@@ -75,3 +75,29 @@ func TestJobName(t *testing.T) {
 		t.Fatal(jobName(4008), jobName(0))
 	}
 }
+
+func TestItemLabelAndCards(t *testing.T) {
+	it := Item{Name: "Katana", Refine: 7, cards: [4]int{4001, 0, 4002, 0}}
+	if it.Label() != "+7 Katana" {
+		t.Fatal(it.Label())
+	}
+	if ids := it.cardIDs(); len(ids) != 2 || ids[0] != 4001 || ids[1] != 4002 {
+		t.Fatal(ids)
+	}
+	for _, c0 := range []int{card0Forge, card0Create, card0Pet} {
+		if ids := (Item{cards: [4]int{c0, 5, 6, 7}}).cardIDs(); ids != nil {
+			t.Errorf("card0 %#x: %v", c0, ids)
+		}
+	}
+}
+
+func TestAtSavePoint(t *testing.T) {
+	c := Character{LastMap: "prontera", LastX: 1, LastY: 2, SaveMap: "prontera", SaveX: 1, SaveY: 2}
+	if !c.AtSavePoint() {
+		t.Fatal("same spot")
+	}
+	c.LastX = 3
+	if c.AtSavePoint() {
+		t.Fatal("different spot")
+	}
+}

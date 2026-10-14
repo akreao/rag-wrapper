@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -178,3 +179,70 @@ func (a *app) adminSetPassword(req *request) error {
 }
 
 func adminAccountURL(t *Account) string { return "/admin/accounts/" + strconv.Itoa(t.ID) }
+
+// --- Characters ---
+
+type adminCharacterData struct {
+	Character *Character
+	Owner     *Account
+	Items     []Item
+}
+
+// character loads the character named in the URL, or writes a 404.
+func (a *app) character(req *request) (*Character, error) {
+	id, err := strconv.Atoi(req.r.PathValue("id"))
+	if err != nil {
+		a.render(req, http.StatusNotFound, "error", view{Title: "No such character", Error: "There's no character with that number."})
+		return nil, nil
+	}
+	c, err := a.store.characterByID(req.r.Context(), id)
+	if err == nil && c == nil {
+		a.render(req, http.StatusNotFound, "error", view{Title: "No such character", Error: "There's no character with that number."})
+	}
+	return c, err
+}
+
+func (a *app) adminCharacter(req *request) error {
+	c, err := a.character(req)
+	if c == nil || err != nil {
+		return err
+	}
+	return a.showAdminCharacter(req, c, "")
+}
+
+func (a *app) showAdminCharacter(req *request, c *Character, errMsg string) error {
+	owner, err := a.store.accountByID(req.r.Context(), c.AccountID)
+	if err != nil {
+		return err
+	}
+	items, err := a.store.inventory(req.r.Context(), c.ID)
+	if err != nil {
+		return err
+	}
+	a.render(req, http.StatusOK, "admin_character", view{
+		Title: c.Name,
+		Error: errMsg,
+		Data:  adminCharacterData{Character: c, Owner: owner, Items: items},
+	})
+	return nil
+}
+
+// adminMoveToSavePoint is for a character stuck somewhere it can't leave,
+// such as a map that crashes the client or a spot inside a wall.
+func (a *app) adminMoveToSavePoint(req *request) error {
+	c, err := a.character(req)
+	if c == nil || err != nil {
+		return err
+	}
+	err = a.store.moveToSavePoint(req.r.Context(), c.ID)
+	if errors.Is(err, errCharacterOnline) {
+		c.Online = true
+		return a.showAdminCharacter(req, c, c.Name+" is in game. Ask the player to log out, or use @jumpto or @recall in game.")
+	}
+	if err != nil {
+		return err
+	}
+	return a.redirect(req, adminCharacterURL(c), c.Name+" will log in at "+c.SaveMap+" ("+strconv.Itoa(c.SaveX)+", "+strconv.Itoa(c.SaveY)+").")
+}
+
+func adminCharacterURL(c *Character) string { return "/admin/characters/" + strconv.Itoa(c.ID) }

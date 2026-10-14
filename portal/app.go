@@ -59,7 +59,7 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 		"date":      func(t time.Time) string { return t.Format("2006-01-02 15:04 MST") },
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "connect", "error"} {
+	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "error"} {
 		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
@@ -100,6 +100,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /admin/accounts/{id}/ban", a.admin(a.adminBan))
 	mux.HandleFunc("POST /admin/accounts/{id}/unban", a.admin(a.adminUnban))
 	mux.HandleFunc("POST /admin/accounts/{id}/password", a.admin(a.adminSetPassword))
+	mux.HandleFunc("GET /admin/characters/{id}", a.admin(a.adminCharacter))
+	mux.HandleFunc("POST /admin/characters/{id}/save-point", a.admin(a.adminMoveToSavePoint))
 	return securityHeaders(mux)
 }
 

@@ -17,11 +17,12 @@
     <thead><tr><th>Slot</th><th>Name</th><th>Class</th><th>Base</th><th>Job</th><th>Zeny</th><th>Map</th><th></th></tr></thead>
     <tbody>
     {{range .}}<tr>
-      <td>{{.Slot}}</td><td>{{.Name}}</td><td>{{.JobName}}</td><td>{{.BaseLevel}}</td><td>{{.JobLevel}}</td><td>{{.Zeny}}</td><td>{{.LastMap}}</td>
-      <td>{{if .Online}}<span class="tag on">Online</span>{{end}}</td>
+      <td>{{.Slot}}</td><td><a href="/admin/characters/{{.ID}}">{{.Name}}</a></td><td>{{.JobName}}</td><td>{{.BaseLevel}}</td><td>{{.JobLevel}}</td><td>{{.Zeny}}</td><td>{{.LastMap}}</td>
+      <td>{{if .Online}}<span class="tag on">Online</span>{{end}}{{if .Deleting}}<span class="tag">Being deleted</span>{{end}}</td>
     </tr>{{end}}
     </tbody>
   </table>
+  <p class="note">Open a character to see its inventory or move it back to its save point.</p>
   {{else}}<p>No characters.</p>{{end}}
 </section>
 
