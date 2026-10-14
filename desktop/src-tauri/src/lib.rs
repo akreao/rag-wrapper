@@ -65,6 +65,8 @@ struct Overview {
     prere: bool,
     /// The rAthena commit this app version comes with, when the server isn't on it yet.
     server_update: Option<update::ServerUpdate>,
+    /// The game servers run an older image than the one built, and restart onto it when asked.
+    restart_pending: bool,
     task: Option<String>,
 }
 
@@ -79,7 +81,7 @@ fn overview(app: State<App>) -> Overview {
     Overview {
         stack_dir: app.dir.display().to_string(),
         docker_version,
-        docker_error,
+        docker_error: docker_error.clone(),
         configured: !get("ADMIN_USER").is_empty(),
         admin_user: get("ADMIN_USER"),
         public_ip: get("PUBLIC_IP"),
@@ -88,6 +90,7 @@ fn overview(app: State<App>) -> Overview {
         packetver: get("PACKETVER"),
         prere: get("PRERE") != "no",
         server_update: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(update::pending),
+        restart_pending: docker_error.is_none() && stack::runs_old_image(&app.dir, &get("PACKETVER")),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -252,7 +255,12 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
     let steps = match kind.as_str() {
         "start" | "restart" => {
             let mut cmd = up_command(&app)?;
-            if kind == "restart" {
+            // After a rebuild or update the new image needs a full `up`,
+            // so `db-init` applies its database upgrades first; that
+            // recreates every rAthena container anyway.
+            let new_image = kind == "restart"
+                && stack::runs_old_image(&app.dir, &app.env().and_then(|e| e.get("PACKETVER")).unwrap_or_default());
+            if kind == "restart" && !new_image {
                 // The game servers read their configs only when they start;
                 // the database and portal keep running.
                 cmd.args(["--no-deps", "--force-recreate"]).args(stack::GAME_SERVERS);
@@ -272,21 +280,9 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             cmd.env("RATHENA_REPO", &update.repo)
                 .env("RATHENA_COMMIT", &update.offered)
                 .args(["--progress", "plain", "build"]);
-            let running = stack::status(&app.dir)
-                .unwrap_or_default()
-                .iter()
-                .any(|s| stack::GAME_SERVERS.contains(&s.service.as_str()) && s.state == "running");
-            let mut steps = vec![
-                Step::Backup(backup::Reason::Update),
-                Step::Compose(cmd),
-                Step::Pin(update),
-            ];
-            // A running server moves to the new image now, which runs the
-            // database upgrades first; a stopped one does at its next Start.
-            if running {
-                steps.push(Step::Compose(up_command(&app)?));
-            }
-            steps
+            // A running server stays on the old image until "Restart on the
+            // new version" (or the next Start); players aren't dropped by surprise.
+            vec![Step::Backup(backup::Reason::Update), Step::Compose(cmd), Step::Pin(update)]
         }
         "stop" => {
             cmd.arg("down");

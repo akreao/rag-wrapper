@@ -248,6 +248,7 @@ async function refreshOverview() {
     if (!buildFormDirty) fillBuildForm();
   }
   renderUpdate(overview.configured && overview.server_update);
+  $("restart-bar").hidden = !overview.configured || !overview.restart_pending || !!overview.server_update;
   updateButtons();
 }
 
@@ -278,6 +279,11 @@ $("skip-update").addEventListener("click", async () => {
   await refreshOverview();
 });
 
+$("restart-new").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("restart");
+});
+
 $("update").addEventListener("click", () => {
   showPage("dashboard");
   runTask("update");
@@ -285,7 +291,7 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update", "skip-update"]) $(id).disabled = !ready || !!task;
+  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update", "skip-update", "restart-new"]) $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("cancel").hidden = !["build", "update", "start", "restart"].includes(task);
 }
