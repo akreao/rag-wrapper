@@ -94,6 +94,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /admin/accounts/{id}/group", a.admin(a.adminSetGroup))
 	mux.HandleFunc("POST /admin/accounts/{id}/ban", a.admin(a.adminBan))
 	mux.HandleFunc("POST /admin/accounts/{id}/unban", a.admin(a.adminUnban))
+	mux.HandleFunc("POST /admin/accounts/{id}/password", a.admin(a.adminSetPassword))
 	return securityHeaders(mux)
 }
 

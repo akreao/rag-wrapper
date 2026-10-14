@@ -26,7 +26,7 @@
 </section>
 
 {{if .Data.Self}}
-<p class="note">This is your own account. Another admin has to change its group or ban it.</p>
+<p class="note">This is your own account. Another admin has to change its group, ban it or reset its password.</p>
 {{else}}
 <section class="grid">
   <form method="post" action="/admin/accounts/{{$t.ID}}/group" class="card">
@@ -65,5 +65,14 @@
     <small>Stops new logins. A player already in game stays on until they log out.</small>
     {{end}}
   </div>
+
+  <form method="post" action="/admin/accounts/{{$t.ID}}/password" class="card">
+    <h2>Reset password</h2>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>New password <input type="password" name="password" minlength="6" maxlength="23" autocomplete="new-password" required></label>
+    <label>New password again <input type="password" name="password2" minlength="6" maxlength="23" autocomplete="new-password" required></label>
+    <button>Set password</button>
+    <small>For a player who forgot theirs. Tell them the new one and ask them to change it.</small>
+  </form>
 </section>
 {{end}}{{end}}

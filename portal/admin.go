@@ -156,4 +156,25 @@ func (a *app) adminUnban(req *request) error {
 	return a.redirect(req, adminAccountURL(t), t.UserID+" can log in again.")
 }
 
+// adminSetPassword is how a player who forgot their password gets back in:
+// there's no email on a LAN server, so an admin sets a new one.
+func (a *app) adminSetPassword(req *request) error {
+	t, err := a.target(req)
+	if t == nil || err != nil {
+		return err
+	}
+	if t.ID == req.account.ID {
+		return a.showAdminAccount(req, t, "Change your own password on your account page.")
+	}
+	pw := req.r.PostFormValue("password")
+	if msg := checkPassword(pw, req.r.PostFormValue("password2")); msg != "" {
+		return a.showAdminAccount(req, t, msg)
+	}
+	if err := a.store.setPassword(req.r.Context(), t.ID, hashPassword(pw)); err != nil {
+		return err
+	}
+	a.sessions.endAccount(t.ID, nil)
+	return a.redirect(req, adminAccountURL(t), "New password set for "+t.UserID+". Ask them to change it on their account page.")
+}
+
 func adminAccountURL(t *Account) string { return "/admin/accounts/" + strconv.Itoa(t.ID) }

@@ -34,7 +34,7 @@ Settings in `.env`:
 Players create and manage their accounts at `http://<server's LAN IP>:8080`. The game client's own `_M`/`_F` sign-up is off, so this is the way in.
 
 - **Anyone on the LAN** can register (username, password, email, birthdate, sex), then log in to change their password, email and birthdate and see their characters. The game asks for the birthdate when deleting a character.
-- **Admins** (group 99, such as the first admin created on setup) also get an Admin page: search accounts, change an account's group (GM level), and ban for a set time or until lifted. Changes apply at the player's next game login; a player already in game stays on until they log out.
+- **Admins** (group 99, such as the first admin created on setup) also get an Admin page: search accounts, change an account's group (GM level), ban for a set time or until lifted, and set a new password for a player who forgot theirs. Changes apply at the player's next game login; a player already in game stays on until they log out.
 - Passwords are stored as `MD5(password)`, matching `use_MD5_passwords: yes`. Portal sessions live in memory, so restarting the portal logs everyone out of it (not out of the game).
 
 The portal is a single Go program in `portal/`, with its pages built in. To work on it without Docker, point it at a database and run it:
