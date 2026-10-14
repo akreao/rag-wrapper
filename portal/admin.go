@@ -56,6 +56,7 @@ type adminAccountData struct {
 	Target     *Account
 	Self       bool
 	Characters []Character
+	Storage    []Item
 }
 
 // target loads the account named in the URL, or writes a 404.
@@ -85,10 +86,14 @@ func (a *app) showAdminAccount(req *request, t *Account, errMsg string) error {
 	if err != nil {
 		return err
 	}
+	storage, err := a.store.storage(req.r.Context(), t.ID)
+	if err != nil {
+		return err
+	}
 	a.render(req, http.StatusOK, "admin_account", view{
 		Title: t.UserID,
 		Error: errMsg,
-		Data:  adminAccountData{Target: t, Self: t.ID == req.account.ID, Characters: chars},
+		Data:  adminAccountData{Target: t, Self: t.ID == req.account.ID, Characters: chars, Storage: storage},
 	})
 	return nil
 }
@@ -192,6 +197,7 @@ type adminCharacterData struct {
 	Character *Character
 	Owner     *Account
 	Items     []Item
+	Cart      []Item
 }
 
 // character loads the character named in the URL, or writes a 404.
@@ -225,10 +231,14 @@ func (a *app) showAdminCharacter(req *request, c *Character, errMsg string) erro
 	if err != nil {
 		return err
 	}
+	cart, err := a.store.cart(req.r.Context(), c.ID)
+	if err != nil {
+		return err
+	}
 	a.render(req, http.StatusOK, "admin_character", view{
 		Title: c.Name,
 		Error: errMsg,
-		Data:  adminCharacterData{Character: c, Owner: owner, Items: items},
+		Data:  adminCharacterData{Character: c, Owner: owner, Items: items, Cart: cart},
 	})
 	return nil
 }

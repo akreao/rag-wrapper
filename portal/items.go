@@ -52,11 +52,26 @@ func (i Item) cardIDs() []int {
 	return ids
 }
 
-// inventory lists a character's items, equipped ones first.
+// inventory lists what a character carries, equipped items first.
 func (s *store) inventory(ctx context.Context, charID int) ([]Item, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT `nameid`, `amount`, `equip`, `identify`, `attribute`, `refine`, `card0`, `card1`, `card2`, `card3` "+
-			"FROM `inventory` WHERE `char_id` = ? ORDER BY `equip` = 0, `nameid`, `id`", charID)
+	return s.items(ctx, "SELECT "+itemColumns+" FROM `inventory` WHERE `char_id` = ? ORDER BY `equip` = 0, `nameid`, `id`", charID)
+}
+
+// cart lists what's in a character's cart (merchant classes only).
+func (s *store) cart(ctx context.Context, charID int) ([]Item, error) {
+	return s.items(ctx, "SELECT "+itemColumns+" FROM `cart_inventory` WHERE `char_id` = ? ORDER BY `nameid`, `id`", charID)
+}
+
+// storage lists an account's Kafra storage, shared by its characters.
+func (s *store) storage(ctx context.Context, accountID int) ([]Item, error) {
+	return s.items(ctx, "SELECT "+itemColumns+" FROM `storage` WHERE `account_id` = ? ORDER BY `nameid`, `id`", accountID)
+}
+
+// The inventory, cart_inventory and storage tables share these columns.
+const itemColumns = "`nameid`, `amount`, `equip`, `identify`, `attribute`, `refine`, `card0`, `card1`, `card2`, `card3`"
+
+func (s *store) items(ctx context.Context, query string, id int) ([]Item, error) {
+	rows, err := s.db.QueryContext(ctx, query, id)
 	if err != nil {
 		return nil, err
 	}

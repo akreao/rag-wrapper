@@ -39,19 +39,11 @@
 
 <section>
   <h2>Inventory</h2>
-  {{with .Data.Items}}
-  <table>
-    <thead><tr><th>Item</th><th>Amount</th><th>Cards</th><th></th></tr></thead>
-    <tbody>
-    {{range .}}<tr>
-      <td>{{.Label}} <small class="note">#{{.ItemID}}</small></td>
-      <td>{{.Amount}}</td>
-      <td>{{range $i, $n := .CardNames}}{{if $i}}, {{end}}{{$n}}{{end}}</td>
-      <td>{{if .Equipped}}<span class="tag on">Equipped</span>{{end}}{{if not .Identified}}<span class="tag">Unidentified</span>{{end}}{{if .Broken}}<span class="tag bad">Broken</span>{{end}}</td>
-    </tr>{{end}}
-    </tbody>
-  </table>
-  <p class="note">Read-only. Give or take items in game with @item and @delitem.</p>
-  {{else}}<p>The inventory is empty.</p>{{end}}
+  {{with .Data.Items}}{{template "items" .}}{{else}}<p>The inventory is empty.</p>{{end}}
+  {{with .Data.Cart}}
+  <h2>Cart</h2>
+  {{template "items" .}}
+  {{end}}
+  <p class="note">Read-only. Give or take items in game with @item and @delitem. The account's storage is on its <a href="/admin/accounts/{{$c.AccountID}}">account page</a>.</p>
   {{if $c.Online}}<p class="note">The character is in game, so this is as of its last save, a few minutes ago at most.</p>{{end}}
 </section>{{end}}

@@ -61,7 +61,7 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 	}
 	pages := map[string]*template.Template{}
 	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "error"} {
-		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+name+".html")
+		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/items.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
 		}

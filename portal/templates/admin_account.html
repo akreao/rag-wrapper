@@ -26,6 +26,12 @@
   {{else}}<p>No characters.</p>{{end}}
 </section>
 
+<section>
+  <h2>Storage</h2>
+  {{with .Data.Storage}}{{template "items" .}}{{else}}<p>The storage is empty.</p>{{end}}
+  <p class="note">Kafra storage, shared by all of this account's characters. Read-only; while one of them is in game it's as of the last save.</p>
+</section>
+
 {{if .Data.Self}}
 <p class="note">This is your own account. Another admin has to change its group, ban it or reset its password.</p>
 {{else}}
