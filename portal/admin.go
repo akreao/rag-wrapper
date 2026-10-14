@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -111,6 +112,7 @@ func (a *app) adminSetGroup(req *request) error {
 	if err := a.store.setGroup(req.r.Context(), t.ID, group); err != nil {
 		return err
 	}
+	a.audit(req, "set group of account %d %q to %d (%s)", t.ID, t.UserID, group, groupName(group))
 	return a.redirect(req, adminAccountURL(t), t.UserID+" is now in "+groupName(group)+". It applies from their next login.")
 }
 
@@ -144,6 +146,7 @@ func (a *app) adminBan(req *request) error {
 		return err
 	}
 	a.sessions.endAccount(t.ID, nil)
+	a.audit(req, "banned account %d %q (%s)", t.ID, t.UserID, req.r.PostFormValue("length"))
 	return a.redirect(req, adminAccountURL(t), t.UserID+" is banned.")
 }
 
@@ -155,6 +158,7 @@ func (a *app) adminUnban(req *request) error {
 	if err := a.store.unban(req.r.Context(), t.ID); err != nil {
 		return err
 	}
+	a.audit(req, "lifted the ban on account %d %q", t.ID, t.UserID)
 	return a.redirect(req, adminAccountURL(t), t.UserID+" can log in again.")
 }
 
@@ -176,6 +180,7 @@ func (a *app) adminSetPassword(req *request) error {
 		return err
 	}
 	a.sessions.endAccount(t.ID, nil)
+	a.audit(req, "set a new password for account %d %q", t.ID, t.UserID)
 	return a.redirect(req, adminAccountURL(t), "New password set for "+t.UserID+". Ask them to change it on their account page.")
 }
 
@@ -231,7 +236,7 @@ func (a *app) showAdminCharacter(req *request, c *Character, errMsg string) erro
 // adminMoveToSavePoint is for a character stuck somewhere it can't leave,
 // such as a map that crashes the client or a spot inside a wall.
 func (a *app) adminMoveToSavePoint(req *request) error {
-	return a.moveCharacter(req, a.store.moveToSavePoint, func(c *Character) string {
+	return a.moveCharacter(req, "save point", a.store.moveToSavePoint, func(c *Character) string {
 		return c.Name + " will log in at " + c.SaveMap + " (" + strconv.Itoa(c.SaveX) + ", " + strconv.Itoa(c.SaveY) + ")."
 	})
 }
@@ -239,12 +244,12 @@ func (a *app) adminMoveToSavePoint(req *request) error {
 // adminMoveToTown is for a character whose save point is itself the spot
 // it's stuck in.
 func (a *app) adminMoveToTown(req *request) error {
-	return a.moveCharacter(req, a.store.moveToTown, func(c *Character) string {
+	return a.moveCharacter(req, townMap, a.store.moveToTown, func(c *Character) string {
 		return c.Name + " will log in at " + townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + "), now also its save point."
 	})
 }
 
-func (a *app) moveCharacter(req *request, move func(context.Context, int) error, done func(*Character) string) error {
+func (a *app) moveCharacter(req *request, where string, move func(context.Context, int) error, done func(*Character) string) error {
 	c, err := a.character(req)
 	if c == nil || err != nil {
 		return err
@@ -257,7 +262,14 @@ func (a *app) moveCharacter(req *request, move func(context.Context, int) error,
 	if err != nil {
 		return err
 	}
+	a.audit(req, "moved character %d %q to %s", c.ID, c.Name, where)
 	return a.redirect(req, adminCharacterURL(c), done(c))
 }
 
 func adminCharacterURL(c *Character) string { return "/admin/characters/" + strconv.Itoa(c.ID) }
+
+// audit logs an admin action to the portal's log, which the desktop app
+// shows, so there's a record of who changed what.
+func (a *app) audit(req *request, format string, args ...any) {
+	log.Printf("admin %q (account %d): "+format, append([]any{req.account.UserID, req.account.ID}, args...)...)
+}
