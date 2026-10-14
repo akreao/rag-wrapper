@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "readdress", "stop", "build", "update", "backup" or "restore" while one runs
+let task = null; // "start", "restart", "readdress", "portal", "stop", "build", "update", "backup" or "restore" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -289,6 +289,7 @@ async function refreshOverview() {
       showNote("ip-note", $("ip").value);
     }
     $("connect-addr").textContent = `${overview.public_ip}:6900`;
+    if (document.activeElement !== $("portal-port")) $("portal-port").value = overview.portal_port;
     $("admin-name").textContent = overview.admin_user;
     if (!buildFormDirty) fillBuildForm();
   }
@@ -336,10 +337,10 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "ip-yes"])
+  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "ip-yes", "portal-port-use"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "update", "start", "restart", "readdress"].includes(task);
+  $("cancel").hidden = !["build", "update", "start", "restart", "readdress", "portal"].includes(task);
 }
 
 // ---- Pages: the main screen, Dashboard, Settings, Backups and Client patch ----
@@ -561,6 +562,32 @@ $("ip-typed").addEventListener("keydown", (e) => {
 });
 $("ip-yes").addEventListener("click", () => saveAddress(pendingIp, true));
 $("ip-no").addEventListener("click", cancelAddress);
+
+// A new portal port restarts only the portal; nobody in game is affected.
+async function savePortalPort() {
+  const error = $("portal-port-error");
+  error.hidden = true;
+  let changed = false;
+  try {
+    changed = await invoke("set_portal_port", { port: Number($("portal-port").value) });
+  } catch (err) {
+    error.textContent = err;
+    error.hidden = false;
+    return;
+  }
+  $("portal-port").blur();
+  await refreshOverview();
+  // The portal may be the one service that didn't start, held off its old port.
+  if (changed && lastServices.some((s) => s.state === "running")) {
+    showPage("dashboard");
+    await runTask("portal");
+  }
+}
+
+$("portal-port-use").addEventListener("click", savePortalPort);
+$("portal-port").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") savePortalPort();
+});
 
 let buildFormDirty = false;
 let restartAfterBuild = false;
@@ -984,7 +1011,7 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", readdress: "Address change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore" }[
+    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);

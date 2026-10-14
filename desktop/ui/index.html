@@ -91,6 +91,12 @@
         </p>
         <p id="ip-error" class="error" hidden></p>
         <p class="hint">Changing it while the server runs restarts the char and map servers.</p>
+        <label for="portal-port">Account portal port</label>
+        <div class="row">
+          <input id="portal-port" type="number" min="1024" max="65535">
+          <button id="portal-port-use">Use</button>
+        </div>
+        <p id="portal-port-error" class="error" hidden></p>
         <p id="portal" hidden><a href="#" id="portal-link">Open the account portal</a></p>
         <p class="hint">Admin account: <span id="admin-name"></span></p>
       </section>
