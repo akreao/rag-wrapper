@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>{{.ServerName}} patcher</title>
+<link rel="stylesheet" href="/static/patcher.css">
+</head>
+<body>
+<h1>{{.ServerName}}</h1>
+<p id="status">Checking for updates...</p>
+<div class="bar"><div id="progress"></div></div>
+<p id="detail" class="muted">&nbsp;</p>
+<p class="buttons">
+  <button id="play" disabled>Play</button>
+  <button id="retry" class="plain" style="display: none">Try again</button>
+  <button id="exit" class="plain">Exit</button>
+</p>
+<p class="links">
+  <a href="{{.Account}}" data-open>Your account</a>
+  <a href="{{.Connect}}" data-open>How to connect</a>
+</p>
+<script src="/static/patcher.js"></script>
+</body>
+</html>

@@ -16,6 +16,10 @@ pub const PROJECT: &str = "rag-wrapper";
 /// containers as `conf/user`. Kept across app updates like `.env`.
 pub const OVERRIDES: &str = "overrides";
 
+/// The client patches the portal serves to the players' patcher. Kept
+/// across app updates like the overrides.
+pub const PATCHES: &str = "patches";
+
 /// The services that read the overrides, restarted to apply them.
 pub const GAME_SERVERS: [&str; 3] = ["login", "char", "map"];
 
@@ -23,12 +27,13 @@ pub const GAME_SERVERS: [&str; 3] = ["login", "char", "map"];
 pub const ENV_EXAMPLE: &str = include_str!("../../../.env.example");
 
 /// Copies the stack files bundled with the app (compose.yaml, docker/,
-/// portal/, the overrides README) and `.env.example` into `dest`, replacing
-/// older copies. `.env` and the user's override files are never bundled,
-/// so the user's settings survive app updates.
+/// portal/, the overrides and patches READMEs) and `.env.example` into
+/// `dest`, replacing older copies. `.env`, the user's override files and
+/// published patches are never bundled, so they survive app updates.
 pub fn install(bundled: &Path, dest: &Path) -> std::io::Result<()> {
     copy_dir(bundled, dest)?;
     fs::create_dir_all(dest.join(OVERRIDES))?;
+    fs::create_dir_all(dest.join(PATCHES))?;
     fs::write(dest.join(".env.example"), ENV_EXAMPLE)
 }
 
