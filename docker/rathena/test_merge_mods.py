@@ -70,6 +70,61 @@ class MergeModsTest(unittest.TestCase):
         self.assertEqual(warnings, [])
         self.assertEqual(added, [])
 
+    def test_a_drop_two_mods_add_is_kept_once(self):
+        self.mod("a", "mob_db.yml", """\
+            - Id: 1002
+              Drops:
+                - Item: Apple
+                  Rate: 5000
+                - Item: Jellopy
+                  Rate: 100
+                  StealProtected: true
+                - Item: Jellopy
+                  Rate: 100
+              MvpDrops:
+                - Item: Apple
+                  Rate: 10
+            """)
+        self.mod("b", "mob_db.yml", """\
+            - Id: 1002
+              Drops:
+                - Item: jellopy
+                  Rate: 100
+                  StealProtected: true
+                - Item: Apple
+                  Rate: 5000
+                  Index: 0
+            """)
+        warnings, added = self.run_merge()
+        # Mod a's second Jellopy isn't steal protected, so that one clashes.
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("Drops jellopy: mods/a/db/mob_db.yml line 12 adds {Item: Jellopy, Rate: 100}, mods/b/", warnings[0])
+        copy = "db/import/mods-merged/mods/a/db/mob_db.yml"
+        with open("imports", encoding="utf-8") as f:
+            self.assertEqual(f.read().splitlines(), [f"mob_db.yml {copy}", "mob_db.yml mods/b/db/mob_db.yml"])
+        with open(copy, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        with open("mods/a/db/mob_db.yml", encoding="utf-8") as f:
+            original = f.read().split("\n")
+        self.assertEqual(len(lines), len(original))
+        # Both of mod a's Jellopy drops are left out, nothing else.
+        changed = [i + 1 for i, (x, y) in enumerate(zip(original, lines)) if x != y]
+        self.assertEqual(changed, [9, 10, 11, 12, 13])
+        self.assertEqual(lines[8], "#      - Item: Jellopy")
+        doc = merge_mods.yaml.safe_load("\n".join(lines))
+        self.assertEqual([d["Item"] for d in doc["Body"][0]["Drops"]], ["Apple"])
+        self.assertEqual(doc["Body"][0]["MvpDrops"], [{"Item": "Apple", "Rate": 10}])
+
+    def test_the_same_drop_at_a_different_rate_clashes(self):
+        self.mod("a", "mob_db.yml", "- Id: 1002\n  Drops:\n    - Item: Apple\n      Rate: 5000\n")
+        self.mod("b", "mob_db.yml", "- Id: 1002\n  Drops:\n    - Item: Apple\n      Rate: 100\n")
+        warnings, _ = self.run_merge()
+        self.assertEqual(len(warnings), 1, warnings)
+        w = warnings[0]
+        self.assertTrue(w.startswith("[Warning]: Mod clash in mob_db.yml, Id 1002, Drops Apple: mods/a/db/mob_db.yml line 7 adds "), w)
+        self.assertTrue(w.endswith("the one from mods/b/ is kept (later in load order)"), w)
+        self.assertTrue(os.path.exists("db/import/mods-merged/mods/a/db/mob_db.yml"))
+
     def test_same_value_set_differently_clashes_and_later_wins(self):
         self.mod("a", "item_db.yml", """\
             - Id: 501
@@ -241,6 +296,27 @@ class MergeModsTest(unittest.TestCase):
         warnings, _ = self.run_merge()
         self.assertEqual(len(warnings), 1, warnings)
         self.assertTrue(warnings[0].startswith("[Warning]: mods/a/db/mob_db.yml clears every mob_db.yml entry"), warnings[0])
+
+    def test_check_finds_the_files_like_the_entrypoint(self):
+        self.write("db/import-tmpl/mob_db.yml", "Header:\n  Type: MOB_DB\n  Version: 4\n")
+        self.mod("a", "item_db.yml", "- Id: 501\n  Buy: 1\n")
+        self.mod("a", "mob_db.yml", "- Id: 1002\n  Hp: 1\n", sub="db/re")
+        self.mod("b", "item_db.yml", "- Id: 501\n  Buy: 2\n", sub="db/pre-re")
+        self.mod("b", "mob_db.yml", "- Id: 1002\n  Hp: 2\n", sub="db/re")
+        self.mod("c", "item_db.yml", "- Id: 501\n  Buy: 3\n")
+        self.mod("c", "notes.yml", "- Id: 501\n")
+        self.write("mods/enabled.txt", "# order\nb\r\n  a  # comment\nb\ngone\n../x\n")
+        self.assertEqual(
+            merge_mods.enabled("mods", "pre-re"),
+            [("item_db.yml", "mods/b/db/pre-re/item_db.yml"), ("item_db.yml", "mods/a/db/item_db.yml")],
+        )
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(merge_mods.main(["merge_mods.py", "--check", "mods", "re"]), 0)
+        warnings = out.getvalue().splitlines()
+        self.assertEqual(len(warnings), 1, warnings)
+        self.assertIn("mob_db.yml, Id 1002, Hp: mods/b/db/re/mob_db.yml line 6 sets 2, mods/a/db/re/mob_db.yml line 6 sets 1", warnings[0])
+        self.assertFalse(os.path.exists("db/import/mods-merged"))
 
     def test_broken_files_are_left_to_rathena(self):
         self.write("mods/a/db/item_db.yml", "Body: [\n")

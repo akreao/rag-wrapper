@@ -44,8 +44,8 @@ pub struct Mod {
     pub pending: bool,
     /// Errors and warnings about its files in the running map server's log.
     pub errors: Vec<String>,
-    /// Values it and another mod both set differently, from the running
-    /// map server's start; one of them is used.
+    /// Values it and another mod both set differently, as the enabled
+    /// mods are now; one of them is used.
     pub clashes: Vec<String>,
 }
 
@@ -220,15 +220,23 @@ pub fn new_databases(dir: &Path) -> Vec<String> {
         .collect()
 }
 
+/// What the clash check depends on: the enabled mods, in order, and their
+/// database files. The check runs again only when this changes.
+pub fn clash_key(dir: &Path) -> String {
+    current(dir).iter().map(|(name, print)| format!("{name}:{}\n", print.db)).collect()
+}
+
 /// Every mod folder and its state: the enabled ones first, in load order,
 /// then the rest by name. `running` says whether the map server is up, and
-/// `log` is its log, searched for errors in each mod's files.
-pub fn status(dir: &Path, running: bool, log: &str) -> Status {
+/// `log` is its log, searched for errors in each mod's files. `checked` is
+/// the output of `merge_mods.py --check` for the mods as they are now;
+/// without it, clashes come from the map server's latest start in `log`.
+pub fn status(dir: &Path, running: bool, log: &str, checked: Option<&str>) -> Status {
     let on = enabled(dir);
     let loaded = applied(dir);
     let applied: BTreeMap<&String, &Fingerprint> = loaded.iter().map(|(n, p)| (n, p)).collect();
     let mut errors = errors_by_mod(log);
-    let mut clashes = clashes_by_mod(log);
+    let mut clashes = clashes_by_mod(checked.unwrap_or(log));
     let mut names = folders(dir);
     names.sort_by_key(|n| on.iter().position(|e| e == n).unwrap_or(usize::MAX));
     let mods: Vec<Mod> = names
@@ -306,8 +314,8 @@ pub fn move_mod(dir: &Path, name: &str, up: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// The clashes `merge_mods.py` reported at the map server's latest start,
-/// under each mod they name, without the warning tag.
+/// The clashes `merge_mods.py` reported, at the map server's latest start
+/// when `log` is its log, under each mod they name, without the warning tag.
 fn clashes_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
     let latest = log.rfind(LOADER_LINE).map_or(log, |i| &log[i..]);
     let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -365,11 +373,13 @@ fn errors_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
     found
 }
 
-/// The mod names in `mods/<name>/` paths in `text`.
+/// The mod names in `mods/<name>/` paths in `text`, including the copies
+/// `merge_mods.py` loads from `db/import/mods-merged/mods/<name>/`.
 fn mod_names(text: &str) -> impl Iterator<Item = &str> {
     text.match_indices("mods/").filter_map(move |(i, m)| {
         let before = text[..i].chars().next_back();
-        if before.is_some_and(|c| c.is_ascii_alphanumeric() || "._-/".contains(c)) {
+        let copy = text[..i].ends_with("/mods-merged/");
+        if !copy && before.is_some_and(|c| c.is_ascii_alphanumeric() || "._-/".contains(c)) {
             return None;
         }
         let rest = &text[i + m.len()..];
@@ -426,7 +436,7 @@ mod tests {
         write(&dir, ".hidden/npc/x.txt", "x");
         write(&dir, "README.md", "x");
 
-        let s = status(&dir, false, "");
+        let s = status(&dir, false, "", None);
         let names: Vec<&str> = s.mods.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["a-empty", "b-shop", "bad name"]);
         assert!(s.mods[0].problem.as_deref().unwrap().starts_with("Nothing to load"));
@@ -451,14 +461,14 @@ mod tests {
         assert_eq!(fs::read_to_string(dir.join(ENABLED)).unwrap(), format!("{ENABLED_HEADER}warper\nshop\n"));
 
         // Stopped: nothing is pending, it loads at the next start.
-        assert!(!status(&dir, false, "").mods.iter().any(|m| m.pending));
-        let s = status(&dir, true, "");
+        assert!(!status(&dir, false, "", None).mods.iter().any(|m| m.pending));
+        let s = status(&dir, true, "", None);
         assert!(s.restart_needed);
         assert!(s.mods.iter().find(|m| m.name == "shop").unwrap().pending);
         assert!(new_databases(&dir).is_empty());
 
         record_applied(&dir).unwrap();
-        let s = status(&dir, true, "");
+        let s = status(&dir, true, "", None);
         assert!(!s.restart_needed);
         assert!(!s.mods.iter().any(|m| m.pending));
 
@@ -472,7 +482,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         write(&dir, "items/db/item_db.yml", "changed");
         assert!(new_databases(&dir).is_empty());
-        assert!(status(&dir, true, "").mods.iter().find(|m| m.name == "items").unwrap().pending);
+        assert!(status(&dir, true, "", None).mods.iter().find(|m| m.name == "items").unwrap().pending);
         // A loaded mod that gains its first database file does.
         write(&dir, "shop/db/mob_db.yml", "x");
         assert_eq!(new_databases(&dir), ["shop"]);
@@ -480,7 +490,7 @@ mod tests {
 
         // Switching off shows as pending until the restart.
         set_enabled(&dir, "shop", false).unwrap();
-        let s = status(&dir, true, "");
+        let s = status(&dir, true, "", None);
         assert!(s.restart_needed);
         assert!(s.mods.iter().find(|m| m.name == "shop").unwrap().pending);
         fs::remove_dir_all(dir).unwrap();
@@ -495,7 +505,7 @@ mod tests {
         write(&dir, ENABLED, "c\ngone\na\nc\n");
         set_enabled(&dir, "b", true).unwrap();
         assert_eq!(enabled(&dir), ["c", "gone", "a", "b"]);
-        let order = |dir: &Path| status(dir, false, "").mods.into_iter().map(|m| m.name).collect::<Vec<_>>();
+        let order = |dir: &Path| status(dir, false, "", None).mods.into_iter().map(|m| m.name).collect::<Vec<_>>();
         assert_eq!(order(&dir), ["c", "a", "b", "d"]);
 
         record_applied(&dir).unwrap();
@@ -507,7 +517,7 @@ mod tests {
         assert_eq!(enabled(&dir), ["a", "gone", "c", "b"]);
         assert!(move_mod(&dir, "d", true).is_err());
         // Reordering waits for a restart too.
-        assert!(status(&dir, true, "").restart_needed);
+        assert!(status(&dir, true, "", None).restart_needed);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -515,11 +525,11 @@ mod tests {
     fn spots_an_image_without_mod_loading() {
         let dir = temp_dir("rebuild");
         write(&dir, "shop/npc/x.txt", "x");
-        assert!(!status(&dir, true, "[Info]: old image\n").rebuild_needed);
+        assert!(!status(&dir, true, "[Info]: old image\n", None).rebuild_needed);
         set_enabled(&dir, "shop", true).unwrap();
-        assert!(status(&dir, true, "[Info]: old image\n").rebuild_needed);
-        assert!(!status(&dir, true, "Mods enabled: shop \nMod: shop\n").rebuild_needed);
-        assert!(!status(&dir, false, "").rebuild_needed);
+        assert!(status(&dir, true, "[Info]: old image\n", None).rebuild_needed);
+        assert!(!status(&dir, true, "Mods enabled: shop \nMod: shop\n", None).rebuild_needed);
+        assert!(!status(&dir, false, "", None).rebuild_needed);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -577,8 +587,28 @@ Mods enabled: a b c
     }
 
     #[test]
+    fn a_fresh_check_replaces_the_log_s_clashes() {
+        let dir = temp_dir("checked");
+        for m in ["a", "b"] {
+            write(&dir, &format!("{m}/db/item_db.yml"), "x");
+        }
+        write(&dir, ENABLED, "a\nb\n");
+        let log = "Mods enabled: a b\n[Warning]: Mod clash in item_db.yml, Id 501, Buy: mods/a/db/item_db.yml line 6 sets 1, mods/b/db/item_db.yml line 6 sets 2; the value from mods/b/ is used (later in load order)\n";
+        let clashes = |s: Status| s.mods.into_iter().map(|m| m.clashes.len()).collect::<Vec<_>>();
+        assert_eq!(clashes(status(&dir, true, log, None)), [1, 1]);
+        assert_eq!(clashes(status(&dir, true, log, Some(""))), [0, 0]);
+        let key = clash_key(&dir);
+        assert!(key.starts_with("a:") && key.contains("\nb:"));
+        write(&dir, ENABLED, "b\na\n");
+        assert_ne!(clash_key(&dir), key);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn mod_names_in_paths() {
         let names: Vec<&str> = mod_names("in 'mods/a-b/x.txt' and npc/mods/c/ and mods/d and \"mods/bad name/\"").collect();
         assert_eq!(names, ["a-b", "bad name"]);
+        let names: Vec<&str> = mod_names("in 'db/import/mods-merged/mods/e/db/mob_db.yml'").collect();
+        assert_eq!(names, ["e"]);
     }
 }

@@ -40,7 +40,13 @@ struct App {
     logs_generation: AtomicU64,
     /// Set once the window has asked to close and the stack is going down.
     closing: AtomicBool,
+    /// The last clash check of the mods: what it checked and its output,
+    /// which is None when the image couldn't run it.
+    clash_check: Arc<ClashCheck>,
 }
+
+/// What the last clash check checked, and its output.
+type ClashCheck = Mutex<Option<(String, Option<String>)>>;
 
 impl App {
     fn env_path(&self) -> PathBuf {
@@ -527,7 +533,7 @@ fn open_client_files(app: State<App>) -> Result<(), String> {
 /// Reads the map server's log for errors, so it runs off the main thread.
 #[tauri::command]
 async fn mods(app: State<'_, App>) -> Result<mods::Status, String> {
-    let (dir, mods) = (app.dir.clone(), app.mods_dir());
+    let (dir, mods, env, cache) = (app.dir.clone(), app.mods_dir(), app.env(), app.clash_check.clone());
     tauri::async_runtime::spawn_blocking(move || {
         let running = stack::status(&dir)
             .unwrap_or_default()
@@ -540,10 +546,36 @@ async fn mods(app: State<'_, App>) -> Result<mods::Status, String> {
         } else {
             String::new()
         };
-        mods::status(&mods, running, &log)
+        let checked = check_clashes(&dir, &mods, env.as_ref(), &cache);
+        mods::status(&mods, running, &log, checked.as_deref())
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Runs `merge_mods.py --check` in the rAthena image on the mods as they
+/// are now, so clashes show before a restart, when the enabled mods or
+/// their database files changed since the last check. None when the image
+/// isn't there or predates the check; the screen then shows the clashes
+/// from the map server's latest start.
+fn check_clashes(dir: &std::path::Path, mods: &std::path::Path, env: Option<&EnvFile>, cache: &ClashCheck) -> Option<String> {
+    let env = env?;
+    let image = images::current(dir, env).into_iter().next()?.local;
+    let mode = if env.get("PRERE").as_deref() == Some("no") { "re" } else { "pre-re" };
+    let key = format!("{image} {mode}\n{}", mods::clash_key(mods));
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((checked, output)) = cache.as_ref() {
+        if *checked == key {
+            return output.clone();
+        }
+    }
+    let mut cmd = host::command("docker");
+    cmd.args(["run", "--rm", "--network", "none", "--entrypoint", "merge_mods.py", "-v"])
+        .arg(format!("{}:/rathena/mods:ro", mods.display()))
+        .args([image.as_str(), "--check", "mods", mode]);
+    let output = stack::output(cmd).ok();
+    *cache = Some((key, output.clone()));
+    output
 }
 
 /// Switches a mod on or off; it applies when the game servers restart.
@@ -625,6 +657,7 @@ pub fn run() {
                 logs: Mutex::new(None),
                 logs_generation: AtomicU64::new(0),
                 closing: AtomicBool::new(false),
+                clash_check: Arc::new(Mutex::new(None)),
             });
             Ok(())
         })

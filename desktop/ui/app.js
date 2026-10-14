@@ -906,11 +906,12 @@ function modItem(m) {
   }
   if (m.clashes.length) {
     const details = document.createElement("details");
+    details.dataset.key = `${m.name}/clashes`;
     const summary = document.createElement("summary");
     summary.textContent = `${count(m.clashes.length, "value", "values")} another mod also sets`;
     const p = document.createElement("p");
     p.className = "muted";
-    p.textContent = "These mods set the same values differently. Each line ends with the one the server uses; the arrows change the load order.";
+    p.textContent = "These mods set the same values differently. Each line ends with the one the server uses; the arrows change the load order. Changes show here right away and load on the next restart.";
     const pre = document.createElement("pre");
     pre.textContent = m.clashes.join("\n\n");
     details.append(summary, p, pre);
@@ -918,6 +919,7 @@ function modItem(m) {
   }
   if (m.errors.length) {
     const details = document.createElement("details");
+    details.dataset.key = `${m.name}/errors`;
     const summary = document.createElement("summary");
     summary.textContent = `${count(m.errors.length, "error or warning", "errors or warnings")} in the map server's log`;
     const pre = document.createElement("pre");
@@ -938,7 +940,10 @@ async function refreshMods() {
   }
   $("mods-folder").textContent = `Folder: ${s.folder}`;
   $("no-mods").hidden = s.mods.length > 0;
+  // Refreshing keeps the sections that were open.
+  const open = new Set([...$("mods").querySelectorAll("details[open]")].map((d) => d.dataset.key));
   $("mods").replaceChildren(...s.mods.map(modItem));
+  for (const d of $("mods").querySelectorAll("details")) d.open = open.has(d.dataset.key);
   const on = $("mods").querySelectorAll(".order");
   if (on.length) {
     on[0].firstChild.disabled = true;
@@ -1053,4 +1058,8 @@ listen("closing", async () => {
 refreshOverview().then(refreshServices).then(refreshBackups).then(refreshLive);
 setInterval(refreshServices, 3000);
 setInterval(refreshLive, 5000);
+// Clashes between mods show soon after their files change.
+setInterval(() => {
+  if (page === "mods") refreshMods();
+}, 5000);
 document.addEventListener("visibilitychange", refreshLive);
