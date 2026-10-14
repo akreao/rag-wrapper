@@ -269,6 +269,15 @@ $("update-changes").addEventListener("click", (e) => {
   invoke("plugin:opener|open_url", { url: e.target.dataset.url });
 });
 
+$("skip-update").addEventListener("click", async () => {
+  try {
+    await invoke("skip_server_update");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
 $("update").addEventListener("click", () => {
   showPage("dashboard");
   runTask("update");
@@ -276,7 +285,7 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update"]) $(id).disabled = !ready || !!task;
+  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update", "skip-update"]) $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("cancel").hidden = !["build", "update", "start", "restart"].includes(task);
 }

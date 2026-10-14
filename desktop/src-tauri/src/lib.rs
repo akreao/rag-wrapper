@@ -113,6 +113,12 @@ fn setup(app: State<App>, admin_user: String, admin_password: String, public_ip:
             env.set(key, &envfile::random_password(20).map_err(|e| e.to_string())?);
         }
     }
+    // A new install already builds this version's commit.
+    if fresh {
+        if let Some(update) = update::pending(&env) {
+            update::skip(&mut env, &update);
+        }
+    }
     env.set("ADMIN_USER", &admin_user);
     env.set("ADMIN_PASSWORD", &admin_password);
     apply_public_ip(&mut env, public_ip);
@@ -132,6 +138,18 @@ fn save_build_settings(app: State<App>, packetver: String, prere: bool) -> Resul
     env.set("PRERE", prere);
     env.save().map_err(|e| e.to_string())?;
     Ok(changed)
+}
+
+/// Keeps the server on its current rAthena commit and hides the offer
+/// until an app version comes with another one.
+#[tauri::command]
+fn skip_server_update(app: State<App>) -> Result<(), String> {
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    if let Some(update) = update::pending(&env) {
+        update::skip(&mut env, &update);
+        env.save().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -458,6 +476,7 @@ pub fn run() {
             setup,
             set_public_ip,
             save_build_settings,
+            skip_server_update,
             game_settings,
             save_game_settings,
             open_overrides,

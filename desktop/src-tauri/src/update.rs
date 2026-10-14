@@ -1,11 +1,18 @@
 //! "Server update available": each app version is released with one
 //! rAthena commit, pinned in the bundled `.env.example`. The server keeps
 //! running the commit in the user's `.env` until they choose to update.
+//!
+//! `.env` also remembers the last commit an app version offered
+//! (`OFFERED_KEY`), set by updating or skipping. A commit set by hand
+//! afterwards, to test a fork change, isn't offered back; the next app
+//! version's commit is.
 
 use serde::Serialize;
 
 use crate::envfile::EnvFile;
 use crate::stack;
+
+pub const OFFERED_KEY: &str = "RATHENA_COMMIT_OFFERED";
 
 #[derive(Serialize, Debug, PartialEq)]
 pub struct ServerUpdate {
@@ -28,7 +35,7 @@ fn offered(env: &EnvFile, bundled: &EnvFile) -> Option<ServerUpdate> {
     let repo = bundled.get("RATHENA_REPO").filter(|r| !r.is_empty())?;
     let current = env.get("RATHENA_COMMIT").unwrap_or_default();
     let current_repo = env.get("RATHENA_REPO").unwrap_or_default();
-    if current == offered && current_repo == repo {
+    if (current == offered && current_repo == repo) || env.get(OFFERED_KEY).as_deref() == Some(offered.as_str()) {
         return None;
     }
     let changes_url = match github_repo(&repo) {
@@ -56,6 +63,12 @@ fn github_repo(url: &str) -> Option<&str> {
 pub fn pin(env: &mut EnvFile, update: &ServerUpdate) {
     env.set("RATHENA_REPO", &update.repo);
     env.set("RATHENA_COMMIT", &update.offered);
+    skip(env, update);
+}
+
+/// Stops offering this commit, keeping the one in `.env`.
+pub fn skip(env: &mut EnvFile, update: &ServerUpdate) {
+    env.set(OFFERED_KEY, &update.offered);
 }
 
 #[cfg(test)]
@@ -109,5 +122,26 @@ mod tests {
         pin(&mut e, &update);
         assert_eq!(e.get("RATHENA_REPO").as_deref(), Some(REPO));
         assert_eq!(e.get("RATHENA_COMMIT").as_deref(), Some("bbb"));
+        assert_eq!(offered(&e, &env(REPO, "bbb")), None);
+    }
+
+    #[test]
+    fn a_hand_set_commit_is_not_offered_back() {
+        let mut e = env(REPO, "aaa");
+        let update = offered(&e, &env(REPO, "bbb")).unwrap();
+        pin(&mut e, &update);
+        e.set("RATHENA_COMMIT", "ccc");
+        assert_eq!(offered(&e, &env(REPO, "bbb")), None);
+        // The next app version's commit is offered again.
+        assert_eq!(offered(&e, &env(REPO, "ddd")).unwrap().current, "ccc");
+    }
+
+    #[test]
+    fn a_skipped_commit_is_not_offered_again() {
+        let mut e = env(REPO, "aaa");
+        let update = offered(&e, &env(REPO, "bbb")).unwrap();
+        skip(&mut e, &update);
+        assert_eq!(e.get("RATHENA_COMMIT").as_deref(), Some("aaa"));
+        assert_eq!(offered(&e, &env(REPO, "bbb")), None);
     }
 }
