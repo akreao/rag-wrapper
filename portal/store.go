@@ -75,6 +75,10 @@ var errUserIDTaken = errors.New("that username is already taken")
 
 type store struct {
 	db *sql.DB
+	// The connection's own database holds the accounts. Characters and
+	// their items are in each game mode's own database, named here
+	// quoted and with a trailing dot, ready to prefix a table.
+	chars string
 	// The login table has no unique key on userid, so registrations are
 	// serialised here to keep two people from claiming the same name.
 	registerMu sync.Mutex
@@ -166,7 +170,7 @@ func scanCharacter(row interface{ Scan(...any) error }) (Character, error) {
 
 func (s *store) characters(ctx context.Context, accountID int) ([]Character, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT "+characterColumns+" FROM `char` WHERE `account_id` = ? ORDER BY `char_num`", accountID)
+		"SELECT "+characterColumns+" FROM "+s.chars+"`char` WHERE `account_id` = ? ORDER BY `char_num`", accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +188,7 @@ func (s *store) characters(ctx context.Context, accountID int) ([]Character, err
 
 // characterByID returns nil, nil when there's no such character.
 func (s *store) characterByID(ctx context.Context, id int) (*Character, error) {
-	c, err := scanCharacter(s.db.QueryRowContext(ctx, "SELECT "+characterColumns+" FROM `char` WHERE `char_id` = ?", id))
+	c, err := scanCharacter(s.db.QueryRowContext(ctx, "SELECT "+characterColumns+" FROM "+s.chars+"`char` WHERE `char_id` = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -222,7 +226,7 @@ func (s *store) moveToTown(ctx context.Context, id int) error {
 // update, so a player who logs in at the same moment wins.
 func (s *store) moveOffline(ctx context.Context, id int, set string, args ...any) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE `char` SET "+set+", `last_instanceid` = 0 WHERE `char_id` = ? AND `online` = 0", append(args, id)...)
+		"UPDATE "+s.chars+"`char` SET "+set+", `last_instanceid` = 0 WHERE `char_id` = ? AND `online` = 0", append(args, id)...)
 	if err != nil {
 		return err
 	}
@@ -231,7 +235,7 @@ func (s *store) moveOffline(ctx context.Context, id int, set string, args ...any
 	}
 	// Nothing changed: either it's online, or it was already there.
 	var online int
-	if err := s.db.QueryRowContext(ctx, "SELECT `online` FROM `char` WHERE `char_id` = ?", id).Scan(&online); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT `online` FROM "+s.chars+"`char` WHERE `char_id` = ?", id).Scan(&online); err != nil {
 		return err
 	}
 	if online != 0 {
@@ -246,7 +250,7 @@ func (s *store) searchAccounts(ctx context.Context, q string, limit, offset int)
 	like := "%" + escapeLike(q) + "%"
 	rows, err := s.db.QueryContext(ctx,
 		"SELECT "+accountColumns+" FROM `login` WHERE `sex` <> 'S' AND (`userid` LIKE ? OR `email` LIKE ? "+
-			"OR `account_id` IN (SELECT `account_id` FROM `char` WHERE `name` LIKE ?)) "+
+			"OR `account_id` IN (SELECT `account_id` FROM "+s.chars+"`char` WHERE `name` LIKE ?)) "+
 			"ORDER BY `account_id` DESC LIMIT ? OFFSET ?", like, like, like, limit, offset)
 	if err != nil {
 		return nil, err
