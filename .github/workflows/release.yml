@@ -1,46 +1,75 @@
 # Builds the desktop app as an AppImage.
 #
-# A tag like v0.2.0 publishes it as a GitHub release; the tag must match the
-# app's version in desktop/src-tauri/tauri.conf.json. Pull requests that touch
-# the packaging, and a manual run, build it and keep it as a workflow artifact.
+# A push to main whose app version (desktop/src-tauri/tauri.conf.json) has no
+# GitHub release yet publishes one, tagged v<version>, so merging a version
+# bump is the release. Notes in docs/releases/<version>.md lead the release.
+# Pull requests that touch the packaging, and a manual run, build it and keep
+# it as a workflow artifact.
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   pull_request:
     paths:
       - '.github/workflows/release.yml'
       - 'desktop/src-tauri/tauri.conf.json'
       - 'desktop/src-tauri/Cargo.toml'
       - 'desktop/src-tauri/Cargo.lock'
+      - 'docs/releases/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pushes to main queue rather than cancel, so a release is never cut off.
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  version:
+    name: Release needed
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: The app's version, and whether it is released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          cargo=$(sed -n 's/^version = "\(.*\)"$/\1/p' desktop/src-tauri/Cargo.toml | head -n1)
+          if [ "$version" != "$cargo" ]; then
+            echo "::error::tauri.conf.json says $version but Cargo.toml says $cargo"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF" = refs/heads/main ] && [ "$GITHUB_EVENT_NAME" = push ] \
+            && ! gh release view "v$version" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Publishing v$version"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
   appimage:
     name: AppImage
+    needs: version
+    # On main, only when there's a release to publish.
+    if: github.event_name != 'push' || needs.version.outputs.release == 'true'
     # The oldest supported Ubuntu, so the AppImage runs on distributions
     # with an older glibc than the build machine's.
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    env:
+      APPIMAGE: rag-wrapper-${{ needs.version.outputs.version }}-x86_64.AppImage
     steps:
       - uses: actions/checkout@v4
-      - name: The tag matches the app's version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          version=$(jq -r .version desktop/src-tauri/tauri.conf.json)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match the app's version $version in tauri.conf.json"
-            exit 1
-          fi
       - name: Tauri's system libraries
         run: |
           sudo apt-get update
@@ -56,36 +85,36 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo tauri build --bundles appimage
       - name: Name it after the version
-        id: appimage
-        run: |
-          version=$(jq -r .version desktop/src-tauri/tauri.conf.json)
-          name="rag-wrapper-$version-x86_64.AppImage"
-          mv desktop/src-tauri/target/release/bundle/appimage/*.AppImage "$name"
-          echo "name=$name" >> "$GITHUB_OUTPUT"
+        run: mv desktop/src-tauri/target/release/bundle/appimage/*.AppImage "$APPIMAGE"
       - name: It holds the stack files
         run: |
-          chmod +x "${{ steps.appimage.outputs.name }}"
-          "./${{ steps.appimage.outputs.name }}" --appimage-extract > /dev/null
+          chmod +x "$APPIMAGE"
+          "./$APPIMAGE" --appimage-extract > /dev/null
           test -x squashfs-root/AppRun
           test -f squashfs-root/usr/lib/rag-wrapper/stack/compose.yaml
           test -d squashfs-root/usr/lib/rag-wrapper/stack/docker/rathena
           rm -rf squashfs-root
       - uses: actions/upload-artifact@v4
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: needs.version.outputs.release != 'true'
         with:
-          name: ${{ steps.appimage.outputs.name }}
-          path: ${{ steps.appimage.outputs.name }}
+          name: ${{ env.APPIMAGE }}
+          path: ${{ env.APPIMAGE }}
           retention-days: 14
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: needs.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           commit=$(sed -n 's/^RATHENA_COMMIT=//p' .env.example)
           {
-            echo "Server: rAthena [\`${commit:0:7}\`](https://github.com/akreao/rathena/commit/$commit) on the \`rag-wrapper\` branch, built on first start."
+            if [ -f "docs/releases/$VERSION.md" ]; then
+              cat "docs/releases/$VERSION.md"
+              echo
+            fi
+            echo "Server: rAthena [\`${commit:0:7}\`](https://github.com/akreao/rathena/commit/$commit) on the \`rag-wrapper\` branch."
             echo
             echo "Download the AppImage, make it executable (\`chmod +x\`) and run it. It needs Docker with the Compose plugin, and FUSE 2 (\`libfuse2\`, or \`libfuse2t64\` on Ubuntu 24.04)."
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" "${{ steps.appimage.outputs.name }}" \
-            --title "rag-wrapper $GITHUB_REF_NAME" --notes-file notes.md --generate-notes --verify-tag
+          gh release create "v$VERSION" "$APPIMAGE" --target "$GITHUB_SHA" \
+            --title "rag-wrapper v$VERSION" --notes-file notes.md --generate-notes
