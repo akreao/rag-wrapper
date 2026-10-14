@@ -85,3 +85,9 @@ The image builds one exact commit, `RATHENA_COMMIT` in `.env`, from the `rag-wra
 - When the table is empty (a fresh import, or a database from before this existed), every current file is recorded as applied without running, because `main.sql` already includes them.
 - After moving `RATHENA_COMMIT`, any new upgrade files run once each, in date order. A failure stops setup, so the servers don't start against a half-upgraded database.
 - Files are tracked rather than re-run because some upstream upgrades aren't safe to run twice. Optional extras like `premium_storage.sql` are not applied.
+
+## Start-up: only when the user starts the server
+
+Containers use `restart: on-failure`: Docker restarts a server that crashes, but nothing starts on boot or when Docker starts. The desktop app is the on switch.
+
+- A "start server when the computer starts" toggle in the app can come later; it would switch the policy to `unless-stopped`.
