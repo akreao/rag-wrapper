@@ -190,3 +190,4 @@ Roadmap feature 10's portal side: the portal hosts an [rpatchur](https://github.
 Questions asked about the finished patcher hosting (PR #12), one at a time.
 
 - **The hand-patching steps stay until the first patch is published.** Until `plist.txt` lists a patch, the page shows the WARPGATE RAGEXE plus WARP0716 steps, so players can join before the "Publish client patch" button exists. Once a patch is published, the page switches to the patcher.
+- **Anyone who can reach the portal can download the patcher.** Like the How to connect page and the `clientinfo.xml` downloads, the zip and the patches need no login, so new players can set up the client before they make an account. The portal is only reachable on the LAN or VPN, and rpatchur can't log in to fetch patches anyway.
