@@ -91,3 +91,9 @@ The image builds one exact commit, `RATHENA_COMMIT` in `.env`, from the `rag-wra
 Containers use `restart: on-failure`: Docker restarts a server that crashes, but nothing starts on boot or when Docker starts. The desktop app is the on switch.
 
 - A "start server when the computer starts" toggle in the app can come later; it would switch the policy to `unless-stopped`.
+
+## Backups: in the desktop app
+
+Already decided in the roadmap (`roadmap/future-features.md`, feature 2): a "Back up now" button, an automatic backup before every rebuild or rAthena update, the last 10 kept, and restore from a list with the servers stopped first.
+
+- Nothing is added to `db-init` for this. Upgrades only run after a rebuild, and the app's backup runs before that rebuild, so a second dump in setup would duplicate it.
