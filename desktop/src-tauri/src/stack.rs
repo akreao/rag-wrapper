@@ -112,6 +112,24 @@ pub fn volume_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the running map server is on an older rAthena image than the
+/// one now built for `packetver`, after a rebuild or server update.
+pub fn runs_old_image(dir: &Path, packetver: &str) -> bool {
+    let mut ps = compose(dir);
+    ps.args(["ps", "--quiet", "map"]);
+    let Some(container) = output(ps).ok().filter(|c| !c.trim().is_empty()) else {
+        return false;
+    };
+    let mut running = Command::new("docker");
+    running.args(["inspect", "--format", "{{.Image}}", container.trim()]);
+    let mut built = Command::new("docker");
+    built.args(["image", "inspect", "--format", "{{.Id}}", &format!("rag-wrapper/rathena:{packetver}")]);
+    match (output(running), output(built)) {
+        (Ok(running), Ok(built)) => running.trim() != built.trim(),
+        _ => false,
+    }
+}
+
 #[derive(Serialize, Default, Clone)]
 pub struct ServiceStatus {
     pub service: String,
