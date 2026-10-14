@@ -8,3 +8,4 @@ The desktop app's Settings screen writes the settings it shows here: rates and t
 - `.yml` files replace the import file whole, in rAthena's YAML DB format.
 - The stack's own settings (database, addresses, server passwords, MD5 passwords, no `_M`/`_F` sign-up) always win over this folder.
 - Changes apply when the game servers restart. Deleting a file goes back to rAthena's defaults.
+- The account portal also reads `server_name` from `char_conf.txt` (mounted read-only), so the name in the `clientinfo.xml` it offers matches the game.

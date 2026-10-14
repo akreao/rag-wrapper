@@ -100,6 +100,12 @@ services:
       DB_NAME: ragnarok
       DB_USER: ragnarok
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      # Shown on the "How to connect" page and written into clientinfo.xml.
+      PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
+      PACKETVER: ${PACKETVER:-20250716}
+    # The server name comes from the Settings screen's char_conf.txt.
+    volumes:
+      - ./overrides:/overrides:ro
     ports:
       - "${PORTAL_PORT:-8080}:8080"
     depends_on:
