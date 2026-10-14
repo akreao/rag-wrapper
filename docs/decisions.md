@@ -128,3 +128,10 @@ Questions asked about the finished desktop app (PR #3), one at a time.
 - **The server runs only while the app is open.** Closing the window cancels any build or start in progress, runs `docker compose down` (the database volume is kept) and exits, showing the shutdown while it runs. Players are disconnected when the app closes, and the server doesn't come back by itself after a reboot.
 - **A Settings panel sets the client date and renewal mode.** `PACKETVER` and pre-renewal/renewal are edited in the app instead of by hand in `.env`; saving a change rebuilds the rAthena image. Rates and other gameplay settings are not part of it.
 - **The LAN address is re-detected on every Start.** "Detect automatically" stays the default, so the server never advertises a stale address after the PC's IP changes; players still need the new address in `clientinfo.xml`, and a DHCP reservation on the router avoids that. A fixed address can be picked in the app's Connecting panel.
+
+# How to connect page
+
+Questions asked about the portal's "How to connect" page (roadmap feature 3, PR #6), one at a time.
+
+- **Logged-out visitors land on How to connect.** Opening the portal's address without being logged in goes to `/connect`, the setup steps, instead of the login page; logged-in players still go to their account. Someone who isn't logged in is most likely new, and the steps start with creating an account.
+- **The steps lead with the 2025-07-16 client.** Most players get that client through WARPGATE, so when the server is built for `20250716` the page says so, and the patching step only applies to a client that isn't already patched. The page still follows whatever `PACKETVER` the server is built with; the `clientinfo.xml` it offers is the same for any client date.
