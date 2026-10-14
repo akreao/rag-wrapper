@@ -154,3 +154,11 @@ Questions asked about database backup and restore (PR #9), one at a time.
 - **Backups made by hand are kept apart from automatic ones.** The newest 10 made with "Back up now" are kept, and separately the newest 10 made automatically (before a rebuild or a restore). A run of rebuilds never pushes out a backup someone made on purpose.
 - **Backups have their own screen.** A Backups button in the header, beside Settings, opens the list with Back up now and Open folder. Starting a backup or a restore switches to the main screen so its progress shows in the Activity log.
 - **A daily backup on stop and close, no schedule.** Stopping the server or closing the app backs up the database first when there's no backup of any kind from the last 24 hours. It counts as automatic, so it shares the 10 automatic slots with rebuild and restore backups. If it fails, the server still stops.
+
+# Live dashboard
+
+The main screen's live view (roadmap feature 4): who's online, uptime, and each container's CPU and memory, in the desktop app only.
+
+- **It sits on the main screen, not a page of its own.** An Online card above the Activity log lists the characters in game; CPU and memory show under each service in the Services list. The roadmap called it a dashboard, and the main screen already is one.
+- **Uptime is the map server's.** Players can play once the map server is up, and Restart game servers resets it.
+- **CPU is a share of the whole machine.** `docker stats` counts percent of one core, which reads as 200% on a busy multi-core PC; the app divides by the number of cores so 100% means the whole machine.

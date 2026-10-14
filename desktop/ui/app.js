@@ -113,6 +113,13 @@ function renderServices(list) {
       li.innerHTML = `<span class="dot ${kind}"></span><span class="name"></span><span class="state muted"></span>`;
       li.querySelector(".name").textContent = LABELS[s.service] || s.service;
       li.querySelector(".state").textContent = text + (s.ports.length ? ` · ${s.ports.join(", ")}` : "");
+      const usage = lastLive?.usage.find((u) => u.service === s.service);
+      if (usage && s.state === "running") {
+        const line = document.createElement("span");
+        line.className = "usage muted";
+        line.textContent = `CPU ${percent(usage.cpu)} · ${size(usage.memory)}`;
+        li.append(line);
+      }
       li.addEventListener("click", () => showView(s.service));
       return li;
     }),
@@ -129,6 +136,71 @@ async function refreshServices() {
     renderServices(await invoke("services"));
   } catch (e) {
     banner(`Couldn't read the server's status: ${e}`);
+  }
+}
+
+// ---- Live view: who's online, uptime, CPU and memory ----
+
+let lastLive = null;
+let liveBusy = false;
+
+const percent = (n) => `${n < 10 ? n.toFixed(1) : Math.round(n)}%`;
+
+function duration(secs) {
+  if (secs < 60) return "under a minute";
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d) return `${d} d ${h} h`;
+  if (h) return `${h} h ${m} min`;
+  return `${m} min`;
+}
+
+function renderLive(live) {
+  lastLive = live;
+  const players = live.players || [];
+  const parts = [];
+  if (live.players) parts.push(players.length === 1 ? "1 player" : `${players.length} players`);
+  if (live.uptime != null) parts.push(`up ${duration(live.uptime)}`);
+  if (live.usage.length) {
+    const cpu = live.usage.reduce((t, u) => t + u.cpu, 0);
+    const mem = live.usage.reduce((t, u) => t + u.memory, 0);
+    parts.push(`CPU ${percent(cpu)}`, `${size(mem)} in use`);
+  }
+  $("online-summary").textContent = parts.join(" · ");
+
+  $("players").hidden = players.length === 0;
+  $("no-players").hidden = players.length > 0;
+  $("no-players").textContent = live.players
+    ? "Nobody is online."
+    : serverRunning()
+      ? "Players show here once the char server is up."
+      : "The server is off.";
+  $("players").tBodies[0].replaceChildren(
+    ...players.map((p) => {
+      const tr = document.createElement("tr");
+      for (const [text, num] of [[p.name], [p.class], [p.base_level, true], [p.job_level, true], [p.map]]) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        if (num) td.className = "num";
+        tr.append(td);
+      }
+      return tr;
+    }),
+  );
+  renderServices(lastServices);
+}
+
+// Only while the main screen is showing; `docker stats` isn't free.
+async function refreshLive() {
+  if (!overview?.configured || overview.docker_error || page !== "dashboard" || document.hidden || liveBusy) return;
+  liveBusy = true;
+  try {
+    renderLive(await invoke("live"));
+  } catch (e) {
+    $("online-summary").textContent = `Couldn't read the live view: ${e}`;
+  } finally {
+    liveBusy = false;
   }
 }
 
@@ -198,6 +270,7 @@ function showPage(next) {
   $("backups-page").hidden = next !== "backups";
   $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
   $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
+  if (next === "dashboard") refreshLive();
 }
 
 $("nav").addEventListener("click", async () => {
@@ -490,6 +563,7 @@ listen("task", async ({ payload }) => {
     await refreshOverview();
     await refreshServices();
     await refreshBackups();
+    refreshLive();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
       if (payload.ok) await runTask("start");
@@ -519,5 +593,7 @@ listen("closing", async () => {
   await showView("activity");
 });
 
-refreshOverview().then(refreshServices).then(refreshBackups);
+refreshOverview().then(refreshServices).then(refreshBackups).then(refreshLive);
 setInterval(refreshServices, 3000);
+setInterval(refreshLive, 5000);
+document.addEventListener("visibilitychange", refreshLive);
