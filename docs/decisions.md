@@ -31,3 +31,10 @@ Players register and manage their accounts in a small web server that runs as an
 - Pages to work towards: register, log in, change password and email, and view the account's characters.
 - It talks to the same `ragnarok` database rAthena uses; it doesn't depend on rAthena's own `web-server`, which stays for the client's emblem and settings features.
 - The client's built-in `_M`/`_F` sign-up stays off, so the portal is the one way in.
+
+## Desktop app: server control only
+
+The desktop app's one job is running the server: start and stop the stack, show each service's status and logs, and show build progress. It has no account features.
+
+- All account work, player self-service and admin (GM level, bans) alike, lives in the web portal, so it works from any PC on the LAN.
+- The desktop app can link to the portal but doesn't embed it.
