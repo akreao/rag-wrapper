@@ -9,8 +9,10 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portal .
 
 # rpatchur (github.com/L1nkZ/rpatchur, MIT/Apache-2.0) has no published
 # releases, so it's cross-compiled for Windows from a pinned commit. This
-# stage is cached, so it only rebuilds when the commit changes.
-FROM rust:1.75-bookworm AS patcher
+# stage is cached, so it only rebuilds when the commit changes. Rust 1.68
+# is the newest that still builds its locked dependencies (ntapi 0.3.6
+# fails on 1.69 and later).
+FROM rust:1.68-bullseye AS patcher
 ARG RPATCHUR_COMMIT=21a548277189fecf1c24f61565337158c4ab19a9
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 \
