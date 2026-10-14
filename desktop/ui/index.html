@@ -195,7 +195,7 @@
         </select>
       </label>
       <p class="hint">Pre-renewal is the more polished mode; rAthena's Renewal content is incomplete and not up to date with kRO. Each mode keeps its own characters: accounts are shared, and switching back brings the other mode's characters back. The client date must match your game client.</p>
-      <p id="build-warning" class="notice" hidden>Saving rebuilds the server, which takes 5 to 10 minutes. Players are disconnected while it restarts.</p>
+      <p id="build-warning" class="notice" hidden>Saving rebuilds the server, which takes 5 to 10 minutes. Players are disconnected while it restarts. If you publish client patches, publish one after a mode switch so players get that mode's files.</p>
       <p id="build-error" class="error" hidden></p>
       <button id="build-save" type="submit">Save and rebuild</button>
     </form>
@@ -247,6 +247,7 @@
         <li><code>rag-wrapper.exe</code>: the patched client, which the patcher's Play button starts.</li>
         <li><code>data/</code>: sprites, textures, maps and other GRF content, packed into <code>rag-wrapper.grf</code>. The patch also writes the client's <code>DATA.INI</code> so it reads that GRF first.</li>
         <li>Anything else, such as <code>System/</code> files, is copied into the client folder as is.</li>
+        <li><code>Pre-Renewal/</code> and <code>Renewal/</code>: files for one game mode only, such as translation additions, laid out the same way. Players get the server's current mode's files, which replace shared files of the same name. After a mode switch, publish a patch to swap them.</li>
       </ul>
       <p class="hint">Only hand out the patched exe, your own custom content and your own translation additions: never the full client or llchrisll's translation, which players install themselves.</p>
       <div class="row">

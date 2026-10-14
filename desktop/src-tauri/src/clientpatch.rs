@@ -10,6 +10,12 @@
 //! before `data.grf`; rewriting it each time puts it back if a player's
 //! translation install replaced it.
 //!
+//! Files that differ between the game modes, such as translation additions,
+//! go in the folder's `Pre-Renewal/` and `Renewal/` folders, laid out the
+//! same way. A patch carries the shared files plus the server's current
+//! mode's folder, whose files win over shared ones of the same name, so
+//! after a mode switch the next patch swaps the players' files.
+//!
 //! `patches/published.json` remembers each published file's checksum and
 //! the patch history, so the next patch carries only what changed.
 
@@ -32,6 +38,14 @@ const PLIST: &str = "plist.txt";
 const MANIFEST: &str = "published.json";
 const DATA_INI: &str = "DATA.INI";
 const DATA_INI_CONTENT: &str = "[Data]\r\n0=rag-wrapper.grf\r\n1=data.grf\r\n";
+
+/// The folders for files of one game mode, by the mode's name.
+const MODES: [&str; 2] = ["Pre-Renewal", "Renewal"];
+
+/// The game mode's name, which is also its folder in the client files.
+pub fn mode_name(renewal: bool) -> &'static str {
+    MODES[usize::from(renewal)]
+}
 
 /// Files the file manager leaves behind, never published.
 const IGNORED: [&str; 2] = ["thumbs.db", "desktop.ini"];
@@ -71,6 +85,9 @@ struct Manifest {
     files: BTreeMap<String, FileState>,
     /// Whether anything has been published into `rag-wrapper.grf`.
     grf: bool,
+    /// The game mode of the latest patch.
+    #[serde(default)]
+    mode: Option<String>,
     /// Oldest first.
     history: Vec<Publish>,
 }
@@ -88,6 +105,10 @@ impl Manifest {
 #[derive(Serialize)]
 pub struct Status {
     pub folder: String,
+    /// The server's game mode, whose folder this patch carries.
+    pub mode: &'static str,
+    /// The mode of the latest patch, when it was another one.
+    pub switched_from: Option<String>,
     /// What the next patch would carry.
     pub changes: Changes,
     /// Files that can't be published as they are; publishing waits for them.
@@ -97,11 +118,14 @@ pub struct Status {
 }
 
 /// What would be published, and what has been.
-pub fn status(client_files: &Path, patches: &Path) -> Result<Status, String> {
+pub fn status(client_files: &Path, patches: &Path, renewal: bool) -> Result<Status, String> {
     let manifest = Manifest::load(patches)?;
-    let (files, problems) = scan(client_files)?;
+    let (files, _, problems) = scan(client_files, renewal)?;
+    let mode = mode_name(renewal);
     Ok(Status {
         folder: client_files.display().to_string(),
+        mode,
+        switched_from: manifest.mode.filter(|m| m != mode),
         changes: diff(&manifest.files, &files),
         problems,
         history: manifest.history.into_iter().rev().collect(),
@@ -112,9 +136,9 @@ pub fn status(client_files: &Path, patches: &Path) -> Result<Status, String> {
 /// two THOR files, one for `rag-wrapper.grf` and one for the client folder.
 /// Each `.thor` is written before its line is added to `plist.txt`, which is
 /// what makes the portal serve it.
-pub fn publish(client_files: &Path, patches: &Path) -> Result<Publish, String> {
+pub fn publish(client_files: &Path, patches: &Path, renewal: bool) -> Result<Publish, String> {
     let mut manifest = Manifest::load(patches)?;
-    let (files, problems) = scan(client_files)?;
+    let (files, sources, problems) = scan(client_files, renewal)?;
     if !problems.is_empty() {
         return Err(format!("Fix these files first:\n{}", problems.join("\n")));
     }
@@ -140,7 +164,7 @@ pub fn publish(client_files: &Path, patches: &Path) -> Result<Publish, String> {
         let out = BufWriter::new(File::create(&tmp).map_err(|e| e.to_string())?);
         let mut thor = ThorWriter::new(out, grf_part.then_some(GRF.as_bytes())).map_err(|e| e.to_string())?;
         for path in update {
-            let content = fs::read(client_files.join(path)).map_err(|e| format!("{path}: {e}"))?;
+            let content = fs::read(&sources[path.as_str()]).map_err(|e| format!("{path}: {e}"))?;
             thor.add(&encode(path)?, &content).map_err(|e| format!("{path}: {e}"))?;
             manifest.files.insert(path.clone(), state_of(&content));
         }
@@ -171,6 +195,7 @@ pub fn publish(client_files: &Path, patches: &Path) -> Result<Publish, String> {
         changes,
     };
     manifest.history.push(publish.clone());
+    manifest.mode = Some(mode_name(renewal).to_owned());
     write_atomic(&patches.join(PLIST), list.as_bytes())?;
     let json = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
     write_atomic(&patches.join(MANIFEST), &json)?;
@@ -232,25 +257,48 @@ fn hash_file(path: &Path) -> io::Result<FileState> {
     })
 }
 
-/// Every file in the client-files folder, by its `/`-separated path, and
-/// what's wrong with any that can't be published.
-fn scan(root: &Path) -> Result<(BTreeMap<String, FileState>, Vec<String>), String> {
+/// The files players get in this mode, by their `/`-separated path in the
+/// client folder: the shared ones plus the mode's folder. Also where each
+/// one is on disk, and what's wrong with any that can't be published.
+type Scan = (BTreeMap<String, FileState>, BTreeMap<String, PathBuf>, Vec<String>);
+
+fn scan(root: &Path, renewal: bool) -> Result<Scan, String> {
     let mut files = BTreeMap::new();
+    let mut sources = BTreeMap::new();
     let mut problems = Vec::new();
     if !root.exists() {
-        return Ok((files, problems));
+        return Ok((files, sources, problems));
     }
-    walk(root, &mut files, &mut problems)?;
+    walk(root, true, &mut files, &mut sources, &mut problems)?;
+    // A mode folder's name may differ in case, as Windows folders often do.
+    let entries = fs::read_dir(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name.to_str().is_some_and(|n| n.eq_ignore_ascii_case(mode_name(renewal))) && entry.path().is_dir() {
+            let mut mode_problems = Vec::new();
+            walk(&entry.path(), false, &mut files, &mut sources, &mut mode_problems)?;
+            let folder = name.to_string_lossy();
+            problems.extend(mode_problems.into_iter().map(|p| format!("{folder}/{p}")));
+        }
+    }
     // Once anything is published, the portal sends players to the
     // patcher, whose Play button starts the exe.
     if !files.is_empty() && !files.keys().any(|p| p.eq_ignore_ascii_case(EXE)) {
         problems.push(format!("{EXE} is missing: every patch needs the patched client, which the patcher's Play button starts."));
     }
     problems.sort();
-    Ok((files, problems))
+    Ok((files, sources, problems))
 }
 
-fn walk(root: &Path, files: &mut BTreeMap<String, FileState>, problems: &mut Vec<String>) -> Result<(), String> {
+/// Adds the files under `root` to `files`, replacing any of the same path.
+/// `skip_modes` leaves out the mode folders at the top.
+fn walk(
+    root: &Path,
+    skip_modes: bool,
+    files: &mut BTreeMap<String, FileState>,
+    sources: &mut BTreeMap<String, PathBuf>,
+    problems: &mut Vec<String>,
+) -> Result<(), String> {
     let mut dirs = vec![PathBuf::new()];
     while let Some(rel) = dirs.pop() {
         let entries = fs::read_dir(root.join(&rel)).map_err(|e| format!("{}: {e}", root.join(&rel).display()))?;
@@ -268,6 +316,10 @@ fn walk(root: &Path, files: &mut BTreeMap<String, FileState>, problems: &mut Vec
             // Follows a link to a file, but not to a folder, which could loop.
             let meta = fs::metadata(entry.path()).map_err(|e| format!("{}: {e}", path.display()))?;
             if meta.is_dir() {
+                let mode_folder = MODES.iter().any(|m| m.eq_ignore_ascii_case(name));
+                if skip_modes && rel.as_os_str().is_empty() && mode_folder {
+                    continue;
+                }
                 if !entry.file_type().map_err(|e| e.to_string())?.is_symlink() {
                     dirs.push(path);
                 }
@@ -279,6 +331,7 @@ fn walk(root: &Path, files: &mut BTreeMap<String, FileState>, problems: &mut Vec
                 continue;
             }
             let state = hash_file(&entry.path()).map_err(|e| format!("{path}: {e}"))?;
+            sources.insert(path.clone(), entry.path());
             files.insert(path, state);
         }
     }
@@ -373,7 +426,7 @@ mod tests {
             read::archive(&fs::read(self.patches().join(name)).unwrap())
         }
         fn publish(&self) -> Result<Publish, String> {
-            publish(&self.files(), &self.patches())
+            publish(&self.files(), &self.patches(), false)
         }
     }
 
@@ -446,7 +499,7 @@ mod tests {
         assert_eq!(p.changes.removed, ["System/b.lub", "data/a.txt"]);
         assert_eq!(d.thor("0003_data.thor").files[&b"data\\a.txt"[..]], None);
         assert_eq!(d.thor("0004_client.thor").files[&b"System\\b.lub"[..]], None);
-        let s = status(&d.files(), &d.patches()).unwrap();
+        let s = status(&d.files(), &d.patches(), false).unwrap();
         assert!(s.changes.is_empty());
         assert_eq!(s.history.len(), 2);
         assert_eq!(s.history[0].patches, ["0003_data.thor", "0004_client.thor"]);
@@ -472,12 +525,42 @@ mod tests {
         d.put(".hidden", b"");
         d.put("data/Thumbs.db", b"");
         d.put("data/ok.txt", b"");
-        let s = status(&d.files(), &d.patches()).unwrap();
+        let s = status(&d.files(), &d.patches(), false).unwrap();
         assert_eq!(s.problems.len(), 5, "{:?}", s.problems);
         assert!(s.problems.iter().any(|p| p.starts_with(&format!("{EXE} is missing"))));
         assert_eq!(s.changes.added, ["data/ok.txt"]);
         assert!(d.publish().unwrap_err().starts_with("Fix these files first"));
         assert!(!d.patches().join(PLIST).exists());
+    }
+
+    #[test]
+    fn each_mode_gets_its_own_files() {
+        let d = Dirs::new("modes");
+        d.put(EXE, b"MZ");
+        d.put("System/shared.lub", b"shared");
+        d.put("System/tr.lub", b"shared tr");
+        d.put("Pre-Renewal/System/tr.lub", b"pre tr");
+        d.put("renewal/System/tr.lub", b"re tr");
+        d.put("renewal/data/re.txt", b"re only");
+        d.publish().unwrap();
+        let a = d.thor("0001_client.thor");
+        assert_eq!(a.files[&b"System\\tr.lub"[..]].as_deref(), Some(&b"pre tr"[..]));
+        assert!(a.files.contains_key(&b"System\\shared.lub"[..]));
+        assert!(!a.files.keys().any(|k| k.starts_with(b"Pre-Renewal") || k.starts_with(b"renewal")));
+
+        let s = status(&d.files(), &d.patches(), true).unwrap();
+        assert_eq!((s.mode, s.switched_from.as_deref()), ("Renewal", Some("Pre-Renewal")));
+        assert_eq!(s.changes.changed, ["System/tr.lub"]);
+        assert_eq!(s.changes.added, ["data/re.txt"]);
+        let p = publish(&d.files(), &d.patches(), true).unwrap();
+        assert_eq!(p.patches, ["0002_data.thor", "0003_client.thor"]);
+        assert_eq!(d.thor("0003_client.thor").files[&b"System\\tr.lub"[..]].as_deref(), Some(&b"re tr"[..]));
+        assert_eq!(status(&d.files(), &d.patches(), true).unwrap().switched_from, None);
+
+        // Switching back takes the Renewal-only file away again.
+        let s = status(&d.files(), &d.patches(), false).unwrap();
+        assert_eq!(s.changes.removed, ["data/re.txt"]);
+        assert_eq!(s.changes.changed, ["System/tr.lub"]);
     }
 
     #[test]
