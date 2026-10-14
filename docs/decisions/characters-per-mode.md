@@ -9,3 +9,8 @@ Switching between Pre-Renewal and Renewal keeps each mode's characters apart (PR
 - **The portal reads accounts from `ragnarok` and characters from the mode's database** (`PRERE`, the same setting the build uses). The desktop app's player list does the same from `.env`.
 - **A backup holds all three databases.** A restore drops all three before loading, so it puts back exactly what was there. A backup from before this change only has `ragnarok`; after restoring one, the next start moves its characters into the current mode again.
 - **Checked against the real stack** (prebuilt 20250716 images with the new `entrypoint.sh`): an install made with the old layout, with a Pre-Renewal character, moved its tables to `ragnarok_prere` and started; switching to Renewal made an empty `ragnarok_re` and started; switching back brought the character back. The portal's admin page showed the character, its storage and character-name search, and a backup dumped and restored all three databases.
+
+## Review
+
+- **Storage and cash points stay with each mode** (Steven, 2026-10-14). Kafra storage, `#` account variables and `#CASHPOINTS` are in the mode's database, as built. The modes have different item databases, so shared storage would carry items one mode can't use. Only accounts and `##` variables are shared.
+- **No copying characters between modes** (Steven, 2026-10-14). A character stays in the mode it was made in. A copy would bring back the Novice reset and Unknown Items this change avoids, so a player who wants the other mode starts a new character there.
