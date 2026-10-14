@@ -18,3 +18,7 @@ Both versions of the 2025-07-16 steps (the patcher, and patching by hand with WA
 ## Only `clientinfo.xml`
 
 The portal no longer offers `sclientinfo.xml`, on the connect page, as a download or in the patcher zip (Steven, 2026-10-14). It was the same file under the name Sakray (kRO's test server) clients read, and nobody plays on a Sakray client. A copy left in a player's `data` folder from an earlier download is harmless.
+
+## When the server switches mode
+
+With separate characters per mode (#30), switching between Pre-Renewal and Renewal is practical, and each mode needs its own translation (Steven, 2026-10-14). We still don't hand out either one: the LANG step already names the server's current mode, and it now also tells players to install the matching translation from the same tab after a switch. That WARPGATE swaps one translation for the other from the LANG tab is inferred from its site, not tried.

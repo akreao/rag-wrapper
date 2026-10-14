@@ -93,7 +93,7 @@ func TestConnectRenewal(t *testing.T) {
 		t.Fatal(err)
 	}
 	if body := get(a.routes(), "/connect").Body.String(); !strings.Contains(body, "<dd>Renewal</dd>") ||
-		!strings.Contains(body, "choose <em>Renewal</em>") || strings.Contains(body, "Pre-Renewal") {
+		!strings.Contains(body, "choose <em>Renewal</em>") || strings.Contains(body, "choose <em>Pre-Renewal</em>") {
 		t.Fatalf("connect on a Renewal server:\n%s", body)
 	}
 }
