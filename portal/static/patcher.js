@@ -3,13 +3,38 @@
 // it with external.invoke. Plain ES5: it runs in Windows' old IE engine.
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  // In the patcher, external.invoke is a native method ("unknown" or
-  // "function" to typeof). In a normal browser it's missing.
-  var inPatcher = !!window.external && typeof window.external.invoke !== 'undefined';
+  // How long a check may go without any word from the patcher before the
+  // page offers to try again.
+  var answerTimeout = 30000;
+  var waiting = null;
 
+  // The patcher's window has no developer tools, so a script error shows
+  // on the page instead of leaving it stuck.
+  window.onerror = function (msg, url, line) {
+    var el = $('detail');
+    if (el) {
+      el.innerText = 'Page error: ' + msg + ' (line ' + line + ')';
+    }
+  };
+
+  // Sends a command to the patcher, and says whether it could. Don't test
+  // typeof window.external.invoke first: rpatchur's IE host answers a
+  // property read of invoke with nothing, so typeof is "undefined" there
+  // even though the call works. In a normal browser the call throws.
   function invoke(cmd) {
-    if (inPatcher) {
+    try {
       window.external.invoke(cmd);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Any word from the patcher ends the wait for an answer.
+  function answered() {
+    if (waiting !== null) {
+      clearTimeout(waiting);
+      waiting = null;
     }
   }
 
@@ -42,6 +67,7 @@
   }
 
   window.patchingStatusReady = function () {
+    answered();
     status('Up to date. Ready to play.');
     detail('');
     progress(1, 1);
@@ -49,6 +75,7 @@
   };
 
   window.patchingStatusError = function (msg) {
+    answered();
     status('Update failed: ' + msg, true);
     detail('Check that this PC can reach the server, then try again.');
     setPlay(false);
@@ -56,6 +83,7 @@
   };
 
   window.patchingStatusDownloading = function (done, total, bytesPerSec) {
+    answered();
     status('Downloading update ' + Math.min(done + 1, total) + ' of ' + total + '...');
     detail(bytesPerSec > 0 ? size(bytesPerSec) + '/s' : '');
     progress(done, total);
@@ -63,27 +91,45 @@
   };
 
   window.patchingStatusInstalling = function (done, total) {
+    answered();
     status('Installing update ' + Math.min(done + 1, total) + ' of ' + total + '...');
     progress(done, total);
     setPlay(false);
   };
 
   window.patchingStatusPatchApplied = function (name) {
+    answered();
     detail('Installed ' + name);
   };
 
   window.notificationInProgress = function () {
+    answered();
     detail('An update is already running.');
   };
 
-  $('play').onclick = function () { invoke('play'); };
-  $('exit').onclick = function () { invoke('exit'); };
-  $('retry').onclick = function () {
+  // Asks the patcher for any new patches. If it never answers, say so
+  // rather than leaving "Checking for updates..." up for good.
+  function checkForUpdates() {
     status('Checking for updates...');
     detail('');
-    $('retry').style.display = 'none';
-    invoke('start_update');
-  };
+    setPlay(false);
+    if (!invoke('start_update')) {
+      status('This page is the patcher\'s window. Download the patcher from the How to connect page.');
+      return;
+    }
+    answered();
+    waiting = setTimeout(function () {
+      waiting = null;
+      status('The patcher didn\'t answer.', true);
+      detail('Try again, or close the patcher and start it again.');
+      $('retry').style.display = '';
+    }, answerTimeout);
+  }
+
+  $('play').onclick = function () { invoke('play'); };
+  $('setup').onclick = function () { invoke('setup'); };
+  $('exit').onclick = function () { invoke('exit'); };
+  $('retry').onclick = checkForUpdates;
 
   // Links open in the player's browser, not in the patcher's window.
   var links = document.getElementsByTagName('a');
@@ -92,17 +138,9 @@
       continue;
     }
     links[i].onclick = function () {
-      if (!inPatcher) {
-        return true;
-      }
-      invoke(JSON.stringify({ 'function': 'open_url', parameters: { url: this.href } }));
-      return false;
+      return !invoke(JSON.stringify({ 'function': 'open_url', parameters: { url: this.href } }));
     };
   }
 
-  if (inPatcher) {
-    invoke('start_update');
-  } else {
-    status('This page is the patcher\'s window. Download the patcher from the How to connect page.');
-  }
+  checkForUpdates();
 })();

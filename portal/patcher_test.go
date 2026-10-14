@@ -57,8 +57,9 @@ func TestPatches(t *testing.T) {
 
 func TestPatcherConfig(t *testing.T) {
 	var cfg struct {
-		Play struct{ Path string }
-		Web  struct {
+		Play  struct{ Path string }
+		Setup struct{ Path string }
+		Web   struct {
 			IndexURL     string `json:"index_url"`
 			PatchServers []struct {
 				PlistURL string `json:"plist_url"`
@@ -72,7 +73,7 @@ func TestPatcherConfig(t *testing.T) {
 	if err := json.Unmarshal(patcherConfig("http://10.0.0.5:8080", `My "LAN"`), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Play.Path != clientExe || cfg.Web.IndexURL != "http://10.0.0.5:8080/patcher/" || len(cfg.Web.PatchServers) != 1 ||
+	if cfg.Play.Path != clientExe || cfg.Setup.Path != "opensetup.exe" || cfg.Web.IndexURL != "http://10.0.0.5:8080/patcher/" || len(cfg.Web.PatchServers) != 1 ||
 		cfg.Web.PatchServers[0].PlistURL != "http://10.0.0.5:8080/patcher/plist.txt" ||
 		cfg.Web.PatchServers[0].PatchURL != "http://10.0.0.5:8080/patcher/data/" || cfg.Client.DefaultGRFName != clientGRF {
 		t.Fatalf("%+v", cfg)
@@ -146,5 +147,32 @@ func TestPatcherMissing(t *testing.T) {
 	}
 	if rec := get(a.routes(), "/connect/"+patcherZip); rec.Code != http.StatusNotFound {
 		t.Fatal(rec.Code)
+	}
+}
+
+// Downloading on the server itself mustn't hand players a config that
+// points at their own PC.
+func TestPatcherConfigFromLocalhost(t *testing.T) {
+	h, _ := patcherSetup(t, "1 0001_client.thor\n")
+	for _, host := range []string{"localhost:8080", "127.0.0.1:8080", "[::1]:8080"} {
+		rec := get(h, "http://"+host+"/connect/"+patcherZip)
+		zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+		if err != nil {
+			t.Fatalf("%s: %v", host, err)
+		}
+		for _, f := range zr.File {
+			if f.Name != patcherName+".yml" {
+				continue
+			}
+			r, _ := f.Open()
+			b, _ := io.ReadAll(r)
+			if !strings.Contains(string(b), `"http://10.0.0.5:8080/patcher/plist.txt"`) || strings.Contains(string(b), host) {
+				t.Errorf("%s: config\n%s", host, b)
+			}
+		}
+	}
+	// A server that only advertises loopback keeps the address it was reached on.
+	if got := (connectInfo{Address: "127.0.0.1"}).BaseURL(httptest.NewRequest(http.MethodGet, "http://localhost:8080/", nil)); got != "http://localhost:8080" {
+		t.Errorf("loopback server: %s", got)
 	}
 }
