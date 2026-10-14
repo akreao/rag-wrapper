@@ -5,3 +5,4 @@
 /patches/*
 !/patches/README.md
 /backups/
+/client-files/

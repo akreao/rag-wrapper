@@ -275,6 +275,7 @@ async function refreshOverview() {
   $("nav").hidden = !overview.configured;
   $("nav-backups").hidden = !overview.configured;
   $("nav-live").hidden = !overview.configured;
+  $("nav-patch").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
     if ($("setup-ip").value !== "other") {
@@ -340,7 +341,7 @@ function updateButtons() {
   $("cancel").hidden = !["build", "update", "start", "restart", "readdress"].includes(task);
 }
 
-// ---- Pages: the main screen, Dashboard, Settings and Backups ----
+// ---- Pages: the main screen, Dashboard, Settings, Backups and Client patch ----
 
 let page = "dashboard";
 
@@ -350,9 +351,11 @@ function showPage(next) {
   $("settings").hidden = next !== "settings";
   $("backups-page").hidden = next !== "backups";
   $("live-page").hidden = next !== "live";
+  $("patch-page").hidden = next !== "patch";
   $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
   $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
   $("nav-live").textContent = page === "live" ? "Back to server" : "Dashboard";
+  $("nav-patch").textContent = page === "patch" ? "Back to server" : "Client patch";
   if (next === "live") refreshLive();
 }
 
@@ -670,6 +673,129 @@ $("open-backups").addEventListener("click", async () => {
   } catch (err) {
     $("backup-error").textContent = `Couldn't open the folder: ${err}`;
     $("backup-error").hidden = false;
+  }
+});
+
+// ---- Client patch: publishing files to the players' patcher ----
+
+const SHOWN = 50; // files listed per change kind before "and N more"
+
+function fileItems(changes) {
+  const items = [];
+  for (const [kind, label] of [["added", "New"], ["changed", "Changed"], ["removed", "Removed"]]) {
+    for (const path of changes[kind].slice(0, SHOWN)) {
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="kind muted"></span><code></code>`;
+      li.querySelector(".kind").textContent = label;
+      li.querySelector("code").textContent = path;
+      items.push(li);
+    }
+    if (changes[kind].length > SHOWN) {
+      const li = document.createElement("li");
+      li.className = "more muted";
+      li.textContent = `and ${changes[kind].length - SHOWN} more ${label.toLowerCase()}`;
+      items.push(li);
+    }
+  }
+  return items;
+}
+
+const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function summary(c) {
+  const parts = [];
+  if (c.added.length) parts.push(`${c.added.length} new`);
+  if (c.changed.length) parts.push(`${c.changed.length} changed`);
+  if (c.removed.length) parts.push(`${c.removed.length} removed`);
+  return parts.join(", ");
+}
+
+let publishing = false;
+
+async function refreshPatch() {
+  let s;
+  try {
+    s = await invoke("client_patch");
+  } catch (err) {
+    $("patch-error").textContent = String(err);
+    $("patch-error").hidden = false;
+    return;
+  }
+  $("patch-folder").textContent = `Folder: ${s.folder}`;
+  $("patch-problems").hidden = s.problems.length === 0;
+  $("patch-problems").replaceChildren(
+    ...s.problems.map((p) => {
+      const li = document.createElement("li");
+      li.textContent = p;
+      return li;
+    }),
+  );
+  const c = s.changes;
+  const total = c.added.length + c.changed.length + c.removed.length;
+  $("patch-summary").textContent = s.problems.length
+    ? "Fix the files above to publish."
+    : total
+      ? `${count(total, "file", "files")} to publish: ${summary(c)}.`
+      : s.history.length
+        ? "Nothing has changed since the last patch."
+        : "The client files folder is empty.";
+  $("patch-changes").replaceChildren(...fileItems(c));
+  $("publish").disabled = publishing || total === 0 || s.problems.length > 0;
+
+  $("no-patches").hidden = s.history.length > 0;
+  $("patch-history").replaceChildren(
+    ...s.history.map((p) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong class="when"></strong> <span class="muted"></span>`;
+      li.querySelector(".when").textContent = p.published;
+      li.querySelector(".muted").textContent = `${summary(p) || "no file changes"} · ${p.patches.join(", ")}`;
+      li.title = [...p.added, ...p.changed, ...p.removed].slice(0, 30).join("\n");
+      return li;
+    }),
+  );
+}
+
+$("nav-patch").addEventListener("click", async () => {
+  if (page === "patch") return showPage("dashboard");
+  $("patch-error").hidden = true;
+  $("patch-done").hidden = true;
+  showPage("patch");
+  await refreshPatch();
+});
+
+$("patch-refresh").addEventListener("click", () => {
+  $("patch-done").hidden = true;
+  refreshPatch();
+});
+
+$("open-client-files").addEventListener("click", async () => {
+  $("patch-error").hidden = true;
+  try {
+    await invoke("open_client_files");
+  } catch (err) {
+    $("patch-error").textContent = `Couldn't open the folder: ${err}`;
+    $("patch-error").hidden = false;
+  }
+  refreshPatch();
+});
+
+$("publish").addEventListener("click", async () => {
+  $("patch-error").hidden = true;
+  $("patch-done").hidden = true;
+  publishing = true;
+  $("publish").disabled = true;
+  $("publish").textContent = "Publishing…";
+  try {
+    const p = await invoke("publish_client_patch");
+    $("patch-done").textContent = `Published ${p.patches.join(" and ")}. Players get it the next time they open the patcher.`;
+    $("patch-done").hidden = false;
+  } catch (err) {
+    $("patch-error").textContent = String(err);
+    $("patch-error").hidden = false;
+  } finally {
+    publishing = false;
+    $("publish").textContent = "Publish client patch";
+    await refreshPatch();
   }
 });
 

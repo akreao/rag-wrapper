@@ -1,4 +1,5 @@
 mod backup;
+mod clientpatch;
 mod envfile;
 mod jobs;
 mod live;
@@ -6,6 +7,7 @@ mod net;
 mod settings;
 mod stack;
 mod task;
+mod thor;
 mod update;
 
 use std::path::PathBuf;
@@ -24,6 +26,10 @@ struct App {
     dir: PathBuf,
     /// Where database backups go.
     backups: PathBuf,
+    /// The files players get through the patcher, as they sit in the client folder.
+    client_files: PathBuf,
+    /// Held while a client patch is being built, so two can't take the same number.
+    publishing: Arc<Mutex<()>>,
     /// The running start, stop, build, backup or restore, if any. Only one at a time.
     task: task::Slot,
     logs: Mutex<Option<Child>>,
@@ -44,6 +50,10 @@ impl App {
 
     fn overrides_dir(&self) -> PathBuf {
         self.dir.join(stack::OVERRIDES)
+    }
+
+    fn patches_dir(&self) -> PathBuf {
+        self.dir.join(stack::PATCHES)
     }
 
     fn ctx(&self, handle: &AppHandle) -> Ctx {
@@ -422,6 +432,38 @@ fn open_backups(handle: AppHandle, app: State<App>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// What the next client patch would carry, and the patches published so far.
+#[tauri::command]
+async fn client_patch(app: State<'_, App>) -> Result<clientpatch::Status, String> {
+    let (files, patches) = (app.client_files.clone(), app.patches_dir());
+    tauri::async_runtime::spawn_blocking(move || clientpatch::status(&files, &patches))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Publishes what changed in the client-files folder as a new patch. The
+/// portal serves it straight away; the server doesn't need to restart.
+#[tauri::command]
+async fn publish_client_patch(app: State<'_, App>) -> Result<clientpatch::Publish, String> {
+    let (files, patches, lock) = (app.client_files.clone(), app.patches_dir(), app.publishing.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let _held = lock.try_lock().map_err(|_| "A patch is already being published.")?;
+        clientpatch::publish(&files, &patches)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Opens the client-files folder in the file manager to add or change files.
+#[tauri::command]
+fn open_client_files(handle: AppHandle, app: State<App>) -> Result<(), String> {
+    clientpatch::ensure_folder(&app.client_files).map_err(|e| e.to_string())?;
+    handle
+        .opener()
+        .open_path(app.client_files.display().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Serialize, Clone)]
 struct LogLine {
     generation: u64,
@@ -458,22 +500,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let (dir, backups) = match stack::stack_dir_override() {
-                Some(dir) => {
-                    let backups = dir.join("backups");
-                    (dir, backups)
-                }
+            // Backups and client files sit beside the stack, not in it.
+            let (dir, data) = match stack::stack_dir_override() {
+                Some(dir) => (dir.clone(), dir),
                 None => {
                     let data = app.path().app_data_dir()?;
                     let dir = data.join("stack");
                     let bundled = app.path().resource_dir()?.join("stack");
                     stack::install(&bundled, &dir)?;
-                    (dir, data.join("backups"))
+                    (dir, data)
                 }
             };
             app.manage(App {
                 dir,
-                backups,
+                backups: data.join("backups"),
+                client_files: data.join("client-files"),
+                publishing: Arc::new(Mutex::new(())),
                 task: Arc::new(Mutex::new(None)),
                 logs: Mutex::new(None),
                 logs_generation: AtomicU64::new(0),
@@ -496,6 +538,9 @@ pub fn run() {
             cancel_task,
             backups,
             open_backups,
+            client_patch,
+            publish_client_patch,
+            open_client_files,
             follow_logs
         ])
         .on_window_event(|window, event| {
