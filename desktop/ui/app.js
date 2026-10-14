@@ -294,9 +294,33 @@ async function refreshOverview() {
     if (!buildFormDirty) fillBuildForm();
   }
   renderUpdate(overview.configured && overview.server_update);
-  $("restart-bar").hidden = !overview.configured || !overview.restart_pending || !!overview.server_update;
+  // One bar at a time, in the order they're dealt with: update, rebuild, restart.
+  const rebuild = overview.configured && !overview.server_update && overview.rebuild;
+  renderRebuild(rebuild);
+  const restart = overview.restart_pending || overview.portal_restart_pending;
+  $("restart-bar").hidden = !overview.configured || !restart || !!overview.server_update || !!rebuild;
+  $("restart-server").hidden = !overview.restart_pending;
+  $("restart-portal").hidden = overview.restart_pending;
+  $("restart-new").textContent = overview.restart_pending ? "Restart on the new version" : "Restart the portal";
   updateButtons();
 }
+
+// ---- Rebuild notice: images here that Start won't bring up to date ----
+
+function renderRebuild(rebuild) {
+  $("rebuild-bar").hidden = !rebuild;
+  if (!rebuild) return;
+  $("rebuild-title").textContent = rebuild.needed ? "Rebuild needed." : "Rebuild recommended.";
+  const parts = [rebuild.server && "the game server", rebuild.portal && "the account portal"].filter(Boolean).join(" and ");
+  $("rebuild-why").textContent = rebuild.needed
+    ? "The game server was built for other build settings than the ones saved, for example because a rebuild failed or was cancelled."
+    : `This version of the app changed ${parts}, and there was no ready-made version to download, so yours is still the old one.`;
+}
+
+$("rebuild-now").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("build");
+});
 
 // ---- Server update: the rAthena commit this app version comes with ----
 
@@ -340,6 +364,7 @@ function updateButtons() {
   for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "ip-yes", "portal-port-use"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
+  $("rebuild-now").disabled = !ready || !!task;
   $("cancel").hidden = !["build", "update", "start", "restart", "readdress", "portal"].includes(task);
 }
 
