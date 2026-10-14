@@ -15,3 +15,11 @@ Questions asked about the finished button (PR #15), one at a time.
 - **Every patch overwrites `DATA.INI`.** Once a GRF has been published, each patch rewrites it with `rag-wrapper.grf` above `data.grf`, replacing llchrisll's copy and putting it back if a player reinstalls the translation later. Players never edit it by hand.
 - **Files deleted from the folder are deleted from the players' clients.** Players' clients stay a copy of the client-files folder, so a dropped or renamed file doesn't linger. The screen lists each removal before publishing.
 - **The client-files folder stays in the app's data folder**, `~/.local/share/app.ragwrapper.desktop/client-files/`, beside the backups. The screen's "Open client files folder" button opens it.
+
+## Files for one game mode
+
+Translation additions differ between Pre-Renewal and Renewal, and with separate characters per mode (#30) the server can switch (Steven, 2026-10-14).
+
+- **Players follow the server.** The client-files folder gets `Pre-Renewal/` and `Renewal/` folders, laid out like the client folder, for files that differ by mode. A patch carries the shared files plus the server's current mode's folder (from `PRERE`); a mode file replaces a shared file of the same path. Chosen over a patch list per mode, because each patcher remembers how far through one list it is: switching lists would make players download a fresh patcher.
+- **A mode switch is a publish.** After a switch, the Client patch screen says the server changed mode and lists the files that differ; publishing swaps them on every player's client, including removing the other mode's files. Until then players keep the old mode's files. `published.json` records the mode of the latest patch.
+- **We still never hand out llchrisll's translation.** Players install the matching one from WARPGATE's LANG tab ([connect-page.md](connect-page.md)); these folders are only for the server owner's own additions.

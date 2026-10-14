@@ -777,7 +777,7 @@ async function refreshPatch() {
     $("patch-error").hidden = false;
     return;
   }
-  $("patch-folder").textContent = `Folder: ${s.folder}`;
+  $("patch-folder").textContent = `Folder: ${s.folder} · Game mode: ${s.mode}`;
   $("patch-problems").hidden = s.problems.length === 0;
   $("patch-problems").replaceChildren(
     ...s.problems.map((p) => {
@@ -788,13 +788,16 @@ async function refreshPatch() {
   );
   const c = s.changes;
   const total = c.added.length + c.changed.length + c.removed.length;
-  $("patch-summary").textContent = s.problems.length
+  const switched = s.switched_from && total
+    ? `The server switched from ${s.switched_from} to ${s.mode}: publish to give players its files. `
+    : "";
+  $("patch-summary").textContent = switched + (s.problems.length
     ? "Fix the files above to publish."
     : total
       ? `${count(total, "file", "files")} to publish: ${summary(c)}.`
       : s.history.length
         ? "Nothing has changed since the last patch."
-        : "The client files folder is empty.";
+        : "The client files folder is empty.");
   $("patch-changes").replaceChildren(...fileItems(c));
   $("publish").disabled = publishing || total === 0 || s.problems.length > 0;
 

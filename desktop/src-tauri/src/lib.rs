@@ -57,7 +57,12 @@ impl App {
         EnvFile::load(&self.env_path()).ok()
     }
 
-    fn overrides_dir(&self) -> PathBuf {
+    /// Whether the server runs Renewal (`PRERE=no`) rather than Pre-Renewal.
+    fn renewal(&self) -> bool {
+        self.env().and_then(|e| e.get("PRERE")).as_deref() == Some("no")
+    }
+
+        fn overrides_dir(&self) -> PathBuf {
         self.dir.join(stack::OVERRIDES)
     }
 
@@ -522,8 +527,8 @@ fn open_backups(app: State<App>) -> Result<(), String> {
 /// What the next client patch would carry, and the patches published so far.
 #[tauri::command]
 async fn client_patch(app: State<'_, App>) -> Result<clientpatch::Status, String> {
-    let (files, patches) = (app.client_files.clone(), app.patches_dir());
-    tauri::async_runtime::spawn_blocking(move || clientpatch::status(&files, &patches))
+    let (files, patches, renewal) = (app.client_files.clone(), app.patches_dir(), app.renewal());
+    tauri::async_runtime::spawn_blocking(move || clientpatch::status(&files, &patches, renewal))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -532,10 +537,10 @@ async fn client_patch(app: State<'_, App>) -> Result<clientpatch::Status, String
 /// portal serves it straight away; the server doesn't need to restart.
 #[tauri::command]
 async fn publish_client_patch(app: State<'_, App>) -> Result<clientpatch::Publish, String> {
-    let (files, patches, lock) = (app.client_files.clone(), app.patches_dir(), app.publishing.clone());
+    let (files, patches, lock, renewal) = (app.client_files.clone(), app.patches_dir(), app.publishing.clone(), app.renewal());
     tauri::async_runtime::spawn_blocking(move || {
         let _held = lock.try_lock().map_err(|_| "A patch is already being published.")?;
-        clientpatch::publish(&files, &patches)
+        clientpatch::publish(&files, &patches, renewal)
     })
     .await
     .map_err(|e| e.to_string())?
