@@ -1,6 +1,6 @@
 # Publish client patch
 
-Roadmap feature 10's last piece, in the desktop app: the "Publish client patch" screen that builds patches for the portal's patcher ([client-patcher.md](client-patcher.md)). Desktop side of the patcher, PR for this branch.
+Roadmap feature 10's last piece, in the desktop app: the "Publish client patch" screen that builds patches for the portal's patcher ([client-patcher.md](client-patcher.md)). PR #15.
 
 - **One client-files folder, laid out like the client.** Steven puts the files players need in `~/.local/share/app.ragwrapper.desktop/client-files/`, as they sit in a game client folder. Only what may be handed out goes there: the patched exe, custom content and his own translation additions, never the full client or llchrisll's translation.
 - **`data/` goes into `rag-wrapper.grf`; everything else into the client folder.** GRF content is packed into our own GRF rather than loose files, so nothing in the official `data.grf` or a player's loose `data/` folder is overwritten. `System/` files (lub/lua) have to be loose, since the client only reads them from the folder.
