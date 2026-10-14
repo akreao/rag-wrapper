@@ -127,8 +127,25 @@ Questions asked about the finished desktop app (PR #3), one at a time.
 
 - **The admin password is cleared from `.env` after the first start.** Setup writes `ADMIN_PASSWORD` so `db-init` can create the admin; once `db-init` has finished, the app blanks it so no plain-text copy stays on disk. `ADMIN_USER` stays. The admin changes their password in the portal like any player. If the database volume is deleted, put a password back in `ADMIN_PASSWORD` before the next start to recreate the admin.
 - **The server runs only while the app is open.** Closing the window cancels any build or start in progress, runs `docker compose down` (the database volume is kept) and exits, showing the shutdown while it runs. Players are disconnected when the app closes, and the server doesn't come back by itself after a reboot.
-- **A Settings panel sets the client date and renewal mode.** `PACKETVER` and pre-renewal/renewal are edited in the app instead of by hand in `.env`; saving a change rebuilds the rAthena image. Rates and other gameplay settings are not part of it.
+- **A Settings panel sets the client date and renewal mode.** `PACKETVER` and pre-renewal/renewal are edited in the app instead of by hand in `.env`; saving a change rebuilds the rAthena image. Rates and other gameplay settings came later, with the Settings screen (below).
 - **The LAN address is re-detected on every Start.** "Detect automatically" stays the default, so the server never advertises a stale address after the PC's IP changes; players still need the new address in `clientinfo.xml`, and a DHCP reservation on the router avoids that. A fixed address can be picked in the app's Connecting panel.
+
+# Server settings review
+
+Questions asked about the finished Settings screen (PR #7), one at a time. The screen writes rAthena override files into the stack's `overrides/` folder (see `overrides/README.md`), which apply when the game servers restart.
+
+- **Player commands give the full "Super Player" list.** Turning the setting on gives every player all of rAthena's Super Player commands, @go (free teleport to towns) and @autotrade included. The setting is off by default.
+- **"Exp lost on death" is one value for both base and job exp.** Official is 1%; 0 turns the penalty off. A server that wants different values sets `death_penalty_base` and `death_penalty_job` by hand in `overrides/battle_conf.txt`; the screen shows the base value, and saving from it sets both to that again.
+- **Saving never restarts the server by itself.** While the server runs, saving shows a "Restart game servers" button, so several changes can go out in one restart, at a time that suits the players online. A restart disconnects everyone in game; the database and portal keep running.
+- **The message of the day is plain ASCII only.** Accented and non-Latin text shows up garbled unless it matches the client's language, so the screen accepts only English letters, digits and punctuation.
+
+# How to connect page
+
+Questions asked about the portal's "How to connect" page (roadmap feature 3, PR #6), one at a time.
+
+- **Logged-out visitors land on How to connect.** Opening the portal's address without being logged in goes to `/connect`, the setup steps, instead of the login page; logged-in players still go to their account. Someone who isn't logged in is most likely new, and the steps start with creating an account.
+- **The steps lead with the 2025-07-16 client.** Most players get that client from [WARPGATE](https://warp.legacygamers.net/), which downloads an unpatched client and keeps it updated without touching `clientinfo.xml`. When the server is built for `20250716` the page sends players to WARPGATE's RAGEXE tab for the clientinfo-ready exe and to [WARP0716](https://github.com/CrazyBebop/WARP0716) (Select Recommended) to patch it, because WARPGATE's own WARP tab can't download WARP0716 (it has no GitHub releases). Details are in the project's `client/patching-20250716.md`; the steps are unverified on Windows until the first real test. The page still follows whatever `PACKETVER` the server is built with; the `clientinfo.xml` it offers is the same for any client date.
+- **The server's name in the client is a setting.** It's the same name the desktop app's Settings screen sets (rAthena's `server_name`, default "rAthena", in `overrides/char_conf.txt`). The portal reads that file, mounted read-only, and writes the name into `clientinfo.xml` and onto the page, so players see one name everywhere.
 
 # Backups review
 

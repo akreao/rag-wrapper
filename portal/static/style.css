@@ -50,3 +50,10 @@ th { color: var(--muted); font-weight: 500; }
 .facts dd { margin: 0; }
 .note { color: var(--muted); }
 .pager a { margin-right: 16px; }
+.card.wide { max-width: none; margin-bottom: 24px; }
+code { font-size: .92em; padding: 1px 5px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); overflow-wrap: anywhere; }
+.steps { padding-left: 1.4em; max-width: 720px; }
+.steps li { margin-bottom: 16px; }
+.steps small { display: block; color: var(--muted); }
+.downloads { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+a.button { display: inline-block; padding: 8px 16px; border-radius: 6px; background: var(--accent); color: #fff; text-decoration: none; }
