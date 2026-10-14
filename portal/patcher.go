@@ -105,7 +105,7 @@ func patcherConfig(base, serverName string) []byte {
 }
 
 // patcherDownload serves a zip to extract into the client folder: the
-// patcher, its config, rpatchur's licences, and the connection files in
+// patcher, its config, rpatchur's licences, and the connection file in
 // data/, so one download sets up a client.
 func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 	if !a.conn.Patcher.Available() {
@@ -129,11 +129,8 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = add(patcherName+".yml", patcherConfig(base, a.conn.ServerName()))
 	}
-	info := a.conn.clientInfo(base + "/register")
-	for _, name := range []string{"data/clientinfo.xml", "data/sclientinfo.xml"} {
-		if err == nil {
-			err = add(name, info)
-		}
+	if err == nil {
+		err = add("data/clientinfo.xml", a.conn.clientInfo(base+"/register"))
 	}
 	for _, name := range []string{"LICENSE-MIT", "LICENSE-APACHE"} {
 		if b, rerr := os.ReadFile(filepath.Join(filepath.Dir(a.conn.Patcher.Exe), name)); rerr == nil && err == nil {
