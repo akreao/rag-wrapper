@@ -10,9 +10,12 @@ RUN apt-get update \
       libmariadb-dev libmariadb-dev-compat libpcre3-dev zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
 
+# RATHENA_COMMIT is a full commit SHA on the fork's rag-wrapper branch.
 ARG RATHENA_REPO=https://github.com/akreao/rathena.git
-ARG RATHENA_REF=master
-RUN git clone --depth 1 --branch "${RATHENA_REF}" "${RATHENA_REPO}" /src/rathena
+ARG RATHENA_COMMIT=b6f89abe300d821412380a2004385532d0d4d9b6
+RUN git init -q /src/rathena \
+ && git -C /src/rathena fetch -q --depth 1 "${RATHENA_REPO}" "${RATHENA_COMMIT}" \
+ && git -C /src/rathena checkout -q FETCH_HEAD
 
 WORKDIR /src/rathena
 ARG PACKETVER=20220406
