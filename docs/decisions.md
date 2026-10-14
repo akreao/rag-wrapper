@@ -46,3 +46,7 @@ The desktop app's one job is running the server: start and stop the stack, show 
 - Better than plain text, but unsalted MD5 is weak if the database is copied. Acceptable while the server is LAN-only.
 - The inter-server account (account 1) must be stored as an MD5 hash too, so `entrypoint.sh` hashes `INTER_PASSWORD` when it writes it.
 - Proper hashing (bcrypt) in the rathena fork is the follow-up if the server is ever opened to the internet.
+
+## Registration: open to anyone on the LAN
+
+Whoever can reach the portal can register; there's no invite code or approval step. This relies on the server being LAN-only. An invite code is the first thing to add if that changes.
