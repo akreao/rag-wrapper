@@ -293,7 +293,7 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "backup-now", "update", "skip-update", "restart-new"])
+  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("cancel").hidden = !["build", "update", "start", "restart"].includes(task);
@@ -799,7 +799,8 @@ async function refreshMods() {
     on[0].firstChild.disabled = true;
     on[on.length - 1].lastChild.disabled = true;
   }
-  $("mods-pending").hidden = !s.restart_needed;
+  $("mods-rebuild").hidden = !s.rebuild_needed;
+  $("mods-pending").hidden = !s.restart_needed || s.rebuild_needed;
 }
 
 $("nav-mods").addEventListener("click", async () => {
@@ -821,6 +822,12 @@ $("open-mods").addEventListener("click", async () => {
   } catch (err) {
     modsError(`Couldn't open the folder: ${err}`);
   }
+});
+
+// A rebuild backs up first; the "Restart on the new version" bar then appears.
+$("mods-rebuild-button").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("build");
 });
 
 $("mods-restart").addEventListener("click", () => {

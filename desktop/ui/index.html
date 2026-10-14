@@ -257,6 +257,10 @@
       <p id="mods-folder" class="hint"></p>
     </section>
     <section class="card">
+      <p id="mods-rebuild" class="notice" hidden>
+        The running server was built before mods existed, so it ignores them. Rebuild the server to load mods, then restart it.
+        <button id="mods-rebuild-button" type="button">Rebuild</button>
+      </p>
       <p id="mods-pending" class="notice" hidden>
         Some changes wait for the game servers to restart, which disconnects everyone. When a mod brings new database files, the database is backed up first.
         <button id="mods-restart" type="button">Restart game servers</button>

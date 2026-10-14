@@ -134,6 +134,9 @@ apply_mods() {
 	fi
 	: > npc/mods.conf
 
+	# The desktop app looks for this line to tell an image that loads mods
+	# from one built before mods existed.
+	echo "Mods enabled: $(enabled_mods | tr '\n' ' ')"
 	imports=$(mktemp)
 	for name in $(enabled_mods); do
 		echo "Mod: ${name}"

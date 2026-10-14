@@ -52,7 +52,12 @@ pub struct Status {
     pub mods: Vec<Mod>,
     /// The running game servers don't have the mods as they are now.
     pub restart_needed: bool,
+    /// Mods are on, but the running image predates mod loading and ignores them.
+    pub rebuild_needed: bool,
 }
+
+/// What `entrypoint.sh` prints on every start once it loads mods.
+const LOADER_LINE: &str = "Mods enabled:";
 
 /// What a mod's files were when loaded: checksums of their names, sizes
 /// and modification times, all of them and the database ones alone.
@@ -254,6 +259,7 @@ pub fn status(dir: &Path, running: bool, log: &str) -> Status {
         folder: dir.display().to_string(),
         // A new order counts too.
         restart_needed: running && current(dir) != loaded,
+        rebuild_needed: running && !on.is_empty() && !log.lines().any(|l| l.starts_with(LOADER_LINE)),
         mods,
     }
 }
@@ -477,6 +483,18 @@ mod tests {
         assert!(move_mod(&dir, "d", true).is_err());
         // Reordering waits for a restart too.
         assert!(status(&dir, true, "").restart_needed);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn spots_an_image_without_mod_loading() {
+        let dir = temp_dir("rebuild");
+        write(&dir, "shop/npc/x.txt", "x");
+        assert!(!status(&dir, true, "[Info]: old image\n").rebuild_needed);
+        set_enabled(&dir, "shop", true).unwrap();
+        assert!(status(&dir, true, "[Info]: old image\n").rebuild_needed);
+        assert!(!status(&dir, true, "Mods enabled: shop \nMod: shop\n").rebuild_needed);
+        assert!(!status(&dir, false, "").rebuild_needed);
         fs::remove_dir_all(dir).unwrap();
     }
 
