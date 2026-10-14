@@ -36,7 +36,8 @@
     "resources": {
       "../../compose.yaml": "stack/compose.yaml",
       "../../docker/": "stack/docker/",
-      "../../portal/": "stack/portal/"
+      "../../portal/": "stack/portal/",
+      "../../overrides/README.md": "stack/overrides/README.md"
     },
     "category": "Game"
   }

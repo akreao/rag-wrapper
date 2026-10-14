@@ -90,7 +90,7 @@ pub fn check_packetver(value: &str) -> Result<(), String> {
     if valid {
         Ok(())
     } else {
-        Err("The client date must be 8 digits, YYYYMMDD, such as 20220406.".into())
+        Err("The client date must be 8 digits, YYYYMMDD, such as 20250716.".into())
     }
 }
 

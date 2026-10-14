@@ -31,8 +31,31 @@ esac
 
 cd /rathena
 
+# conf/user is the overrides folder from the host: the desktop app's
+# Settings screen writes there, and so can people by hand. Each file in it
+# with the name of one of rAthena's conf/import files is used in its place;
+# the files the stack writes below import it first, so the stack's own
+# values (database, addresses, passwords) still win.
+user_import() {
+	if [ -f "conf/user/$1" ]; then
+		echo "import: conf/user/$1"
+	fi
+}
+
 write_imports() {
+	for path in conf/import-tmpl/*; do
+		file=$(basename "${path}")
+		if [ ! -f "conf/user/${file}" ]; then
+			cp "${path}" "conf/import/${file}"
+		elif [ "${file%.yml}" != "${file}" ]; then
+			cp "conf/user/${file}" "conf/import/${file}"
+		else
+			user_import "${file}" > "conf/import/${file}"
+		fi
+	done
+
 	{
+		user_import inter_conf.txt
 		for db in login_server ipban_db char_server map_server web_server log_db; do
 			echo "${db}_ip: ${DB_HOST}"
 			echo "${db}_port: ${DB_PORT}"
@@ -43,24 +66,27 @@ write_imports() {
 	} > conf/import/inter_conf.txt
 
 	# Passwords are stored as MD5; accounts come from the portal, not _M/_F.
-	cat > conf/import/login_conf.txt <<CONF
+	{ user_import login_conf.txt; cat <<CONF
 use_MD5_passwords: yes
 new_account: no
 CONF
+	} > conf/import/login_conf.txt
 
-	cat > conf/import/char_conf.txt <<CONF
+	{ user_import char_conf.txt; cat <<CONF
 userid: ${INTER_USER}
 passwd: ${INTER_PASSWORD}
 login_ip: ${LOGIN_HOST}
 char_ip: ${PUBLIC_IP}
 CONF
+	} > conf/import/char_conf.txt
 
-	cat > conf/import/map_conf.txt <<CONF
+	{ user_import map_conf.txt; cat <<CONF
 userid: ${INTER_USER}
 passwd: ${INTER_PASSWORD}
 char_ip: ${CHAR_HOST}
 map_ip: ${PUBLIC_IP}
 CONF
+	} > conf/import/map_conf.txt
 }
 
 mysql_cmd() {
