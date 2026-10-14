@@ -38,3 +38,11 @@ The desktop app's one job is running the server: start and stop the stack, show 
 
 - All account work, player self-service and admin (GM level, bans) alike, lives in the web portal, so it works from any PC on the LAN.
 - The desktop app can link to the portal but doesn't embed it.
+
+## Passwords: rAthena's MD5 option
+
+`use_MD5_passwords: yes` in the login server config, and the portal stores `MD5(password)` the same way.
+
+- Better than plain text, but unsalted MD5 is weak if the database is copied. Acceptable while the server is LAN-only.
+- The inter-server account (account 1) must be stored as an MD5 hash too, so `entrypoint.sh` hashes `INTER_PASSWORD` when it writes it.
+- Proper hashing (bcrypt) in the rathena fork is the follow-up if the server is ever opened to the internet.
