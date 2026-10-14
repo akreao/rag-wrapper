@@ -1,0 +1,121 @@
+# Publishes the prebuilt rAthena and portal images the desktop app pulls
+# instead of compiling them (docs/decisions/prebuilt-images.md).
+#
+# Each tag names what the image was built from, the same way the app's
+# images.rs names it:
+#   rag-wrapper-rathena:<PACKETVER>-<prere|re>-<commit, 12>-<hash of docker/rathena/>
+#   rag-wrapper-portal:<hash of portal/>
+# An image whose tag is already published isn't built again.
+name: Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/rathena/**'
+      - 'portal/**'
+      - '.env.example'
+      - '.github/workflows/images.yml'
+  # A change to this workflow builds every image without publishing.
+  pull_request:
+    paths:
+      - '.github/workflows/images.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/${{ github.repository_owner }}/rag-wrapper
+  PUSH: ${{ github.event_name != 'pull_request' }}
+
+jobs:
+  rathena:
+    name: rAthena ${{ matrix.packetver }} ${{ matrix.mode }}
+    # The PACKETVER presets on the Settings screen, in both modes.
+    strategy:
+      fail-fast: false
+      matrix:
+        packetver: ['20250716', '20220406']
+        mode: [prere, re]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag
+        id: tag
+        run: |
+          repo=$(sed -n 's/^RATHENA_REPO=//p' .env.example)
+          commit=$(sed -n 's/^RATHENA_COMMIT=//p' .env.example)
+          hash=$(cd docker/rathena && find . -type f -not -path '*/.*' -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -c1-12)
+          image="${REGISTRY,,}-rathena:${{ matrix.packetver }}-${{ matrix.mode }}-${commit:0:12}-${hash}"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "$image"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Already published?
+        id: published
+        run: |
+          if docker manifest inspect "${{ steps.tag.outputs.image }}" > /dev/null 2>&1; then
+            echo "Already published."
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build
+        if: steps.published.outputs.yes != 'true'
+        run: |
+          docker build docker/rathena \
+            --build-arg RATHENA_REPO="${{ steps.tag.outputs.repo }}" \
+            --build-arg RATHENA_COMMIT="${{ steps.tag.outputs.commit }}" \
+            --build-arg PACKETVER="${{ matrix.packetver }}" \
+            --build-arg PRERE="${{ matrix.mode == 'prere' && 'yes' || 'no' }}" \
+            --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+            --label org.opencontainers.image.description="rAthena from ${{ steps.tag.outputs.repo }} at ${{ steps.tag.outputs.commit }}, PACKETVER ${{ matrix.packetver }}, ${{ matrix.mode }}" \
+            --label org.opencontainers.image.licenses="GPL-3.0-only" \
+            --tag "${{ steps.tag.outputs.image }}"
+      - name: Publish
+        if: steps.published.outputs.yes != 'true' && env.PUSH == 'true'
+        run: docker push "${{ steps.tag.outputs.image }}"
+
+  portal:
+    name: Portal
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag
+        id: tag
+        run: |
+          hash=$(cd portal && find . -type f -not -path '*/.*' -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -c1-12)
+          image="${REGISTRY,,}-portal:${hash}"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "$image"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Already published?
+        id: published
+        run: |
+          if docker manifest inspect "${{ steps.tag.outputs.image }}" > /dev/null 2>&1; then
+            echo "Already published."
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build
+        if: steps.published.outputs.yes != 'true'
+        run: |
+          docker build portal \
+            --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+            --label org.opencontainers.image.description="rag-wrapper's account portal and Windows client patcher" \
+            --tag "${{ steps.tag.outputs.image }}"
+      - name: Publish
+        if: steps.published.outputs.yes != 'true' && env.PUSH == 'true'
+        run: docker push "${{ steps.tag.outputs.image }}"
