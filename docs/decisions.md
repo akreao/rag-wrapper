@@ -50,3 +50,10 @@ The desktop app's one job is running the server: start and stop the stack, show 
 ## Registration: open to anyone on the LAN
 
 Whoever can reach the portal can register; there's no invite code or approval step. This relies on the server being LAN-only. An invite code is the first thing to add if that changes.
+
+## First admin: created in the desktop app's first-run setup
+
+On the first start, the desktop app asks for an admin username and password. The setup step (`db-init`) creates that account with GM rights, stored as MD5 like every other password.
+
+- This is the desktop app's only account-related job; everything after it happens in the portal.
+- Nobody on the LAN can claim admin by registering first.
