@@ -24,8 +24,10 @@ type app struct {
 	pages      map[string]*template.Template
 	adminGroup int
 	conn       connectInfo
-	loginFails *limiter
-	signups    *limiter
+	// The client patcher's own window, outside the site's layout.
+	patcherPageTmpl *template.Template
+	loginFails      *limiter
+	signups         *limiter
 }
 
 // groups are the account groups in rAthena's stock conf/groups.yml.
@@ -67,14 +69,19 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 		}
 		pages[name] = t
 	}
+	patcherPage, err := parsePatcherPage()
+	if err != nil {
+		return nil, err
+	}
 	return &app{
-		store:      st,
-		sessions:   newSessions(),
-		pages:      pages,
-		adminGroup: adminGroup,
-		conn:       conn,
-		loginFails: newLimiter(10, 15*time.Minute),
-		signups:    newLimiter(5, time.Hour),
+		patcherPageTmpl: patcherPage,
+		store:           st,
+		sessions:        newSessions(),
+		pages:           pages,
+		adminGroup:      adminGroup,
+		conn:            conn,
+		loginFails:      newLimiter(10, 15*time.Minute),
+		signups:         newLimiter(5, time.Hour),
 	}, nil
 }
 
@@ -87,6 +94,10 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /connect", a.page(a.connect))
 	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile("clientinfo.xml"))
 	mux.HandleFunc("GET /connect/sclientinfo.xml", a.clientInfoFile("sclientinfo.xml"))
+	mux.HandleFunc("GET /connect/"+patcherZip, a.patcherDownload)
+	mux.HandleFunc("GET /patcher/{$}", a.patcherPage)
+	mux.HandleFunc("GET /patcher/plist.txt", a.patcherList)
+	mux.HandleFunc("GET /patcher/data/{name}", a.patchFile)
 	mux.HandleFunc("GET /login", a.page(a.loginForm))
 	mux.HandleFunc("POST /login", a.page(a.login))
 	mux.HandleFunc("POST /logout", a.page(a.logout))

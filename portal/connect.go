@@ -17,6 +17,7 @@ type connectInfo struct {
 	Address   string // PUBLIC_IP: where the client is sent for login, char and map
 	PacketVer string // PACKETVER: the client date the server was built for
 	Overrides string // the stack's overrides/ folder, for the server name
+	Patcher   patcherFiles
 }
 
 // The name rAthena gives the server when char_conf.txt doesn't set one.
@@ -137,3 +138,7 @@ func (a *app) clientInfoFile(name string) http.HandlerFunc {
 		w.Write(a.conn.clientInfo("http://" + r.Host + "/register"))
 	}
 }
+
+// PatcherZip and PatcherExe name the patcher download and the program in it.
+func (c connectInfo) PatcherZip() string { return patcherZip }
+func (c connectInfo) PatcherExe() string { return patcherName + ".exe" }
