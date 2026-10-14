@@ -8,3 +8,4 @@
 !/mods/README.md
 /backups/
 /client-files/
+__pycache__/

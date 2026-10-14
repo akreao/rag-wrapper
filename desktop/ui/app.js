@@ -877,6 +877,18 @@ function modItem(m) {
     p.textContent = m.problem;
     li.append(p);
   }
+  if (m.clashes.length) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = `${count(m.clashes.length, "value", "values")} another mod also sets`;
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "These mods set the same values differently. Each line ends with the one the server uses; the arrows change the load order.";
+    const pre = document.createElement("pre");
+    pre.textContent = m.clashes.join("\n\n");
+    details.append(summary, p, pre);
+    li.append(details);
+  }
   if (m.errors.length) {
     const details = document.createElement("details");
     const summary = document.createElement("summary");

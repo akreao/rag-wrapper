@@ -42,6 +42,10 @@ jobs:
           docker compose config --quiet
       - name: shellcheck
         run: shellcheck --severity=warning docker/rathena/entrypoint.sh
+      - name: merge_mods.py tests
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
+          python3 -m unittest docker/rathena/test_merge_mods.py
 
   # Compiling rAthena (and the portal's Windows patcher) is slow, so these
   # only build when the image or what it builds changes. The job keeps its
