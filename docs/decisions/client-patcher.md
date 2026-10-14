@@ -16,3 +16,12 @@ Questions asked about the finished patcher hosting (PR #12), one at a time.
 - **The hand-patching steps stay until the first patch is published.** Until `plist.txt` lists a patch, the page shows the WARPGATE RAGEXE plus WARP0716 steps, so players can join before the "Publish client patch" button exists. Once a patch is published, the page switches to the patcher.
 - **Anyone who can reach the portal can download the patcher.** Like the How to connect page and the `clientinfo.xml` downloads, the zip and the patches need no login, so new players can set up the client before they make an account. The portal is only reachable on the LAN or VPN, and rpatchur can't log in to fetch patches anyway.
 - **Play closes the patcher.** Clicking Play starts `rag-wrapper.exe` and closes the patcher's window, as most RO patchers do. Players open the patcher again the next time they play, which also picks up new patches.
+
+## Patcher window fix (Steven's first test)
+
+Steven's first run of the patcher: it didn't check for patches on start, Try again left it on "Checking for updates...", and Exit did nothing.
+
+- **Cause (read from the source, not seen on Windows).** The page only called rpatchur when `typeof window.external.invoke` wasn't `"undefined"`. rpatchur's IE host (web-view 0.7.3, `webview_mshtml.c` in webview-sys 0.6.2) answers a property read of `invoke` with an empty value, so `typeof` is `"undefined"` there even though calling it works. The page decided it wasn't in the patcher and never sent `start_update`, `exit` or `play`. rpatchur itself doesn't check for patches until the page asks.
+- **Fix.** The page calls `window.external.invoke` directly and treats a thrown error as "not in the patcher", which is how a normal browser behaves. It asks for an update on load, as rpatchur's own examples do.
+- **No silent hangs.** If the patcher says nothing for 30 seconds after a check, the page says so and shows Try again. A script error in the page shows in the window, since rpatchur's window has no developer tools.
+- **Tested** in Chromium with a stand-in for rpatchur's `external.invoke`: the commands sent on load and by each button, the timeout and the plain-browser message. The fix still needs a run of the real patcher on Windows.
