@@ -14,7 +14,8 @@ use serde::Serialize;
 use crate::stack;
 use crate::task::Ctx;
 
-/// How many backups are kept; each new one deletes the oldest beyond this.
+/// How many backups of each kind are kept, made by hand and made
+/// automatically; each new one deletes the oldest of its kind beyond this.
 pub const KEEP: usize = 10;
 
 const PREFIX: &str = "ragnarok-";
@@ -106,9 +107,13 @@ pub fn list(dir: &Path) -> Vec<Backup> {
     backups
 }
 
-/// Deletes all but the newest `KEEP` backups, sparing `spare`.
+/// Deletes all but the newest `KEEP` backups made by hand and the newest
+/// `KEEP` made automatically, sparing `spare`. Automatic backups never
+/// push out one made by hand.
 fn prune(dir: &Path, spare: Option<&str>) {
-    for old in list(dir).into_iter().skip(KEEP) {
+    let (manual, automatic): (Vec<_>, Vec<_>) =
+        list(dir).into_iter().partition(|b| b.reason == Reason::Manual.slug());
+    for old in [manual, automatic].into_iter().flat_map(|kind| kind.into_iter().skip(KEEP)) {
         if Some(old.file.as_str()) != spare {
             let _ = fs::remove_file(dir.join(&old.file));
         }
@@ -403,12 +408,19 @@ mod tests {
             let stamp = format!("202610{day:02}-120000");
             fs::write(dir.join(file_name(&stamp, Reason::Manual)), b"x").unwrap();
         }
+        for day in 1..=11 {
+            let stamp = format!("202609{day:02}-120000");
+            fs::write(dir.join(file_name(&stamp, Reason::Rebuild)), b"x").unwrap();
+        }
         fs::write(dir.join("notes.txt"), b"mine").unwrap();
         let oldest = file_name("20261001-120000", Reason::Manual);
 
         prune(&dir, Some(&oldest));
         let left = list(&dir);
-        assert_eq!(left.len(), KEEP + 1);
+        assert_eq!(left.len(), 2 * KEEP + 1);
+        assert!(!dir.join(file_name("20260901-120000", Reason::Rebuild)).exists());
+        assert!(dir.join(file_name("20260902-120000", Reason::Rebuild)).exists());
+        let left: Vec<_> = left.into_iter().filter(|b| b.reason == "manual").collect();
         assert_eq!(left[0].file, file_name("20261012-120000", Reason::Manual));
         assert_eq!(left[KEEP].file, oldest);
         assert!(!dir.join(file_name("20261002-120000", Reason::Manual)).exists());
