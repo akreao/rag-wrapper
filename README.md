@@ -2,6 +2,10 @@
 
 A Linux desktop app that runs a private rAthena server and its database, for use with the real Ragnarok Online client.
 
+## Desktop app
+
+The app in [`desktop/`](desktop/README.md) runs the stack for you: first-run admin setup, start and stop, build progress, and each service's status and logs.
+
 ## Running the server stack
 
 The server side runs in Docker: MariaDB plus rAthena's login, char, map and web servers, built from source for your client's packet version.
