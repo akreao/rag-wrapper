@@ -77,3 +77,11 @@ The image builds one exact commit, `RATHENA_COMMIT` in `.env`, from the `rag-wra
 - Builds are repeatable: the same `.env` always builds the same server.
 - Picking up a server change means committing it to `rag-wrapper`, then moving `RATHENA_COMMIT` to that commit and rebuilding.
 - The Dockerfile fetches the commit by SHA, so it must be a full 40-character SHA.
+
+## Database upgrades: applied automatically
+
+`db-init` applies rAthena's `sql-files/upgrades/upgrade_*.sql` files on start, tracked in a `wrapper_sql_upgrades` table.
+
+- When the table is empty (a fresh import, or a database from before this existed), every current file is recorded as applied without running, because `main.sql` already includes them.
+- After moving `RATHENA_COMMIT`, any new upgrade files run once each, in date order. A failure stops setup, so the servers don't start against a half-upgraded database.
+- Files are tracked rather than re-run because some upstream upgrades aren't safe to run twice. Optional extras like `premium_storage.sql` are not applied.
