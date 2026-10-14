@@ -57,8 +57,9 @@ func TestPatches(t *testing.T) {
 
 func TestPatcherConfig(t *testing.T) {
 	var cfg struct {
-		Play struct{ Path string }
-		Web  struct {
+		Play  struct{ Path string }
+		Setup struct{ Path string }
+		Web   struct {
 			IndexURL     string `json:"index_url"`
 			PatchServers []struct {
 				PlistURL string `json:"plist_url"`
@@ -72,7 +73,7 @@ func TestPatcherConfig(t *testing.T) {
 	if err := json.Unmarshal(patcherConfig("http://10.0.0.5:8080", `My "LAN"`), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Play.Path != clientExe || cfg.Web.IndexURL != "http://10.0.0.5:8080/patcher/" || len(cfg.Web.PatchServers) != 1 ||
+	if cfg.Play.Path != clientExe || cfg.Setup.Path != "opensetup.exe" || cfg.Web.IndexURL != "http://10.0.0.5:8080/patcher/" || len(cfg.Web.PatchServers) != 1 ||
 		cfg.Web.PatchServers[0].PlistURL != "http://10.0.0.5:8080/patcher/plist.txt" ||
 		cfg.Web.PatchServers[0].PatchURL != "http://10.0.0.5:8080/patcher/data/" || cfg.Client.DefaultGRFName != clientGRF {
 		t.Fatalf("%+v", cfg)

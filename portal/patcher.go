@@ -86,8 +86,9 @@ func patcherConfig(base, serverName string) []byte {
 	cfg := map[string]any{
 		"window": map[string]any{"title": serverName + " patcher", "width": 600, "height": 360, "resizable": false},
 		"play":   map[string]any{"path": clientExe, "arguments": []string{}, "exit_on_success": true},
-		// No setup button on the page; rpatchur still wants the section.
-		"setup": map[string]any{"path": "Setup.exe", "arguments": []string{}, "exit_on_success": false},
+		// The page's Settings button: the client's own settings program,
+		// which the WARPGATE client ships as opensetup.exe.
+		"setup": map[string]any{"path": "opensetup.exe", "arguments": []string{}, "exit_on_success": false},
 		"web": map[string]any{
 			"index_url":              base + "/patcher/",
 			"preferred_patch_server": serverName,

@@ -127,6 +127,7 @@
   }
 
   $('play').onclick = function () { invoke('play'); };
+  $('setup').onclick = function () { invoke('setup'); };
   $('exit').onclick = function () { invoke('exit'); };
   $('retry').onclick = checkForUpdates;
 
