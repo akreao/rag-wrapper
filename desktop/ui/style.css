@@ -209,6 +209,18 @@ label[hidden] { display: none; }
 #backups .confirm button { margin: 6px 6px 0 0; }
 #no-backups[hidden], #backup-error[hidden] { display: none; }
 
+.update-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--card));
+  border-bottom: 1px solid var(--accent);
+}
+.update-bar[hidden] { display: none; }
+.update-bar p { margin: 0; flex: 1; }
+.update-bar button { flex: none; }
+
 .files { list-style: none; margin: 0 0 10px; padding: 0; font-size: 12px; }
 .files li { padding: 4px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
 .files .kind { display: inline-block; min-width: 64px; }

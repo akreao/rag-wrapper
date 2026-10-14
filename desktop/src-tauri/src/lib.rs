@@ -8,6 +8,7 @@ mod settings;
 mod stack;
 mod task;
 mod thor;
+mod update;
 
 use std::path::PathBuf;
 use std::process::Child;
@@ -72,6 +73,10 @@ struct Overview {
     addresses: Vec<net::Address>,
     packetver: String,
     prere: bool,
+    /// The rAthena commit this app version comes with, when the server isn't on it yet.
+    server_update: Option<update::ServerUpdate>,
+    /// The game servers run an older image than the one built, and restart onto it when asked.
+    restart_pending: bool,
     task: Option<String>,
 }
 
@@ -86,7 +91,7 @@ fn overview(app: State<App>) -> Overview {
     Overview {
         stack_dir: app.dir.display().to_string(),
         docker_version,
-        docker_error,
+        docker_error: docker_error.clone(),
         configured: !get("ADMIN_USER").is_empty(),
         admin_user: get("ADMIN_USER"),
         public_ip: get("PUBLIC_IP"),
@@ -94,6 +99,8 @@ fn overview(app: State<App>) -> Overview {
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
         prere: get("PRERE") != "no",
+        server_update: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(update::pending),
+        restart_pending: docker_error.is_none() && stack::runs_old_image(&app.dir, &get("PACKETVER")),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -119,6 +126,12 @@ fn setup(app: State<App>, admin_user: String, admin_password: String, public_ip:
             env.set(key, &envfile::random_password(20).map_err(|e| e.to_string())?);
         }
     }
+    // A new install already builds this version's commit.
+    if fresh {
+        if let Some(update) = update::pending(&env) {
+            update::skip(&mut env, &update);
+        }
+    }
     env.set("ADMIN_USER", &admin_user);
     env.set("ADMIN_PASSWORD", &admin_password);
     apply_public_ip(&mut env, public_ip);
@@ -138,6 +151,18 @@ fn save_build_settings(app: State<App>, packetver: String, prere: bool) -> Resul
     env.set("PRERE", prere);
     env.save().map_err(|e| e.to_string())?;
     Ok(changed)
+}
+
+/// Keeps the server on its current rAthena commit and hides the offer
+/// until an app version comes with another one.
+#[tauri::command]
+fn skip_server_update(app: State<App>) -> Result<(), String> {
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    if let Some(update) = update::pending(&env) {
+        update::skip(&mut env, &update);
+        env.save().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -220,10 +245,12 @@ enum Step {
     /// A backup if there's none from the last day; never fails the task.
     Daily,
     Restore(String),
+    /// Moves `.env` to the update's commit.
+    Pin(update::ServerUpdate),
 }
 
-/// Runs `start`, `restart`, `stop`, `build`, `backup` or `restore` (of
-/// `file`), streaming its output as `task-line` events.
+/// Runs `start`, `restart`, `stop`, `build`, `update`, `backup` or
+/// `restore` (of `file`), streaming its output as `task-line` events.
 #[tauri::command]
 fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<String>) -> Result<(), String> {
     if app.closing.load(Ordering::SeqCst) {
@@ -237,13 +264,13 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
     let mut cmd = stack::compose(&app.dir);
     let steps = match kind.as_str() {
         "start" | "restart" => {
-            let mut env = app.env().ok_or("Finish setup first.")?;
-            if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
-                apply_public_ip(&mut env, None);
-                env.save().map_err(|e| e.to_string())?;
-            }
-            cmd.args(["--progress", "plain", "up", "--detach"]);
-            if kind == "restart" {
+            let mut cmd = up_command(&app)?;
+            // After a rebuild or update the new image needs a full `up`,
+            // so `db-init` applies its database upgrades first; that
+            // recreates every rAthena container anyway.
+            let new_image = kind == "restart"
+                && stack::runs_old_image(&app.dir, &app.env().and_then(|e| e.get("PACKETVER")).unwrap_or_default());
+            if kind == "restart" && !new_image {
                 // The game servers read their configs only when they start;
                 // the database and portal keep running.
                 cmd.args(["--no-deps", "--force-recreate"]).args(stack::GAME_SERVERS);
@@ -254,6 +281,18 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             cmd.args(["--progress", "plain", "build"]);
             // A new build can upgrade the database on its next start.
             vec![Step::Backup(backup::Reason::Rebuild), Step::Compose(cmd)]
+        }
+        "update" => {
+            let env = app.env().ok_or("Finish setup first.")?;
+            let update = update::pending(&env).ok_or("The server is already on this version's rAthena.")?;
+            // The new commit goes into `.env` only once its image has built,
+            // so a failed or cancelled build leaves the update on offer.
+            cmd.env("RATHENA_REPO", &update.repo)
+                .env("RATHENA_COMMIT", &update.offered)
+                .args(["--progress", "plain", "build"]);
+            // A running server stays on the old image until "Restart on the
+            // new version" (or the next Start); players aren't dropped by surprise.
+            vec![Step::Backup(backup::Reason::Update), Step::Compose(cmd), Step::Pin(update)]
         }
         "stop" => {
             cmd.arg("down");
@@ -297,6 +336,11 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                     Ok(())
                 }
                 Step::Restore(file) => backup::restore(&ctx, &file),
+                Step::Pin(update) => {
+                    let mut env = EnvFile::load(&ctx.dir.join(".env")).map_err(|e| e.to_string())?;
+                    update::pin(&mut env, &update);
+                    env.save().map_err(|e| e.to_string())
+                }
             }
         });
         if let Err(e) = &result {
@@ -317,6 +361,19 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
         );
     });
     Ok(())
+}
+
+/// `docker compose up` for the whole stack, after re-detecting the LAN
+/// address unless one is pinned.
+fn up_command(app: &App) -> Result<std::process::Command, String> {
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
+        apply_public_ip(&mut env, None);
+        env.save().map_err(|e| e.to_string())?;
+    }
+    let mut cmd = stack::compose(&app.dir);
+    cmd.args(["--progress", "plain", "up", "--detach"]);
+    Ok(cmd)
 }
 
 /// Once `db-init` has finished, the admin account exists and the password
@@ -457,6 +514,7 @@ pub fn run() {
             setup,
             set_public_ip,
             save_build_settings,
+            skip_server_update,
             game_settings,
             save_game_settings,
             open_overrides,

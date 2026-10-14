@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "stop", "build", "backup" or "restore" while one runs
+let task = null; // "start", "restart", "stop", "build", "update", "backup" or "restore" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -248,14 +248,53 @@ async function refreshOverview() {
     $("admin-name").textContent = overview.admin_user;
     if (!buildFormDirty) fillBuildForm();
   }
+  renderUpdate(overview.configured && overview.server_update);
+  $("restart-bar").hidden = !overview.configured || !overview.restart_pending || !!overview.server_update;
   updateButtons();
 }
 
+// ---- Server update: the rAthena commit this app version comes with ----
+
+const short = (sha) => (sha ? sha.slice(0, 7) : "none");
+
+function renderUpdate(update) {
+  $("update-bar").hidden = !update;
+  if (!update) return;
+  $("update-to").textContent = short(update.offered);
+  $("update-from").textContent = short(update.current);
+  $("update-changes").hidden = !update.changes_url;
+  $("update-changes").dataset.url = update.changes_url || "";
+}
+
+$("update-changes").addEventListener("click", (e) => {
+  e.preventDefault();
+  invoke("plugin:opener|open_url", { url: e.target.dataset.url });
+});
+
+$("skip-update").addEventListener("click", async () => {
+  try {
+    await invoke("skip_server_update");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
+$("restart-new").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("restart");
+});
+
+$("update").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("update");
+});
+
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now"]) $(id).disabled = !ready || !!task;
+  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update", "skip-update", "restart-new"]) $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "start", "restart"].includes(task);
+  $("cancel").hidden = !["build", "update", "start", "restart"].includes(task);
 }
 
 // ---- Pages: the main screen, Dashboard, Settings, Backups and Client patch ----
@@ -456,6 +495,7 @@ $("portal-link").addEventListener("click", (e) => {
 const REASONS = {
   manual: "Backed up by hand",
   rebuild: "Before a rebuild",
+  update: "Before a server update",
   "before-restore": "Before a restore",
   daily: "Daily, on stop or close",
 };
@@ -683,7 +723,7 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", stop: "Stop", build: "Build", backup: "Backup", restore: "Restore" }[
+    const verb = { start: "Start", restart: "Restart", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);

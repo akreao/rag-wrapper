@@ -24,6 +24,23 @@
   </header>
 
   <div id="banner" class="banner" hidden></div>
+  <div id="update-bar" class="update-bar" hidden>
+    <p>
+      <strong>Server update available.</strong>
+      This version of the app comes with a new rAthena build (<code id="update-to"></code>, yours is <code id="update-from"></code>).
+      <a href="#" id="update-changes" hidden>What's changed</a>
+      <br><span class="muted">Updating backs up the database and rebuilds the server, which takes 5 to 10 minutes; players can keep playing meanwhile. A running server moves to the new version when you restart it.</span>
+    </p>
+    <button id="update" class="primary">Update server</button>
+    <button id="skip-update" title="Stay on your current rAthena commit until an app version comes with another one">Not this one</button>
+  </div>
+  <div id="restart-bar" class="update-bar" hidden>
+    <p>
+      <strong>A new server version is built.</strong>
+      Players stay on the old one until the game servers restart, which disconnects everyone. Database upgrades run first.
+    </p>
+    <button id="restart-new" class="primary">Restart on the new version</button>
+  </div>
 
   <main id="setup" hidden>
     <form id="setup-form" class="card narrow">
@@ -183,7 +200,7 @@
         <button id="backup-now">Back up now</button>
         <button id="open-backups">Open folder</button>
       </div>
-      <p class="hint">The database is also backed up before every rebuild, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones.</p>
+      <p class="hint">The database is also backed up before every rebuild or server update, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones.</p>
       <p id="backup-error" class="error" hidden></p>
       <ul id="backups"></ul>
       <p id="no-backups" class="hint" hidden>No backups yet.</p>
