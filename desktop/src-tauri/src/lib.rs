@@ -44,6 +44,7 @@ struct Overview {
     public_ip_auto: bool,
     addresses: Vec<net::Address>,
     packetver: String,
+    prere: bool,
     task: Option<String>,
 }
 
@@ -65,6 +66,7 @@ fn overview(app: State<App>) -> Overview {
         public_ip_auto: get("PUBLIC_IP_AUTO") != "no",
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
+        prere: get("PRERE") == "yes",
         task: app.task.lock().unwrap().as_ref().map(|(k, _)| k.clone()),
     }
 }
@@ -94,6 +96,21 @@ fn setup(app: State<App>, admin_user: String, admin_password: String, public_ip:
     env.set("ADMIN_PASSWORD", &admin_password);
     apply_public_ip(&mut env, public_ip);
     env.save().map_err(|e| e.to_string())
+}
+
+/// Sets the build settings. Returns whether anything changed, in which
+/// case the image needs a rebuild.
+#[tauri::command]
+fn save_build_settings(app: State<App>, packetver: String, prere: bool) -> Result<bool, String> {
+    let packetver = packetver.trim();
+    envfile::check_packetver(packetver)?;
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    let prere = if prere { "yes" } else { "no" };
+    let changed = env.get("PACKETVER").as_deref() != Some(packetver) || env.get("PRERE").as_deref() != Some(prere);
+    env.set("PACKETVER", packetver);
+    env.set("PRERE", prere);
+    env.save().map_err(|e| e.to_string())?;
+    Ok(changed)
 }
 
 /// `None` follows the detected LAN address on every start; `Some` pins one.
@@ -265,6 +282,7 @@ pub fn run() {
             overview,
             setup,
             set_public_ip,
+            save_build_settings,
             services,
             run_task,
             cancel_task,

@@ -80,6 +80,20 @@ pub fn check_account_field(what: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A client date as rAthena's `--enable-packetver` takes it: YYYYMMDD.
+pub fn check_packetver(value: &str) -> Result<(), String> {
+    let valid = value.len() == 8
+        && value.bytes().all(|b| b.is_ascii_digit())
+        && ("20000101".."20991232").contains(&value)
+        && ("01"..="12").contains(&&value[4..6])
+        && ("01"..="31").contains(&&value[6..8]);
+    if valid {
+        Ok(())
+    } else {
+        Err("The client date must be 8 digits, YYYYMMDD, such as 20220406.".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +121,17 @@ mod tests {
         assert!(check_account_field("x", "adm").is_err());
         assert!(check_account_field("x", "ad min").is_err());
         assert!(check_account_field("x", "a'; DROP").is_err());
+    }
+
+    #[test]
+    fn packetvers() {
+        assert!(check_packetver("20220406").is_ok());
+        assert!(check_packetver("20180620").is_ok());
+        assert!(check_packetver("2022046").is_err());
+        assert!(check_packetver("20221306").is_err());
+        assert!(check_packetver("20220400").is_err());
+        assert!(check_packetver("2022-4-6").is_err());
+        assert!(check_packetver("19990101").is_err());
     }
 
     #[test]

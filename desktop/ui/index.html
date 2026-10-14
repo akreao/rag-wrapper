@@ -59,6 +59,21 @@
         <p id="portal" hidden><a href="#" id="portal-link">Open the account portal</a></p>
         <p class="hint">Admin account: <span id="admin-name"></span></p>
       </section>
+      <form id="build-form" class="card">
+        <h2>Server build</h2>
+        <label>Client date (PACKETVER)
+          <input id="packetver" inputmode="numeric" required pattern="20[0-9]{6}" maxlength="8">
+        </label>
+        <label>Game mode
+          <select id="mode">
+            <option value="re">Renewal</option>
+            <option value="pre">Pre-renewal</option>
+          </select>
+        </label>
+        <p class="hint">Must match your game client. Saving a change rebuilds the server, which takes 5 to 10 minutes.</p>
+        <p id="build-error" class="error" hidden></p>
+        <button id="build-save" type="submit">Save and rebuild</button>
+      </form>
     </aside>
     <section class="card logs">
       <div class="tabs">

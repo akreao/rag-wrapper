@@ -35,7 +35,8 @@
     ],
     "resources": {
       "../../compose.yaml": "stack/compose.yaml",
-      "../../docker/": "stack/docker/"
+      "../../docker/": "stack/docker/",
+      "../../portal/": "stack/portal/"
     },
     "category": "Game"
   }

@@ -96,7 +96,12 @@ function describe(s) {
   return ["busy", s.state];
 }
 
+// `docker compose config --services` doesn't keep a stable order.
+const ORDER = Object.keys(LABELS);
+const rank = (name) => (ORDER.includes(name) ? ORDER.indexOf(name) : ORDER.length);
+
 function renderServices(list) {
+  list = [...list].sort((a, b) => rank(a.service) - rank(b.service));
   lastServices = list;
   const ul = $("services");
   ul.replaceChildren(
@@ -168,13 +173,17 @@ async function refreshOverview() {
     fillAddresses($("ip"), overview.public_ip, overview.public_ip_auto);
     $("connect-addr").textContent = `${overview.public_ip}:6900`;
     $("admin-name").textContent = overview.admin_user;
+    if (!buildFormDirty) {
+      $("packetver").value = overview.packetver;
+      $("mode").value = overview.prere ? "pre" : "re";
+    }
   }
   updateButtons();
 }
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build"]) $(id).disabled = !ready || !!task;
+  for (const id of ["start", "stop", "build", "build-save"]) $(id).disabled = !ready || !!task;
   $("cancel").hidden = task !== "build" && task !== "start";
 }
 
@@ -211,6 +220,34 @@ $("ip").addEventListener("change", async () => {
     banner(String(err));
   }
   await refreshOverview();
+});
+
+let buildFormDirty = false;
+let restartAfterBuild = false;
+$("packetver").addEventListener("input", () => (buildFormDirty = true));
+$("mode").addEventListener("change", () => (buildFormDirty = true));
+
+$("build-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const error = $("build-error");
+  error.hidden = true;
+  let changed;
+  try {
+    changed = await invoke("save_build_settings", {
+      packetver: $("packetver").value,
+      prere: $("mode").value === "pre",
+    });
+  } catch (err) {
+    error.textContent = err;
+    error.hidden = false;
+    return;
+  }
+  buildFormDirty = false;
+  await refreshOverview();
+  if (!changed) return;
+  // A running server is restarted on the new build once it's ready.
+  restartAfterBuild = lastServices.some((s) => s.state === "running");
+  await runTask("build");
 });
 
 $("portal-link").addEventListener("click", (e) => {
@@ -254,6 +291,10 @@ listen("task", async ({ payload }) => {
     if (view === "activity") render();
     await refreshOverview();
     await refreshServices();
+    if (payload.kind === "build" && restartAfterBuild) {
+      restartAfterBuild = false;
+      if (payload.ok) await runTask("start");
+    }
   }
 });
 
