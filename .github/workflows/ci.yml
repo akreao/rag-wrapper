@@ -43,13 +43,15 @@ jobs:
       - name: shellcheck
         run: shellcheck --severity=warning docker/rathena/entrypoint.sh
 
-  # Compiling rAthena is slow, so this only runs when the image or the
-  # version it builds (in .env.example) changes.
+  # Compiling rAthena (and the portal's Windows patcher) is slow, so these
+  # only build when the image or what it builds changes. The job keeps its
+  # old name, which main's branch settings require.
   rathena-changes:
     name: Detect rAthena image changes
     runs-on: ubuntu-24.04
     outputs:
       rathena: ${{ steps.filter.outputs.rathena }}
+      portal: ${{ steps.filter.outputs.portal }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -60,6 +62,9 @@ jobs:
               - 'docker/rathena/**'
               - '.env.example'
               - 'compose.yaml'
+              - '.github/workflows/ci.yml'
+            portal:
+              - 'portal/Dockerfile'
               - '.github/workflows/ci.yml'
 
   rathena:
@@ -73,6 +78,23 @@ jobs:
         run: |
           cp .env.example .env
           docker compose build db-init
+
+  # Builds the portal image, which cross-compiles the rpatchur patcher.
+  portal-image:
+    name: Portal image
+    needs: rathena-changes
+    if: needs.rathena-changes.outputs.portal == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the portal image
+        run: docker build -t rag-wrapper/portal portal
+      - name: The image holds the Windows patcher
+        run: |
+          docker create --name portal rag-wrapper/portal
+          docker cp portal:/patcher ./patcher
+          ls -l patcher
+          file patcher/rpatchur.exe | tee /dev/stderr | grep -q 'PE32+ executable (GUI) x86-64'
 
   # Compile checks only; packaged builds come with tagged releases.
   desktop:

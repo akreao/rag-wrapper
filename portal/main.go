@@ -55,6 +55,10 @@ func main() {
 		Address:   env("PUBLIC_IP", "127.0.0.1"),
 		PacketVer: env("PACKETVER", "20250716"),
 		Overrides: env("OVERRIDES_DIR", "/overrides"),
+		Patcher: patcherFiles{
+			Dir: env("PATCHES_DIR", "/patches"),
+			Exe: env("PATCHER_EXE", "/patcher/rpatchur.exe"),
+		},
 	}
 
 	app, err := newApp(&store{db: db}, adminGroup, conn)

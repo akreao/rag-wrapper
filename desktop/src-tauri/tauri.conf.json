@@ -37,7 +37,8 @@
       "../../compose.yaml": "stack/compose.yaml",
       "../../docker/": "stack/docker/",
       "../../portal/": "stack/portal/",
-      "../../overrides/README.md": "stack/overrides/README.md"
+      "../../overrides/README.md": "stack/overrides/README.md",
+      "../../patches/README.md": "stack/patches/README.md"
     },
     "category": "Game"
   }

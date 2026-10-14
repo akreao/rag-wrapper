@@ -1,0 +1,17 @@
+/* The client patcher's window. rpatchur shows it with Windows' old IE
+   engine: no CSS variables, grid or other newer CSS here. */
+body { margin: 0; padding: 20px 28px; background: #17181b; color: #ececee;
+  font: 15px/1.5 "Segoe UI", Tahoma, sans-serif; cursor: default; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 16px; }
+p { margin: 0 0 10px; }
+.muted { color: #9b9ca3; font-size: 13px; }
+.error { color: #f2a59c; }
+.bar { height: 10px; background: #34353b; border-radius: 5px; overflow: hidden; margin: 0 0 8px; }
+#progress { height: 10px; width: 0; background: #7ea2ff; }
+.buttons { margin-top: 18px; }
+button { font: inherit; font-weight: 600; padding: 8px 26px; margin-right: 8px; border: 0; border-radius: 6px;
+  background: #2b5fd9; color: #fff; cursor: pointer; }
+button.plain { background: #34353b; font-weight: 400; }
+button[disabled] { background: #34353b; color: #6b6b70; cursor: default; }
+.links { position: absolute; bottom: 14px; font-size: 13px; }
+.links a { color: #7ea2ff; margin-right: 16px; }

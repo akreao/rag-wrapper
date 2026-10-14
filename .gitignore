@@ -2,4 +2,6 @@
 /portal/portal
 /overrides/*
 !/overrides/README.md
+/patches/*
+!/patches/README.md
 /backups/
