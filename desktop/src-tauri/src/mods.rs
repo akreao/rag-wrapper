@@ -288,7 +288,8 @@ fn errors_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
         }
     };
     for raw in log.lines() {
-        let line = clean(raw);
+        // Progress messages are overwritten with \r; the last one stands.
+        let line = clean(raw.rsplit('\r').next().unwrap_or_default());
         if line.starts_with('[') {
             if !block.is_empty() && line.contains("Occurred in file") {
                 block.push(line);
@@ -428,6 +429,7 @@ mod tests {
     fn finds_errors_in_mod_files() {
         let log = "\
 Mod: shop
+[Status]: Loading 'mods/items/db/item_db.yml'...\r[Warning]: Database version 4 is outdated and should be updated. Current version is: 5
 [Warning]: mods/items/db/bogus.yml skipped: it isn't named after one of rAthena's databases in db/import
 [Status]: Loading '12' entries in 'mods/items/db/item_db.yml'
 [Error]: \x07
