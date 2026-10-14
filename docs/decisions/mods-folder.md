@@ -15,3 +15,7 @@ Roadmap feature 6, custom content: a server-side mods folder that the desktop ap
 - **Existing installs need a Rebuild before mods load.** The entrypoint is part of the rAthena image, so an image built before this change ignores `mods/`. New installs build it with the image.
 - **Checked against a real rAthena build** (the fork's `rag-wrapper` branch, pre-renewal, 20250716): an enabled mod's NPC loaded, its `item_db.yml` added an item and renamed Red Potion (in the map server and in the portal's item names), its `pre-re/mob_db.yml` loaded, and a broken mod's script and database errors were picked out of the map server's log under that mod.
 - **No fork change.** Everything is in the stack's entrypoint; rAthena's own YAML imports and script imports do the loading.
+
+Questions asked about the finished feature (PR #17), one at a time.
+
+- **The mods folder stays in the stack folder**, `~/.local/share/app.ragwrapper.desktop/stack/mods/`, beside `overrides/` and `patches/`, rather than in the app's data folder beside `client-files/`. Compose mounts it with a relative path, and the stack run without the app uses the same folder.
