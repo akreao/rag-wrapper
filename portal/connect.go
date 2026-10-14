@@ -16,6 +16,7 @@ import (
 type connectInfo struct {
 	Address   string // PUBLIC_IP: where the client is sent for login, char and map
 	PacketVer string // PACKETVER: the client date the server was built for
+	Renewal   bool   // PRERE=no: the server runs Renewal instead of Pre-Renewal
 	Overrides string // the stack's overrides/ folder, for the server name
 	Patcher   patcherFiles
 }
@@ -57,6 +58,15 @@ func (c connectInfo) Loopback() bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// Mode names the server's game mode the way WARPGATE's LANG tab does, so
+// players pick the matching English translation.
+func (c connectInfo) Mode() string {
+	if c.Renewal {
+		return "Renewal"
+	}
+	return "Pre-Renewal"
+}
+
 // ClientDate shows PACKETVER as a date, e.g. 20250716 as 2025-07-16.
 func (c connectInfo) ClientDate() string {
 	t, err := time.Parse("20060102", c.PacketVer)
@@ -71,7 +81,6 @@ func (c connectInfo) CharPort() int  { return charPort }
 func (c connectInfo) MapPort() int   { return mapPort }
 
 // clientInfo builds a clientinfo.xml that sends the client to this server.
-// sclientinfo.xml is the same file under the name Sakray clients look for.
 // It declares euc-kr like the stock file; the content is ASCII, since the
 // Settings screen only allows ASCII server names.
 // registerURL is the portal's sign-up page, which some clients open from
@@ -129,14 +138,12 @@ func (a *app) connect(req *request) error {
 	return nil
 }
 
-// clientInfoFile serves clientinfo.xml or sclientinfo.xml as a download.
-func (a *app) clientInfoFile(name string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-		w.Header().Set("Cache-Control", "no-store")
-		w.Write(a.conn.clientInfo("http://" + r.Host + "/register"))
-	}
+// clientInfoFile serves clientinfo.xml as a download.
+func (a *app) clientInfoFile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="clientinfo.xml"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(a.conn.clientInfo("http://" + r.Host + "/register"))
 }
 
 // PatcherZip and PatcherExe name the patcher download and the program in it.
