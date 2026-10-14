@@ -62,11 +62,14 @@ func TestConnectRoutes(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/connect", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "10.0.0.5") ||
-		!strings.Contains(rec.Body.String(), "2025-07-16") || !strings.Contains(rec.Body.String(), "WARPGATE") {
+		!strings.Contains(rec.Body.String(), "2025-07-16") || !strings.Contains(rec.Body.String(), "choose <em>Pre-Renewal</em>") {
 		t.Fatalf("GET /connect: %d\n%s", rec.Code, rec.Body)
 	}
 
-	for _, name := range []string{"clientinfo.xml", "sclientinfo.xml"} {
+	if rec := get(h, "/connect/sclientinfo.xml"); rec.Code != http.StatusNotFound {
+		t.Fatalf("sclientinfo.xml is still served: %d", rec.Code)
+	}
+	for _, name := range []string{"clientinfo.xml"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://10.0.0.5:8080/connect/"+name, nil))
 		body := rec.Body.String()
@@ -81,5 +84,16 @@ func TestConnectRoutes(t *testing.T) {
 func TestServerNameDefault(t *testing.T) {
 	if got := (connectInfo{Overrides: t.TempDir()}).ServerName(); got != "rAthena" {
 		t.Fatal(got)
+	}
+}
+
+func TestConnectRenewal(t *testing.T) {
+	a, err := newApp(nil, 99, connectInfo{Address: "10.0.0.5", PacketVer: "20250716", Renewal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := get(a.routes(), "/connect").Body.String(); !strings.Contains(body, "<dd>Renewal</dd>") ||
+		!strings.Contains(body, "choose <em>Renewal</em>") || strings.Contains(body, "Pre-Renewal") {
+		t.Fatalf("connect on a Renewal server:\n%s", body)
 	}
 }

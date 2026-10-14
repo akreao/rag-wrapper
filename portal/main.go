@@ -54,6 +54,7 @@ func main() {
 	conn := connectInfo{
 		Address:   env("PUBLIC_IP", "127.0.0.1"),
 		PacketVer: env("PACKETVER", "20250716"),
+		Renewal:   env("PRERE", "yes") == "no",
 		Overrides: env("OVERRIDES_DIR", "/overrides"),
 		Patcher: patcherFiles{
 			Dir: env("PATCHES_DIR", "/patches"),
