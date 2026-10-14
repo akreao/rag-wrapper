@@ -121,7 +121,7 @@ func TestPatcherRoutes(t *testing.T) {
 	}
 
 	rec = get(h, "/connect")
-	if body := rec.Body.String(); !strings.Contains(body, "Download the patcher") || !strings.Contains(body, "llchrisll") ||
+	if body := rec.Body.String(); !strings.Contains(body, "Download the patcher") || !strings.Contains(body, "<em>LANG</em>") ||
 		strings.Contains(body, "WARP0716") {
 		t.Fatalf("connect with a patch published:\n%s", body)
 	}
@@ -130,7 +130,7 @@ func TestPatcherRoutes(t *testing.T) {
 func TestConnectWithoutPatches(t *testing.T) {
 	h, _ := patcherSetup(t, "")
 	if body := get(h, "/connect").Body.String(); strings.Contains(body, "Download the patcher") || !strings.Contains(body, "WARP0716") ||
-		!strings.Contains(body, "llchrisll") {
+		!strings.Contains(body, "<em>LANG</em>") {
 		t.Fatalf("connect with nothing published:\n%s", body)
 	}
 	if rec := get(h, "/patcher/plist.txt"); rec.Code != http.StatusOK || rec.Body.Len() != 0 {
