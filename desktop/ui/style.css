@@ -86,7 +86,9 @@ main { flex: 1; min-height: 0; padding: 16px 20px; }
   align-items: start;
   overflow: auto;
 }
-#dashboard[hidden], #setup[hidden], #settings[hidden] { display: none; }
+#backups-page { overflow: auto; }
+#backups-page .card { max-width: 640px; }
+#dashboard[hidden], #setup[hidden], #settings[hidden], #backups-page[hidden] { display: none; }
 
 aside { display: flex; flex-direction: column; gap: 16px; overflow: auto; }
 
@@ -176,3 +178,18 @@ label[hidden] { display: none; }
 }
 .notice[hidden] { display: none; }
 .notice button { margin-left: 8px; }
+
+#backups { list-style: none; margin: 0; padding: 0; }
+#backups li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+#backups .what { font-size: 12px; }
+#backups button { padding: 3px 10px; font-size: 12px; }
+#backups .confirm { grid-column: 1 / -1; font-size: 12px; margin: 4px 0 0; }
+#backups .confirm button { margin: 6px 6px 0 0; }
+#no-backups[hidden], #backup-error[hidden] { display: none; }
