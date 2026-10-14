@@ -202,6 +202,7 @@ pub fn create(ctx: &Ctx, reason: Reason, spare: Option<&str>) -> Result<Option<S
 
 fn start_servers(ctx: &Ctx) -> Result<(), String> {
     ctx.line("Starting the server again…");
+    stack::check_ports(&ctx.dir)?;
     let mut up = ctx.compose();
     up.args(["--progress", "plain", "up", "--detach"]);
     ctx.run(up)
