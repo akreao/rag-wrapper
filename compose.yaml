@@ -6,7 +6,7 @@ x-rathena: &rathena
     context: docker/rathena
     args:
       RATHENA_REPO: ${RATHENA_REPO:-https://github.com/akreao/rathena.git}
-      RATHENA_REF: ${RATHENA_REF:-master}
+      RATHENA_COMMIT: ${RATHENA_COMMIT:-b6f89abe300d821412380a2004385532d0d4d9b6}
       PACKETVER: ${PACKETVER:-20220406}
       PRERE: ${PRERE:-no}
   image: rag-wrapper/rathena:${PACKETVER:-20220406}

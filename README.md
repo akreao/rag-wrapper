@@ -24,6 +24,6 @@ The first build compiles rAthena and takes several minutes. On first start, `db-
 Settings in `.env`:
 - `PUBLIC_IP` is the address the client is sent for the char and map servers. Keep `127.0.0.1` when the client runs on this machine; use the machine's LAN IP for other computers.
 - `PACKETVER` must match your client's date. Changing it needs a rebuild (`docker compose build`).
-- `RATHENA_REPO` and `RATHENA_REF` choose the rAthena source to build.
+- `RATHENA_COMMIT` is the rAthena commit to build, from the `rag-wrapper` branch of `akreao/rathena`. Change it to pick up server changes, then rebuild. `RATHENA_REPO` points at a different fork.
 
 `docker compose down` stops everything; the database lives in the `db-data` volume and survives restarts. `docker compose down -v` deletes it.

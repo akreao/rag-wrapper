@@ -7,7 +7,7 @@ Choices made while planning rag-wrapper, newest last. Each says what was decided
 - **Fresh app**, not built on Ragnarok Offline.
 - **Linux only** for now. Docker is an accepted requirement.
 - **Real game client**, no roBrowser. `PACKETVER` is 20220406 until the client's date is confirmed.
-- rAthena is built from `akreao/rathena` `master`.
+- rAthena is built from the `rag-wrapper` branch of `akreao/rathena` (see below).
 
 ## Who connects: LAN
 
@@ -65,3 +65,15 @@ A single Go binary serving plain server-rendered HTML, no JavaScript framework, 
 ## Desktop app: Tauri
 
 Tauri, as proposed in the first plan and not changed since. It drives `docker compose` for start, stop, status, logs and builds, and runs the first-run admin setup.
+
+# Docker stack review
+
+Questions asked after the Docker stack (PR #1) merged.
+
+## rAthena source: a pinned commit on the fork's `rag-wrapper` branch
+
+The image builds one exact commit, `RATHENA_COMMIT` in `.env`, from the `rag-wrapper` branch of `akreao/rathena`. That branch started from the fork's `master` and is where server changes for this app get committed.
+
+- Builds are repeatable: the same `.env` always builds the same server.
+- Picking up a server change means committing it to `rag-wrapper`, then moving `RATHENA_COMMIT` to that commit and rebuilding.
+- The Dockerfile fetches the commit by SHA, so it must be a full 40-character SHA.
