@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rag-wrapper</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>rag-wrapper</h1>
+    <span id="docker" class="muted"></span>
+    <div class="actions">
+      <button id="start" class="primary">Start server</button>
+      <button id="stop">Stop</button>
+      <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
+      <button id="cancel" hidden>Cancel</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="setup" hidden>
+    <form id="setup-form" class="card narrow">
+      <h2>Set up your server</h2>
+      <p class="muted">Choose the admin account. It is created with full GM rights the first time the server starts. Players make their own accounts in the web portal.</p>
+      <label>Admin username
+        <input id="admin-user" autocomplete="off" required minlength="4" maxlength="23" pattern="[A-Za-z0-9_]+">
+      </label>
+      <label>Password
+        <input id="admin-pass" type="password" required minlength="4" maxlength="23" pattern="[A-Za-z0-9_]+">
+      </label>
+      <label>Password again
+        <input id="admin-pass2" type="password" required>
+      </label>
+      <p class="hint">4 to 23 letters, digits or _.</p>
+      <label>Address players connect to
+        <select id="setup-ip"></select>
+      </label>
+      <p id="setup-error" class="error" hidden></p>
+      <button class="primary" type="submit">Save</button>
+    </form>
+  </main>
+
+  <main id="dashboard" hidden>
+    <aside>
+      <section class="card">
+        <h2>Services</h2>
+        <ul id="services"></ul>
+      </section>
+      <section class="card">
+        <h2>Connecting</h2>
+        <p>Point the client's <code>clientinfo.xml</code> at <strong id="connect-addr"></strong>.</p>
+        <label>Address players connect to
+          <select id="ip"></select>
+        </label>
+        <p class="hint">A change takes effect on the next Start.</p>
+        <p id="portal" hidden><a href="#" id="portal-link">Open the account portal</a></p>
+        <p class="hint">Admin account: <span id="admin-name"></span></p>
+      </section>
+      <form id="build-form" class="card">
+        <h2>Server build</h2>
+        <label>Client date (PACKETVER)
+          <input id="packetver" inputmode="numeric" required pattern="20[0-9]{6}" maxlength="8">
+        </label>
+        <label>Game mode
+          <select id="mode">
+            <option value="re">Renewal</option>
+            <option value="pre">Pre-renewal</option>
+          </select>
+        </label>
+        <p class="hint">Must match your game client. Saving a change rebuilds the server, which takes 5 to 10 minutes.</p>
+        <p id="build-error" class="error" hidden></p>
+        <button id="build-save" type="submit">Save and rebuild</button>
+      </form>
+    </aside>
+    <section class="card logs">
+      <div class="tabs">
+        <button id="tab-activity" class="tab active">Activity</button>
+        <span id="log-title" class="muted"></span>
+        <div id="progress" hidden><div id="progress-bar"></div></div>
+        <span id="progress-text" class="muted"></span>
+      </div>
+      <pre id="log"></pre>
+    </section>
+  </main>
+</body>
+</html>

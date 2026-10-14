@@ -1,0 +1,156 @@
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --text: #1d2330;
+  --muted: #667085;
+  --border: #d9dde5;
+  --accent: #2e4a8c;
+  --accent-text: #ffffff;
+  --ok: #2f9e5b;
+  --busy: #d99a1e;
+  --bad: #d14343;
+  --off: #a0a7b4;
+  --log-bg: #12161f;
+  --log-text: #d6dbe4;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171d;
+    --card: #1c2028;
+    --text: #e4e7ec;
+    --muted: #8d95a3;
+    --border: #2d333e;
+    --accent: #6f8fdc;
+    --accent-text: #0e1320;
+    --log-bg: #0c0f14;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+h1 { font-size: 17px; margin: 0; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; }
+
+.actions { margin-left: auto; display: flex; gap: 8px; }
+
+button {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+
+.muted { color: var(--muted); }
+.hint { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
+.error { color: var(--bad); }
+
+.banner {
+  padding: 10px 20px;
+  background: color-mix(in srgb, var(--bad) 15%, var(--card));
+  border-bottom: 1px solid var(--bad);
+}
+
+main { flex: 1; min-height: 0; padding: 16px 20px; }
+#setup { overflow: auto; }
+#dashboard { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+#dashboard[hidden], #setup[hidden] { display: none; }
+
+aside { display: flex; flex-direction: column; gap: 16px; overflow: auto; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.card.narrow { max-width: 420px; margin: 24px auto; }
+.card p { margin: 0 0 10px; }
+
+label { display: block; margin-bottom: 10px; }
+input, select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+code { font-size: 12px; }
+a { color: var(--accent); }
+
+#services { list-style: none; margin: 0; padding: 0; }
+#services li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#services li:hover { background: var(--bg); }
+#services li.selected { background: color-mix(in srgb, var(--accent) 15%, var(--card)); }
+.state { font-size: 12px; }
+
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); }
+.dot.ok { background: var(--ok); }
+.dot.busy { background: var(--busy); }
+.dot.bad { background: var(--bad); }
+
+.logs { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; }
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tab { border: none; padding: 4px 10px; }
+.tab.active { background: var(--bg); font-weight: 600; }
+
+#progress { width: 160px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+#progress[hidden] { display: none; }
+#progress-bar { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+#progress-text { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+#log {
+  flex: 1;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--log-bg);
+  color: var(--log-text);
+  font: 12px/1.4 ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

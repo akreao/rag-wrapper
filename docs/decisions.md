@@ -118,4 +118,13 @@ Questions asked about the CI workflow (PR #5), one at a time.
 `.github/workflows/ci.yml` runs on every PR and every push to `main`: the portal's `gofmt`, `go vet` and `go test`; `docker compose config` and `shellcheck` on the entrypoint; and a build of the rAthena image, only when `docker/rathena/`, `.env.example`, `compose.yaml` or the workflow changes.
 
 - **CI must pass before a PR merges to `main`.** The checks are required in the branch settings, so a broken portal or a bad rAthena pin can't land by accident. A skipped rAthena image job counts as passed.
-- **The desktop app's CI job runs compile checks only.** Each PR runs `cargo check` and `clippy`; the AppImage is built only when a release is tagged. This job is added once the desktop app PR (#3) has merged.
+- **The desktop app's CI job runs compile checks only.** Each PR runs `cargo check` and `clippy`; the AppImage is built only when a release is tagged. The job arrived with the desktop app PR (#3) and also runs its unit tests.
+
+# Desktop app review
+
+Questions asked about the finished desktop app (PR #3), one at a time.
+
+- **The admin password is cleared from `.env` after the first start.** Setup writes `ADMIN_PASSWORD` so `db-init` can create the admin; once `db-init` has finished, the app blanks it so no plain-text copy stays on disk. `ADMIN_USER` stays. The admin changes their password in the portal like any player. If the database volume is deleted, put a password back in `ADMIN_PASSWORD` before the next start to recreate the admin.
+- **The server runs only while the app is open.** Closing the window cancels any build or start in progress, runs `docker compose down` (the database volume is kept) and exits, showing the shutdown while it runs. Players are disconnected when the app closes, and the server doesn't come back by itself after a reboot.
+- **A Settings panel sets the client date and renewal mode.** `PACKETVER` and pre-renewal/renewal are edited in the app instead of by hand in `.env`; saving a change rebuilds the rAthena image. Rates and other gameplay settings are not part of it.
+- **The LAN address is re-detected on every Start.** "Detect automatically" stays the default, so the server never advertises a stale address after the PC's IP changes; players still need the new address in `clientinfo.xml`, and a DHCP reservation on the router avoids that. A fixed address can be picked in the app's Connecting panel.
