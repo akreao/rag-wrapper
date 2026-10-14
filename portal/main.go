@@ -51,7 +51,12 @@ func main() {
 		}
 	}
 
-	app, err := newApp(&store{db: db}, adminGroup)
+	conn := connectInfo{
+		Address:   env("PUBLIC_IP", "127.0.0.1"),
+		PacketVer: env("PACKETVER", "20220406"),
+	}
+
+	app, err := newApp(&store{db: db}, adminGroup, conn)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -39,6 +39,7 @@ Players create and manage their accounts at `http://<server's LAN IP>:8080`. The
 
 - **Anyone on the LAN** can register (username, password, email, birthdate, sex), then log in to change their password, email and birthdate and see their characters. The game asks for the birthdate when deleting a character.
 - **Admins** (group 99, such as the first admin created on setup) also get an Admin page: search accounts, change an account's group (GM level), ban for a set time or until lifted, and set a new password for a player who forgot theirs. Changes apply at the player's next game login; a player already in game stays on until they log out.
+- **How to connect** (`/connect`, open to everyone) shows the server's address, ports and client date, offers `clientinfo.xml` and `sclientinfo.xml` downloads with `PUBLIC_IP` filled in, and walks players through patching a 2022 client with [WARP](https://github.com/Neo-Mind/WARP) so it reads them. The portal doesn't ship patched clients.
 - Passwords are stored as `MD5(password)`, matching `use_MD5_passwords: yes`. Portal sessions live in memory, so restarting the portal logs everyone out of it (not out of the game).
 
 The portal is a single Go program in `portal/`, with its pages built in. To work on it without Docker, point it at a database and run it:

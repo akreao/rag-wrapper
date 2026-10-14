@@ -23,6 +23,7 @@ type app struct {
 	sessions   *sessions
 	pages      map[string]*template.Template
 	adminGroup int
+	conn       connectInfo
 	loginFails *limiter
 	signups    *limiter
 }
@@ -51,14 +52,14 @@ func groupName(id int) string {
 	return "Group " + strconv.Itoa(id)
 }
 
-func newApp(st *store, adminGroup int) (*app, error) {
+func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 	funcs := template.FuncMap{
 		"groupName": groupName,
 		"groups":    func() any { return groups },
 		"date":      func(t time.Time) string { return t.Format("2006-01-02 15:04 MST") },
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "error"} {
+	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "connect", "error"} {
 		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
@@ -70,6 +71,7 @@ func newApp(st *store, adminGroup int) (*app, error) {
 		sessions:   newSessions(),
 		pages:      pages,
 		adminGroup: adminGroup,
+		conn:       conn,
 		loginFails: newLimiter(10, 15*time.Minute),
 		signups:    newLimiter(5, time.Hour),
 	}, nil
@@ -81,6 +83,9 @@ func (a *app) routes() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /{$}", a.home)
+	mux.HandleFunc("GET /connect", a.page(a.connect))
+	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile("clientinfo.xml"))
+	mux.HandleFunc("GET /connect/sclientinfo.xml", a.clientInfoFile("sclientinfo.xml"))
 	mux.HandleFunc("GET /login", a.page(a.loginForm))
 	mux.HandleFunc("POST /login", a.page(a.login))
 	mux.HandleFunc("POST /logout", a.page(a.logout))
@@ -338,7 +343,7 @@ func (a *app) register(req *request) error {
 
 	a.sessions.end(req.w, req.sess)
 	req.sess = a.sessions.start(req.w, id, loginTTL)
-	return a.redirect(req, "/account", "Your account is ready. Log in to the game with the same username and password.")
+	return a.redirect(req, "/account", "Your account is ready. Log in to the game with the same username and password; see How to connect to set up your client.")
 }
 
 // --- The player's own account ---
