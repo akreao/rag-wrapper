@@ -9,3 +9,7 @@ Roadmap feature 10's last piece, in the desktop app: the "Publish client patch" 
 - **The patches are written by the app itself.** rpatchur's `mkpatch` has no releases and would mean another Rust build; the THOR format is small, so the app writes it the way rpatchur's own writer (`gruf`) does, with the `data.integrity` checksums the patcher checks.
 - **Publishing waits for files that can't be handed out as they are**: no `rag-wrapper.exe` (the portal switches players to the patcher after the first patch, and its Play button starts that exe, so the first patch must carry it), another `.exe`, a `.grf` or `DATA.INI` in the folder, or a name the client can't read. Names outside `data/` must be ASCII. Korean names under `data/` are written in the client's code page (CP949), whether they're spelled in Hangul or in the Latin letters GRF tools on Windows show.
 - **Not verified on Windows yet.** The format matches rpatchur's reader in the app's tests; the first real test is publishing the patched exe and running the patcher on a Windows PC.
+
+Questions asked about the finished button (PR #15), one at a time.
+
+- **Every patch overwrites `DATA.INI`.** Once a GRF has been published, each patch rewrites it with `rag-wrapper.grf` above `data.grf`, replacing llchrisll's copy and putting it back if a player reinstalls the translation later. Players never edit it by hand.
