@@ -13,3 +13,4 @@ Roadmap feature 10's last piece, in the desktop app: the "Publish client patch" 
 Questions asked about the finished button (PR #15), one at a time.
 
 - **Every patch overwrites `DATA.INI`.** Once a GRF has been published, each patch rewrites it with `rag-wrapper.grf` above `data.grf`, replacing llchrisll's copy and putting it back if a player reinstalls the translation later. Players never edit it by hand.
+- **Files deleted from the folder are deleted from the players' clients.** Players' clients stay a copy of the client-files folder, so a dropped or renamed file doesn't linger. The screen lists each removal before publishing.
