@@ -44,9 +44,10 @@ jobs:
         run: shellcheck --severity=warning docker/rathena/entrypoint.sh
 
   # Compiling rAthena (and the portal's Windows patcher) is slow, so these
-  # only build when the image or what it builds changes.
+  # only build when the image or what it builds changes. The job keeps its
+  # old name, which main's branch settings require.
   rathena-changes:
-    name: Detect image changes
+    name: Detect rAthena image changes
     runs-on: ubuntu-24.04
     outputs:
       rathena: ${{ steps.filter.outputs.rathena }}
