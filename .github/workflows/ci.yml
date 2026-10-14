@@ -1,0 +1,75 @@
+# Checks every pull request and every push to main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portal:
+    name: Portal (Go)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: portal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: portal/go.mod
+          cache-dependency-path: portal/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - run: go vet ./...
+      - run: go test ./...
+
+  stack:
+    name: Compose stack
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: compose.yaml and .env.example
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: shellcheck
+        run: shellcheck --severity=warning docker/rathena/entrypoint.sh
+
+  # Compiling rAthena is slow, so this only runs when the image or the
+  # version it builds (in .env.example) changes.
+  rathena-changes:
+    name: Detect rAthena image changes
+    runs-on: ubuntu-24.04
+    outputs:
+      rathena: ${{ steps.filter.outputs.rathena }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rathena:
+              - 'docker/rathena/**'
+              - '.env.example'
+              - 'compose.yaml'
+              - '.github/workflows/ci.yml'
+
+  rathena:
+    name: rAthena image
+    needs: rathena-changes
+    if: needs.rathena-changes.outputs.rathena == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image at the version in .env.example
+        run: |
+          cp .env.example .env
+          docker compose build db-init
