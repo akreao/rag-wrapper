@@ -112,7 +112,7 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The patcher isn't in this portal's image. Rebuild the portal with docker compose build portal.", http.StatusNotFound)
 		return
 	}
-	base := "http://" + r.Host
+	base := a.conn.BaseURL(r)
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	add := func(name string, data []byte) error {
@@ -184,7 +184,7 @@ func (a *app) patchFile(w http.ResponseWriter, r *http.Request) {
 // old IE engine, so the page and its script stay plain (no CSS variables,
 // no modern JavaScript).
 func (a *app) patcherPage(w http.ResponseWriter, r *http.Request) {
-	base := "http://" + r.Host
+	base := a.conn.BaseURL(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-UA-Compatible", "IE=edge")

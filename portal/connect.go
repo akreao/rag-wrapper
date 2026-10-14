@@ -58,6 +58,27 @@ func (c connectInfo) Loopback() bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// BaseURL is the portal's address for links that leave this browser, such
+// as the patcher's config and clientinfo.xml's registration link. It's the
+// address the request came in on, unless that is this machine (the server
+// owner downloading on the server itself): then it's PUBLIC_IP, with the
+// same port, so the files work on players' PCs.
+func (c connectInfo) BaseURL(r *http.Request) string {
+	host, port, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		host, port = r.Host, ""
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if (strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())) && !c.Loopback() {
+		host = c.Address
+		if port != "" {
+			host = net.JoinHostPort(host, port)
+		}
+		return "http://" + host
+	}
+	return "http://" + r.Host
+}
+
 // Mode names the server's game mode the way WARPGATE's LANG tab does, so
 // players pick the matching English translation.
 func (c connectInfo) Mode() string {
@@ -143,7 +164,7 @@ func (a *app) clientInfoFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="clientinfo.xml"`)
 	w.Header().Set("Cache-Control", "no-store")
-	w.Write(a.conn.clientInfo("http://" + r.Host + "/register"))
+	w.Write(a.conn.clientInfo(a.conn.BaseURL(r) + "/register"))
 }
 
 // PatcherZip and PatcherExe name the patcher download and the program in it.
