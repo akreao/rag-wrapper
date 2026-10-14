@@ -1,0 +1,83 @@
+# MariaDB plus rAthena's login, char, map and web servers.
+# Settings come from .env (copy .env.example to start).
+
+x-rathena: &rathena
+  build:
+    context: docker/rathena
+    args:
+      RATHENA_REPO: ${RATHENA_REPO:-https://github.com/akreao/rathena.git}
+      RATHENA_REF: ${RATHENA_REF:-master}
+      PACKETVER: ${PACKETVER:-20220406}
+      PRERE: ${PRERE:-no}
+  image: rag-wrapper/rathena:${PACKETVER:-20220406}
+  restart: unless-stopped
+  environment:
+    DB_HOST: db
+    DB_NAME: ragnarok
+    DB_USER: ragnarok
+    DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    INTER_USER: ${INTER_USER:?set INTER_USER in .env}
+    INTER_PASSWORD: ${INTER_PASSWORD:?set INTER_PASSWORD in .env}
+    PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
+
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ragnarok
+      MARIADB_USER: ragnarok
+      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  db-init:
+    <<: *rathena
+    command: init
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  login:
+    <<: *rathena
+    command: login
+    ports:
+      - "6900:6900"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
+  char:
+    <<: *rathena
+    command: char
+    ports:
+      - "6121:6121"
+    depends_on:
+      - login
+
+  map:
+    <<: *rathena
+    command: map
+    ports:
+      - "5121:5121"
+    depends_on:
+      - char
+
+  web:
+    <<: *rathena
+    command: web
+    ports:
+      - "8888:8888"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
+volumes:
+  db-data:
