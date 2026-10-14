@@ -1,0 +1,28 @@
+{{define "content"}}<h1>Accounts</h1>
+<form method="get" action="/admin" class="search">
+  <input name="q" value="{{.Data.Query}}" placeholder="Username or email">
+  <button>Search</button>
+</form>
+{{with .Data.Accounts}}
+<table>
+  <thead><tr><th>#</th><th>Username</th><th>Email</th><th>Group</th><th>Status</th><th>Last login</th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td>{{.ID}}</td>
+    <td><a href="/admin/accounts/{{.ID}}">{{.UserID}}</a></td>
+    <td>{{.Email}}</td>
+    <td>{{groupName .GroupID}}</td>
+    <td>{{template "status" .}}</td>
+    <td>{{if .LastLogin}}{{.LastLogin}}{{else}}Never{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No accounts found.</p>
+{{end}}
+<p class="pager">
+  {{with .Data.PrevURL}}<a href="{{.}}">Previous</a>{{end}}
+  {{with .Data.NextURL}}<a href="{{.}}">Next</a>{{end}}
+</p>{{end}}
+
+{{define "status"}}{{if .Blocked}}<span class="tag bad">Blocked</span>{{else if .Banned}}<span class="tag bad">Banned until {{date .BannedUntil}}</span>{{else}}OK{{end}}{{end}}

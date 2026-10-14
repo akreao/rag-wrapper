@@ -1,0 +1,29 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Ragnarok accounts</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="/">Ragnarok accounts</a>
+  <nav>
+  {{if .Account}}
+    <a href="/account">{{.Account.UserID}}</a>
+    {{if .IsAdmin}}<a href="/admin">Admin</a>{{end}}
+    <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">Log out</button></form>
+  {{else}}
+    <a href="/login">Log in</a>
+    <a href="/register">Create account</a>
+  {{end}}
+  </nav>
+</header>
+<main>
+  {{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+  {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+  {{template "content" .}}
+</main>
+</body>
+</html>{{end}}

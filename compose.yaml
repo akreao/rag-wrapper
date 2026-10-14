@@ -1,4 +1,4 @@
-# MariaDB plus rAthena's login, char, map and web servers.
+# MariaDB, rAthena's login, char, map and web servers, and the account portal.
 # Settings come from .env (copy .env.example to start).
 
 # Every rAthena service runs the same image. Only db-init has `build:`,
@@ -82,6 +82,22 @@ services:
     command: web
     ports:
       - "8888:8888"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
+  # Account registration and management for players and admins.
+  portal:
+    build: portal
+    image: rag-wrapper/portal
+    restart: on-failure
+    environment:
+      DB_HOST: db
+      DB_NAME: ragnarok
+      DB_USER: ragnarok
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    ports:
+      - "${PORTAL_PORT:-8080}:8080"
     depends_on:
       db-init:
         condition: service_completed_successfully
