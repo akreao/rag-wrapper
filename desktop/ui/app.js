@@ -113,13 +113,6 @@ function renderServices(list) {
       li.innerHTML = `<span class="dot ${kind}"></span><span class="name"></span><span class="state muted"></span>`;
       li.querySelector(".name").textContent = LABELS[s.service] || s.service;
       li.querySelector(".state").textContent = text + (s.ports.length ? ` · ${s.ports.join(", ")}` : "");
-      const usage = lastLive?.usage.find((u) => u.service === s.service);
-      if (usage && s.state === "running") {
-        const line = document.createElement("span");
-        line.className = "usage muted";
-        line.textContent = `CPU ${percent(usage.cpu)} · ${size(usage.memory)}`;
-        li.append(line);
-      }
       li.addEventListener("click", () => showView(s.service));
       return li;
     }),
@@ -141,7 +134,6 @@ async function refreshServices() {
 
 // ---- Live view: who's online, uptime, CPU and memory ----
 
-let lastLive = null;
 let liveBusy = false;
 
 const percent = (n) => `${n < 10 ? n.toFixed(1) : Math.round(n)}%`;
@@ -156,17 +148,24 @@ function duration(secs) {
   return `${m} min`;
 }
 
+function row(cells) {
+  const tr = document.createElement("tr");
+  for (const [text, num] of cells) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (num) td.className = "num";
+    tr.append(td);
+  }
+  return tr;
+}
+
 function renderLive(live) {
-  lastLive = live;
   const players = live.players || [];
+  const cpu = live.usage.reduce((t, u) => t + u.cpu, 0);
+  const mem = live.usage.reduce((t, u) => t + u.memory, 0);
   const parts = [];
   if (live.players) parts.push(players.length === 1 ? "1 player" : `${players.length} players`);
   if (live.uptime != null) parts.push(`up ${duration(live.uptime)}`);
-  if (live.usage.length) {
-    const cpu = live.usage.reduce((t, u) => t + u.cpu, 0);
-    const mem = live.usage.reduce((t, u) => t + u.memory, 0);
-    parts.push(`CPU ${percent(cpu)}`, `${size(mem)} in use`);
-  }
   $("online-summary").textContent = parts.join(" · ");
 
   $("players").hidden = players.length === 0;
@@ -177,23 +176,21 @@ function renderLive(live) {
       ? "Players show here once the char server is up."
       : "The server is off.";
   $("players").tBodies[0].replaceChildren(
-    ...players.map((p) => {
-      const tr = document.createElement("tr");
-      for (const [text, num] of [[p.name], [p.class], [p.base_level, true], [p.job_level, true], [p.map]]) {
-        const td = document.createElement("td");
-        td.textContent = text;
-        if (num) td.className = "num";
-        tr.append(td);
-      }
-      return tr;
-    }),
+    ...players.map((p) => row([[p.name], [p.class], [p.base_level, true], [p.job_level, true], [p.map]])),
   );
-  renderServices(lastServices);
+
+  const usage = [...live.usage].sort((a, b) => rank(a.service) - rank(b.service));
+  $("usage").hidden = usage.length === 0;
+  $("no-usage").hidden = usage.length > 0;
+  $("usage").tBodies[0].replaceChildren(
+    ...usage.map((u) => row([[LABELS[u.service] || u.service], [percent(u.cpu), true], [size(u.memory), true]])),
+  );
+  $("usage").tFoot.replaceChildren(row([["Total"], [percent(cpu), true], [size(mem), true]]));
 }
 
-// Only while the main screen is showing; `docker stats` isn't free.
+// Only while the Dashboard page is showing; `docker stats` isn't free.
 async function refreshLive() {
-  if (!overview?.configured || overview.docker_error || page !== "dashboard" || document.hidden || liveBusy) return;
+  if (!overview?.configured || overview.docker_error || page !== "live" || document.hidden || liveBusy) return;
   liveBusy = true;
   try {
     renderLive(await invoke("live"));
@@ -240,6 +237,7 @@ async function refreshOverview() {
   $("setup").hidden = overview.configured;
   $("nav").hidden = !overview.configured;
   $("nav-backups").hidden = !overview.configured;
+  $("nav-live").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
     fillAddresses($("setup-ip"), null, true);
@@ -259,7 +257,7 @@ function updateButtons() {
   $("cancel").hidden = !["build", "start", "restart"].includes(task);
 }
 
-// ---- Pages: the dashboard, Settings and Backups ----
+// ---- Pages: the main screen, Dashboard, Settings and Backups ----
 
 let page = "dashboard";
 
@@ -268,9 +266,11 @@ function showPage(next) {
   $("dashboard").hidden = next !== "dashboard";
   $("settings").hidden = next !== "settings";
   $("backups-page").hidden = next !== "backups";
+  $("live-page").hidden = next !== "live";
   $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
   $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
-  if (next === "dashboard") refreshLive();
+  $("nav-live").textContent = page === "live" ? "Back to server" : "Dashboard";
+  if (next === "live") refreshLive();
 }
 
 $("nav").addEventListener("click", async () => {
@@ -280,6 +280,8 @@ $("nav").addEventListener("click", async () => {
   await loadGameSettings();
   showPage("settings");
 });
+
+$("nav-live").addEventListener("click", () => showPage(page === "live" ? "dashboard" : "live"));
 
 $("nav-backups").addEventListener("click", async () => {
   if (page === "backups") return showPage("dashboard");

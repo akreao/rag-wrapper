@@ -159,6 +159,6 @@ Questions asked about database backup and restore (PR #9), one at a time.
 
 The main screen's live view (roadmap feature 4): who's online, uptime, and each container's CPU and memory, in the desktop app only.
 
-- **It sits on the main screen, not a page of its own.** An Online card above the Activity log lists the characters in game; CPU and memory show under each service in the Services list. The roadmap called it a dashboard, and the main screen already is one.
+- **The live view has its own page.** A Dashboard button in the header, beside Settings and Backups, opens it: the characters online, then each container's CPU and memory. The main screen stays as it was, with Services and the Activity log. It only refreshes while the page is open, so `docker stats` doesn't run in the background.
 - **Uptime is the map server's.** Players can play once the map server is up, and Restart game servers resets it.
 - **CPU is a share of the whole machine.** `docker stats` counts percent of one core, which reads as 200% on a busy multi-core PC; the app divides by the number of cores so 100% means the whole machine.

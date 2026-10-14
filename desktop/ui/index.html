@@ -12,6 +12,7 @@
     <h1>rag-wrapper</h1>
     <span id="docker" class="muted"></span>
     <div class="actions">
+      <button id="nav-live" hidden>Dashboard</button>
       <button id="nav" hidden>Settings</button>
       <button id="nav-backups" hidden>Backups</button>
       <button id="start" class="primary">Start server</button>
@@ -62,20 +63,6 @@
         <p class="hint">Admin account: <span id="admin-name"></span></p>
       </section>
     </aside>
-    <div class="column">
-    <section class="card online">
-      <div class="online-head">
-        <h2>Online</h2>
-        <span id="online-summary" class="muted"></span>
-      </div>
-      <div class="players">
-        <table id="players" hidden>
-          <thead><tr><th>Character</th><th>Class</th><th class="num">Base</th><th class="num">Job</th><th>Map</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <p id="no-players" class="hint">The server is off.</p>
-      </div>
-    </section>
     <section class="card logs">
       <div class="tabs">
         <button id="tab-activity" class="tab active">Activity</button>
@@ -85,7 +72,6 @@
       </div>
       <pre id="log"></pre>
     </section>
-    </div>
   </main>
 
   <main id="settings" hidden>
@@ -163,6 +149,30 @@
       <p id="build-error" class="error" hidden></p>
       <button id="build-save" type="submit">Save and rebuild</button>
     </form>
+  </main>
+
+  <main id="live-page" hidden>
+    <section class="card">
+      <div class="online-head">
+        <h2>Online</h2>
+        <span id="online-summary" class="muted"></span>
+      </div>
+      <table id="players" class="table" hidden>
+        <thead><tr><th>Character</th><th>Class</th><th class="num">Base</th><th class="num">Job</th><th>Map</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="no-players" class="hint">The server is off.</p>
+    </section>
+    <section class="card">
+      <h2>Resources</h2>
+      <table id="usage" class="table" hidden>
+        <thead><tr><th>Service</th><th class="num">CPU</th><th class="num">Memory</th></tr></thead>
+        <tbody></tbody>
+        <tfoot></tfoot>
+      </table>
+      <p id="no-usage" class="hint">Nothing is running.</p>
+      <p class="hint">CPU is a share of the whole computer. Refreshes every 5 seconds while this page is open.</p>
+    </section>
   </main>
 
   <main id="backups-page" hidden>
