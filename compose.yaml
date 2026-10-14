@@ -14,7 +14,7 @@ x-rathena: &rathena
   volumes:
     - ./overrides:/rathena/conf/user:ro
     - ./mods:/rathena/mods:ro
-  environment:
+  environment: &rathena-env
     DB_HOST: db
     DB_NAME: ragnarok
     DB_USER: ragnarok
@@ -55,6 +55,10 @@ services:
         PRERE: ${PRERE:-yes}
     pull_policy: !reset null
     command: init
+    # Only db-init gets root: it makes each game mode's characters database.
+    environment:
+      <<: *rathena-env
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
     restart: "no"
     depends_on:
       db:
