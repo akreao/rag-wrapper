@@ -19,16 +19,25 @@ don't combine on their own, and this script handles them:
   combined jobs, loaded after the mods. The other cleared lists
   (RULES' "whole" ones) are rare and each mod sets them as a whole; two
   mods setting one differently is a clash.
+- The same drop added by more than one mod. A monster's Drops (and
+  MvpDrops) without an Index are added to its list, so two mods adding the
+  same item would give it twice, using two of its 10 drop slots and
+  rolling for it twice. Only the last mod's copy is kept: the earlier
+  mods' files load from copies in OUT_DIR with that drop commented out,
+  line for line, so errors still point at the right line. A different
+  Rate is a clash.
 
 Usage: merge_mods.py IMPORTS OUT_DIR
 
 IMPORTS lists the mods' files in load order, "<database file> <path>" per
 line, as entrypoint.sh builds it. Files written to OUT_DIR are added to
-IMPORTS, after the mods, so they load last. Problems are printed as
+IMPORTS, after the mods, so they load last, and the copies replace their
+originals in IMPORTS. Problems are printed as
 rAthena-style [Warning] lines with the files' paths.
 """
 
 import os
+import shutil
 import sys
 
 import yaml
@@ -54,6 +63,8 @@ except AttributeError:
 # A sequence not listed here whose sub-entries have a Level is matched by
 # Level (rAthena's per-level fields); any other is "whole".
 # "replace_maps" are maps rAthena clears before applying (item Jobs).
+# "one_copy" are appended lists where a sub-entry with the same value of
+# the given field, from more than one mod, is kept only once (the last).
 RULES = {
     "item_db.yml": {"key": ["Id"], "replace_maps": {"Jobs"}},
     "item_group_db.yml": {"key": ["Group"], "lists": {"SubGroups": ["SubGroup"], "SubGroups.List": ["Index"]}},
@@ -89,7 +100,7 @@ RULES = {
     "job_stats.yml": {"key": ["Jobs*"]},
     "statpoint.yml": {"key": ["Level"]},
     "captcha_db.yml": {"key": ["Id"]},
-    "mob_db.yml": {"key": ["Id"], "lists": {"Drops": ["Index"], "MvpDrops": ["Index"]}},
+    "mob_db.yml": {"key": ["Id"], "lists": {"Drops": ["Index"], "MvpDrops": ["Index"]}, "one_copy": {"Drops": "Item", "MvpDrops": "Item"}},
     "mob_avail.yml": {"key": ["Mob"]},
     "mob_summon.yml": {"key": ["Group"], "lists": {"Summon": ["Mob"]}},
     "mob_chat_db.yml": {"key": ["Id"]},
@@ -268,10 +279,14 @@ def load(path):
 def check(imports):
     """Reads the mods' files and reports clashes. Returns, per database
     file, the entries whose replace-maps more than one mod set, with each
-    mod's map in load order, for the fix-up files."""
+    mod's map in load order, for the fix-up files; and, per mod file, the
+    sub-entries a later mod adds again, to leave out."""
     # (file, entry key, path, label) -> [(mod path, node)]
     seen = {}
     maps = {}
+    # (file, entry key, list field, value) -> [(mod path, sub-entry node)]
+    copies = {}
+    removals = {}
     for file, path in imports:
         rule = RULES.get(file)
         try:
@@ -300,6 +315,26 @@ def check(imports):
                     node = child(entry, name)
                     if node is not None:
                         maps.setdefault(file, {}).setdefault((key, name), []).append((path, node))
+                for name, field in rule.get("one_copy", {}).items():
+                    added = child(entry, name)
+                    for e in added.value if isinstance(added, yaml.SequenceNode) else ():
+                        value = scalar(child(e, field))
+                        if not value or child(e, "Index") is not None:
+                            continue
+                        # Every earlier mod's copy goes; the same mod's stay.
+                        where = (file, key, name, norm(value))
+                        before = copies.get(where, [])
+                        copies[where] = [c for c in before if mod_of(c[0]) == mod_of(path)] + [(path, e)]
+                        for earlier, node in before:
+                            if mod_of(earlier) == mod_of(path):
+                                continue
+                            removals.setdefault(earlier, []).append(node)
+                            if not same(without(node, field), without(e, field)):
+                                warn(
+                                    f"Mod clash in {file}, {key}, {name} {value}: {earlier} line {node.start_mark.line + 1} "
+                                    f"adds {text(node)}, {path} line {e.start_mark.line + 1} adds {text(e)}; "
+                                    f"the one from mods/{mod_of(path)}/ is kept (later in load order)"
+                                )
 
     for (file, key, p, label), sets in seen.items():
         rule = RULES[file]
@@ -316,7 +351,37 @@ def check(imports):
         order = "earlier" if rule.get("first_wins") else "later"
         warn(f"Mod clash in {file}, {key}, {label}: {sources}; the value from mods/{used[0]}/ is used ({order} in load order)")
 
-    return {f: {k: v for k, v in m.items() if len({mod_of(p) for p, _ in v}) > 1} for f, m in maps.items()}
+    combined = {f: {k: v for k, v in m.items() if len({mod_of(p) for p, _ in v}) > 1} for f, m in maps.items()}
+    return combined, removals
+
+
+def without(node, field):
+    """A mapping node without one field."""
+    return yaml.MappingNode(node.tag, [(k, v) for k, v in node.value if k.value != field])
+
+
+def write_copies(removals, out_dir):
+    """Writes a copy of each mod file with the given sub-entries commented
+    out, keeping every line where it was. Returns {original: copy}."""
+    copies = {}
+    for path, nodes in removals.items():
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().split("\n")
+        for node in nodes:
+            first, end = node.start_mark.line, node.end_mark
+            # The entry ends where the next one starts, or at a line's end.
+            last = end.line if lines[end.line][: end.column].strip() else end.line - 1
+            # Only a block-style "- Item: ..." entry on lines of its own.
+            if node.flow_style or lines[first][: node.start_mark.column].strip() != "-":
+                continue
+            for i in range(first, last + 1):
+                lines[i] = "#" + lines[i]
+        target = os.path.join(out_dir, path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        copies[path] = target
+    return copies
 
 
 def mod_of(path):
@@ -373,11 +438,14 @@ def main(argv):
     imports_path, out_dir = argv[1], argv[2]
     with open(imports_path, encoding="utf-8") as f:
         imports = [tuple(line.rstrip("\n").split(" ", 1)) for line in f if " " in line]
-    os.makedirs(out_dir, exist_ok=True)
-    for name in os.listdir(out_dir):
-        os.remove(os.path.join(out_dir, name))
-    written = write_fixups(check(imports), out_dir)
-    with open(imports_path, "a", encoding="utf-8") as f:
+    shutil.rmtree(out_dir, ignore_errors=True)
+    os.makedirs(out_dir)
+    combined, removals = check(imports)
+    copies = write_copies(removals, out_dir)
+    written = write_fixups(combined, out_dir)
+    with open(imports_path, "w", encoding="utf-8") as f:
+        for file, path in imports:
+            f.write(f"{file} {copies.get(path, path)}\n")
         for file, target in written:
             f.write(f"{file} {target}\n")
     return 0

@@ -29,7 +29,7 @@ Changes apply when the game servers restart; no rebuild is needed. The database 
 
 ## When two mods change the same entry
 
-Their changes combine. rAthena applies a mod's entry as changes to what's already loaded, so fields one mod leaves out keep the other's value, and lists combine: a monster's `Drops` (without an `Index`) gain both mods' drops, keyed lists such as a skill tree's skills or an item group's sub-groups keep both mods' entries, and maps like an item's `Jobs` or `Flags` get both mods' keys.
+Their changes combine. rAthena applies a mod's entry as changes to what's already loaded, so fields one mod leaves out keep the other's value, and lists combine: a monster's `Drops` (without an `Index`) gain both mods' drops (a drop both add is kept once, from the later mod), keyed lists such as a skill tree's skills or an item group's sub-groups keep both mods' entries, and maps like an item's `Jobs` or `Flags` get both mods' keys.
 
 When both set the same value differently (an item's `Buy`, the drop at one `Drops` `Index`, the same job in `Jobs`), the mod later in `enabled.txt` wins, and the Mods screen lists the clash under both mods. `const.yml` is the exception: rAthena keeps a constant's first value. Clashes never stop the server.
 

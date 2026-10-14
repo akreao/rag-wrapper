@@ -365,11 +365,13 @@ fn errors_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
     found
 }
 
-/// The mod names in `mods/<name>/` paths in `text`.
+/// The mod names in `mods/<name>/` paths in `text`, including the copies
+/// `merge_mods.py` loads from `db/import/mods-merged/mods/<name>/`.
 fn mod_names(text: &str) -> impl Iterator<Item = &str> {
     text.match_indices("mods/").filter_map(move |(i, m)| {
         let before = text[..i].chars().next_back();
-        if before.is_some_and(|c| c.is_ascii_alphanumeric() || "._-/".contains(c)) {
+        let copy = text[..i].ends_with("/mods-merged/");
+        if !copy && before.is_some_and(|c| c.is_ascii_alphanumeric() || "._-/".contains(c)) {
             return None;
         }
         let rest = &text[i + m.len()..];
@@ -580,5 +582,7 @@ Mods enabled: a b c
     fn mod_names_in_paths() {
         let names: Vec<&str> = mod_names("in 'mods/a-b/x.txt' and npc/mods/c/ and mods/d and \"mods/bad name/\"").collect();
         assert_eq!(names, ["a-b", "bad name"]);
+        let names: Vec<&str> = mod_names("in 'db/import/mods-merged/mods/e/db/mob_db.yml'").collect();
+        assert_eq!(names, ["e"]);
     }
 }
