@@ -379,6 +379,7 @@ const REASONS = {
   manual: "Backed up by hand",
   rebuild: "Before a rebuild",
   "before-restore": "Before a restore",
+  daily: "Daily, on stop or close",
 };
 
 function size(bytes) {

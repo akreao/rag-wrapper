@@ -43,6 +43,8 @@ pub enum Reason {
     Manual,
     Rebuild,
     BeforeRestore,
+    /// On stop or close, when there's no backup from the last day.
+    Daily,
 }
 
 impl Reason {
@@ -51,6 +53,7 @@ impl Reason {
             Reason::Manual => "manual",
             Reason::Rebuild => "rebuild",
             Reason::BeforeRestore => "before-restore",
+            Reason::Daily => "daily",
         }
     }
 }
@@ -153,6 +156,28 @@ fn stop_db(ctx: &Ctx) {
 /// Dumps the database into a new backup, starting MariaDB for it if the
 /// server is stopped, then deletes the oldest beyond `KEEP`. Returns the
 /// file name, or `None` when there is no database yet.
+/// Backs up a running database when no backup of any kind was made in
+/// the last 24 hours. Used on stop and close, in place of a schedule.
+/// A failure is reported but doesn't stop the server from going down.
+pub fn daily(ctx: &Ctx) {
+    if !db_running(&ctx.dir) {
+        return;
+    }
+    let newest = list(&ctx.backups).into_iter().find_map(|b| {
+        chrono::NaiveDateTime::parse_from_str(&b.created, "%Y-%m-%d %H:%M:%S").ok()
+    });
+    if !due(newest, chrono::Local::now().naive_local()) {
+        return;
+    }
+    if let Err(e) = create(ctx, Reason::Daily, None) {
+        ctx.line(e);
+    }
+}
+
+fn due(newest: Option<chrono::NaiveDateTime>, now: chrono::NaiveDateTime) -> bool {
+    newest.is_none_or(|t| now - t >= chrono::TimeDelta::hours(24))
+}
+
 pub fn create(ctx: &Ctx, reason: Reason, spare: Option<&str>) -> Result<Option<String>, String> {
     if !stack::volume_exists("db-data") {
         ctx.line("There's no database yet, so there's nothing to back up.");
@@ -433,6 +458,15 @@ mod tests {
         assert!(!dir.join(file_name("20261002-120000", Reason::Manual)).exists());
         assert!(dir.join("notes.txt").exists());
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn daily_is_due_after_a_day() {
+        let at = |s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap();
+        let now = at("2026-10-15 12:00:00");
+        assert!(due(None, now));
+        assert!(!due(Some(at("2026-10-14 12:00:01")), now));
+        assert!(due(Some(at("2026-10-14 12:00:00")), now));
     }
 
     #[test]

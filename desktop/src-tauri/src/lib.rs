@@ -42,6 +42,10 @@ impl App {
     fn overrides_dir(&self) -> PathBuf {
         self.dir.join(stack::OVERRIDES)
     }
+
+    fn ctx(&self, handle: &AppHandle) -> Ctx {
+        Ctx { handle: handle.clone(), dir: self.dir.clone(), backups: self.backups.clone(), slot: self.task.clone() }
+    }
 }
 
 #[derive(Serialize)]
@@ -188,6 +192,8 @@ struct TaskEvent {
 enum Step {
     Compose(std::process::Command),
     Backup(backup::Reason),
+    /// A backup if there's none from the last day; never fails the task.
+    Daily,
     Restore(String),
 }
 
@@ -226,7 +232,7 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
         }
         "stop" => {
             cmd.arg("down");
-            vec![Step::Compose(cmd)]
+            vec![Step::Daily, Step::Compose(cmd)]
         }
         "backup" | "restore" => {
             app.env().ok_or("Finish setup first.")?;
@@ -254,18 +260,17 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
         },
     );
 
-    let ctx = Ctx {
-        handle: handle.clone(),
-        dir: app.dir.clone(),
-        backups: app.backups.clone(),
-        slot: app.task.clone(),
-    };
+    let ctx = app.ctx(&handle);
     std::thread::spawn(move || {
         let result = steps.into_iter().try_for_each(|step| {
             ctx.check_cancelled()?;
             match step {
                 Step::Compose(cmd) => ctx.run(cmd),
                 Step::Backup(reason) => backup::create(&ctx, reason, None).map(|_| ()),
+                Step::Daily => {
+                    backup::daily(&ctx);
+                    Ok(())
+                }
                 Step::Restore(file) => backup::restore(&ctx, &file),
             }
         });
@@ -431,8 +436,9 @@ pub fn run() {
 }
 
 /// The server only runs while the app is open: closing the window cancels
-/// any build or start (a backup or restore is left to finish), takes the
-/// stack down (the database volume is kept) and then exits.
+/// any build or start (a backup or restore is left to finish), backs up
+/// the database if there's no backup from the last day, takes the stack
+/// down (the database volume is kept) and then exits.
 fn stop_and_exit(handle: AppHandle) {
     let app = handle.state::<App>();
     if let Some(running) = app.task.lock().unwrap().as_mut() {
@@ -444,6 +450,7 @@ fn stop_and_exit(handle: AppHandle) {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
     if app.env_path().exists() {
+        backup::daily(&app.ctx(&handle));
         let mut cmd = stack::compose(&app.dir);
         cmd.arg("down");
         let lines = handle.clone();
