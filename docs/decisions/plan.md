@@ -23,7 +23,7 @@ The server is for this machine and others on the same local network, not the int
 The app builds the rAthena image on the user's machine with `docker compose build`, from `docker/rathena/Dockerfile`.
 
 - First start, and any change to `PACKETVER` or renewal mode, triggers a rebuild of roughly 5 to 10 minutes. The app shows build progress and logs while it runs.
-- No container registry or publishing CI is needed. Prebuilt images can be added once the client's `PACKETVER` is settled.
+- Since then: the app downloads prebuilt images from GHCR when one matches its settings and builds locally otherwise; see [prebuilt-images.md](prebuilt-images.md).
 
 ## Accounts: a slim web portal
 

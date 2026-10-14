@@ -38,6 +38,14 @@ pub const ENV_EXAMPLE: &str = include_str!("../../../.env.example");
 /// into `dest`, replacing older copies. `.env`, the user's override files,
 /// published patches and mods are never bundled, so they survive app updates.
 pub fn install(bundled: &Path, dest: &Path) -> std::io::Result<()> {
+    // The build folders are replaced whole, so a file an older version had
+    // doesn't end up in an image or change its prebuilt image's name.
+    for dir in ["docker", "portal"] {
+        match fs::remove_dir_all(dest.join(dir)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
     copy_dir(bundled, dest)?;
     fs::create_dir_all(dest.join(OVERRIDES))?;
     fs::create_dir_all(dest.join(PATCHES))?;
