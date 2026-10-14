@@ -9,3 +9,4 @@ When the desktop app tells the user a Rebuild is needed or recommended, after St
 - **A new portal gets its own restart.** After a Rebuild that changed only the portal, the restart bar says so and offers **Restart the portal**. It does the same full `up` as Restart on the new version, which only recreates containers whose image changed, so nobody in game is disconnected.
 - **The mods screen keeps its own Rebuild warning** for a server built before mods existed: that's read from the map server's log, not from the image records.
 - **Start never rebuilds on its own.** A local build takes 5 to 10 minutes, so the bar offers the Rebuild and the user clicks it (Steven, 2026-10-14).
+- **The bar can't be dismissed.** It shows only while something is really out of date, and a hidden reminder is how the 0.1.1 rebuild was forgotten (Steven, 2026-10-14).
