@@ -166,15 +166,36 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String) -> Result<(), Stri
     let _ = handle.emit("task", TaskEvent { kind: kind.clone(), running: true, ok: true });
 
     let task = app.task.clone();
+    let dir = app.dir.clone();
     std::thread::spawn(move || {
         let _ = done.join();
         let finished = task.lock().unwrap().take();
         let ok = finished
             .and_then(|(_, mut child)| child.wait().ok())
             .is_some_and(|s| s.success());
+        if ok && kind == "start" {
+            forget_admin_password(&dir);
+        }
         let _ = handle.emit("task", TaskEvent { kind, running: false, ok });
     });
     Ok(())
+}
+
+/// Once `db-init` has finished, the admin account exists and the password
+/// has no further use, so no plain-text copy is kept in `.env`.
+fn forget_admin_password(dir: &std::path::Path) {
+    let Ok(mut env) = EnvFile::load(&dir.join(".env")) else { return };
+    if env.get("ADMIN_PASSWORD").unwrap_or_default().is_empty() {
+        return;
+    }
+    let initialised = stack::status(dir)
+        .unwrap_or_default()
+        .iter()
+        .any(|s| s.service == "db-init" && s.state == "exited" && s.exit_code == 0);
+    if initialised {
+        env.set("ADMIN_PASSWORD", "");
+        let _ = env.save();
+    }
 }
 
 #[tauri::command]

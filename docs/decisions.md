@@ -65,3 +65,10 @@ A single Go binary serving plain server-rendered HTML, no JavaScript framework, 
 ## Desktop app: Tauri
 
 Tauri, as proposed in the first plan and not changed since. It drives `docker compose` for start, stop, status, logs and builds, and runs the first-run admin setup.
+
+## Admin password: cleared from `.env` after first start
+
+Setup writes `ADMIN_PASSWORD` to `.env` so `db-init` can create the admin. After the first start where `db-init` finishes, the desktop app blanks it, so no plain-text copy stays on disk. `ADMIN_USER` stays.
+
+- The admin changes their password in the web portal like any player.
+- If the database volume is deleted, the admin isn't recreated on its own: put a password back in `ADMIN_PASSWORD` before the next start.

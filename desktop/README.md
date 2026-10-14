@@ -3,7 +3,7 @@
 A Tauri app that runs the server: it drives `docker compose` on the stack in this repository. It has no account features beyond creating the first admin; players use the web portal.
 
 What it does:
-- **First run** asks for an admin username and password and the address players connect to, then writes `.env`: the admin as `ADMIN_USER`/`ADMIN_PASSWORD`, `PUBLIC_IP`, and random `DB_PASSWORD`, `DB_ROOT_PASSWORD` and `INTER_PASSWORD`. `db-init` creates the admin as a GM on the next start.
+- **First run** asks for an admin username and password and the address players connect to, then writes `.env`: the admin as `ADMIN_USER`/`ADMIN_PASSWORD`, `PUBLIC_IP`, and random `DB_PASSWORD`, `DB_ROOT_PASSWORD` and `INTER_PASSWORD`. `db-init` creates the admin as a GM on the next start, after which the app blanks `ADMIN_PASSWORD` so no plain-text copy stays on disk.
 - **Start** runs `docker compose up --detach`, which builds the rAthena image first if it's missing. The build's output streams into the Activity pane with a step counter.
 - **Stop** runs `docker compose down`. The database volume is kept.
 - **Rebuild** runs `docker compose build`, for after a `PACKETVER` change.
