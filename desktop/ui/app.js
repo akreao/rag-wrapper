@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "stop", "build", "update", "backup" or "restore" while one runs
+let task = null; // "start", "restart", "readdress", "stop", "build", "update", "backup" or "restore" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -208,23 +208,60 @@ function banner(text) {
   $("banner").textContent = text || "";
 }
 
+// ---- Address players connect to: the LAN, a VPN, or a typed one ----
+
+// What "Detect automatically" picks: never a VPN address.
+const detectedLan = () => overview.addresses.find((a) => !a.vpn)?.ip;
+const vpnOf = (ip) => overview.addresses.find((a) => a.ip === ip)?.vpn;
+
 function fillAddresses(select, current, auto) {
-  const detected = overview.addresses[0]?.ip;
-  const options = [
-    ["auto", `Detect automatically${detected ? ` (now ${detected})` : ""}`],
-    ...overview.addresses.map((a) => [a.ip, `${a.ip} (${a.interface})`]),
-    ["127.0.0.1", "127.0.0.1 (this computer only)"],
-  ];
-  if (current && !auto && !options.some(([v]) => v === current)) options.push([current, current]);
+  const option = (value, label) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = label;
+    return o;
+  };
+  const group = (label, options) => {
+    const g = document.createElement("optgroup");
+    g.label = label;
+    g.append(...options);
+    return g;
+  };
+  const detected = detectedLan();
+  const lan = overview.addresses.filter((a) => !a.vpn);
+  const vpn = overview.addresses.filter((a) => a.vpn);
+  const known = [...overview.addresses.map((a) => a.ip), "127.0.0.1"];
   select.replaceChildren(
-    ...options.map(([value, label]) => {
-      const o = document.createElement("option");
-      o.value = value;
-      o.textContent = label;
-      return o;
-    }),
+    option("auto", `Detect automatically${detected ? ` (now ${detected})` : ""}`),
+    ...(lan.length ? [group("Home network", lan.map((a) => option(a.ip, `${a.ip} (${a.interface})`)))] : []),
+    ...(vpn.length ? [group("VPN", vpn.map((a) => option(a.ip, `${a.ip} (${a.vpn})`)))] : []),
+    group("Other", [
+      option("127.0.0.1", "127.0.0.1 (this computer only)"),
+      ...(current && !auto && !known.includes(current) ? [option(current, `${current} (typed)`)] : []),
+      option("other", "Type an address…"),
+    ]),
   );
   select.value = auto || !current ? "auto" : current;
+}
+
+// The catch with one address for everyone: rAthena sends every player the
+// same char and map address, so it has to be one all of them can reach.
+function addressNote(value) {
+  const vpns = [...new Set(overview.addresses.filter((a) => a.vpn).map((a) => a.vpn))];
+  const vpn = vpnOf(value);
+  if (vpn)
+    return `Everyone connects through ${vpn} with this address, players at home too: the game sends every player the same address, so anyone not on ${vpn} can't get past the server list.`;
+  if (value === "127.0.0.1") return "Only the game client on this computer can connect.";
+  if (value === "other") return "The game sends every player this one address, so use one all of them can reach.";
+  if (vpns.length)
+    return `Friends on ${vpns.join(" or ")} can't connect with a home network address. Pick the ${vpns[0]} address to let them in; players at home then join ${vpns[0]} too.`;
+  return "";
+}
+
+function showNote(id, value) {
+  const note = addressNote(value);
+  $(id).textContent = note;
+  $(id).hidden = !note;
 }
 
 async function refreshOverview() {
@@ -240,9 +277,15 @@ async function refreshOverview() {
   $("nav-live").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
-    fillAddresses($("setup-ip"), null, true);
+    if ($("setup-ip").value !== "other") {
+      fillAddresses($("setup-ip"), null, true);
+      showNote("setup-ip-note", "auto");
+    }
   } else {
-    fillAddresses($("ip"), overview.public_ip, overview.public_ip_auto);
+    if (pendingIp === undefined && $("ip").value !== "other") {
+      fillAddresses($("ip"), overview.public_ip, overview.public_ip_auto);
+      showNote("ip-note", $("ip").value);
+    }
     $("connect-addr").textContent = `${overview.public_ip}:6900`;
     $("admin-name").textContent = overview.admin_user;
     if (!buildFormDirty) fillBuildForm();
@@ -291,9 +334,10 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update", "skip-update", "restart-new"]) $(id).disabled = !ready || !!task;
+  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update", "skip-update", "restart-new", "ip-yes"])
+    $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "update", "start", "restart"].includes(task);
+  $("cancel").hidden = !["build", "update", "start", "restart", "readdress"].includes(task);
 }
 
 // ---- Pages: the main screen, Dashboard, Settings and Backups ----
@@ -423,7 +467,8 @@ $("setup-form").addEventListener("submit", async (e) => {
     error.hidden = false;
     return;
   }
-  const ip = $("setup-ip").value;
+  const choice = $("setup-ip").value;
+  const ip = choice === "other" ? $("setup-ip-typed").value.trim() : choice;
   try {
     await invoke("setup", {
       adminUser: $("admin-user").value,
@@ -439,15 +484,77 @@ $("setup-form").addEventListener("submit", async (e) => {
   await refreshServices();
 });
 
-$("ip").addEventListener("change", async () => {
-  const ip = $("ip").value;
-  try {
-    await invoke("set_public_ip", { publicIp: ip === "auto" ? null : ip });
-  } catch (err) {
-    banner(String(err));
-  }
-  await refreshOverview();
+$("setup-ip").addEventListener("change", () => {
+  const other = $("setup-ip").value === "other";
+  $("setup-ip-other").hidden = !other;
+  if (other) $("setup-ip-typed").focus();
+  showNote("setup-ip-note", $("setup-ip").value);
 });
+
+// The address picked while the server runs, waiting for "Change and
+// restart": null for automatic, undefined when nothing is waiting.
+let pendingIp;
+
+function cancelAddress() {
+  pendingIp = undefined;
+  $("ip-confirm").hidden = true;
+  $("ip-other").hidden = true;
+  $("ip-typed").value = "";
+  fillAddresses($("ip"), overview.public_ip, overview.public_ip_auto);
+  showNote("ip-note", $("ip").value);
+}
+
+async function saveAddress(ip, restart) {
+  $("ip-error").hidden = true;
+  let changed = false;
+  try {
+    changed = await invoke("set_public_ip", { publicIp: ip });
+  } catch (err) {
+    $("ip-error").textContent = err;
+    $("ip-error").hidden = false;
+    return false;
+  }
+  pendingIp = undefined;
+  $("ip-confirm").hidden = true;
+  $("ip-other").hidden = true;
+  $("ip-typed").value = "";
+  await refreshOverview();
+  if (changed && restart) {
+    showPage("dashboard");
+    await runTask("readdress");
+  }
+  return true;
+}
+
+async function chooseAddress(ip) {
+  // A pinned address that's already the one in use needs no restart.
+  const same = (ip ?? detectedLan() ?? "127.0.0.1") === overview.public_ip;
+  if (!serverRunning() || same) return saveAddress(ip, false);
+  pendingIp = ip;
+  $("ip-error").hidden = true;
+  $("ip-confirm").hidden = false;
+}
+
+$("ip").addEventListener("change", () => {
+  const value = $("ip").value;
+  showNote("ip-note", value);
+  $("ip-confirm").hidden = true;
+  pendingIp = undefined;
+  $("ip-other").hidden = value !== "other";
+  if (value === "other") {
+    $("ip-typed").focus();
+    return;
+  }
+  chooseAddress(value === "auto" ? null : value);
+});
+
+$("ip-use").addEventListener("click", () => chooseAddress($("ip-typed").value.trim()));
+$("ip-typed").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") chooseAddress($("ip-typed").value.trim());
+  if (e.key === "Escape") cancelAddress();
+});
+$("ip-yes").addEventListener("click", () => saveAddress(pendingIp, true));
+$("ip-no").addEventListener("click", cancelAddress);
 
 let buildFormDirty = false;
 let restartAfterBuild = false;
@@ -597,7 +704,7 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore" }[
+    const verb = { start: "Start", restart: "Restart", readdress: "Address change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);
