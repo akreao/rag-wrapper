@@ -2,6 +2,7 @@ mod backup;
 mod clientpatch;
 mod envfile;
 mod host;
+mod images;
 mod jobs;
 mod live;
 mod menu;
@@ -269,6 +270,10 @@ enum Step {
     Restore(String),
     /// Moves `.env` to the update's commit.
     Pin(update::ServerUpdate),
+    /// Pulls the prebuilt images, building any that aren't published with the command.
+    Images(Vec<images::Image>, std::process::Command),
+    /// Pulls the prebuilt images that aren't here yet, before a start.
+    FetchMissing(Vec<images::Image>),
 }
 
 /// Runs `start`, `restart`, `readdress` (after the address changed), `stop`,
@@ -301,30 +306,31 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 let services: &[&str] = if kind == "readdress" { &stack::READDRESSED } else { &stack::GAME_SERVERS };
                 cmd.args(["--no-deps", "--force-recreate"]).args(services);
             }
+            // A first start downloads the images rather than building them.
+            let fetch = Step::FetchMissing(images::current(&app.dir, &app.env().ok_or("Finish setup first.")?));
             // A mod's database files can change items or monsters players
             // already have, so the database is backed up before they load.
             if mods::new_databases(&app.mods_dir()).is_empty() {
-                vec![Step::Compose(cmd)]
+                vec![fetch, Step::Compose(cmd)]
             } else {
-                vec![Step::Backup(backup::Reason::Mods), Step::Compose(cmd)]
+                vec![Step::Backup(backup::Reason::Mods), fetch, Step::Compose(cmd)]
             }
         }
         "build" => {
-            cmd.args(["--progress", "plain", "build"]);
+            let env = app.env().ok_or("Finish setup first.")?;
             // A new build can upgrade the database on its next start.
-            vec![Step::Backup(backup::Reason::Rebuild), Step::Compose(cmd)]
+            vec![Step::Backup(backup::Reason::Rebuild), Step::Images(images::current(&app.dir, &env), cmd)]
         }
         "update" => {
             let env = app.env().ok_or("Finish setup first.")?;
             let update = update::pending(&env).ok_or("The server is already on this version's rAthena.")?;
             // The new commit goes into `.env` only once its image has built,
             // so a failed or cancelled build leaves the update on offer.
-            cmd.env("RATHENA_REPO", &update.repo)
-                .env("RATHENA_COMMIT", &update.offered)
-                .args(["--progress", "plain", "build"]);
+            cmd.env("RATHENA_REPO", &update.repo).env("RATHENA_COMMIT", &update.offered);
+            let images = images::wanted(&app.dir, &env, &update.repo, &update.offered);
             // A running server stays on the old image until "Restart on the
             // new version" (or the next Start); players aren't dropped by surprise.
-            vec![Step::Backup(backup::Reason::Update), Step::Compose(cmd), Step::Pin(update)]
+            vec![Step::Backup(backup::Reason::Update), Step::Images(images, cmd), Step::Pin(update)]
         }
         "stop" => {
             cmd.arg("down");
@@ -362,6 +368,8 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             ctx.check_cancelled()?;
             match step {
                 Step::Compose(cmd) => ctx.run(cmd),
+                Step::Images(wanted, build) => images::fetch_or_build(&ctx, &wanted, build),
+                Step::FetchMissing(wanted) => images::fetch_missing(&ctx, &wanted),
                 Step::Backup(reason) => backup::create(&ctx, reason, None).map(|_| ()),
                 Step::Daily => {
                     backup::daily(&ctx);

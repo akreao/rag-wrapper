@@ -25,7 +25,7 @@ docker compose up -d --build
 docker compose logs -f login char map
 ```
 
-The first build compiles rAthena and takes several minutes. On first start, `db-init` creates the database and imports rAthena's schema; later starts skip the import.
+The first build compiles rAthena and takes several minutes. The desktop app downloads prebuilt images instead when they're published for its settings (`PREBUILT_IMAGES` in `.env`); `docker compose` on its own always builds. On first start, `db-init` creates the database and imports rAthena's schema; later starts skip the import.
 
 | Port | Server |
 |------|--------|
