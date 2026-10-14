@@ -97,7 +97,8 @@ CONF
 #   db/*.yml             db/import-style YAML, named like rAthena's
 #   db/pre-re/*.yml,     database files (item_db.yml, mob_db.yml, ...);
 #   db/re/*.yml          the pre-re/ or re/ ones only in that mode
-# Problems are logged with the file's path, which the app looks for.
+# Problems are logged with the file's path, which the app looks for, and
+# clashes between mods with both paths.
 enabled_mods() {
 	if [ ! -f mods/enabled.txt ]; then
 		return 0
@@ -155,6 +156,16 @@ apply_mods() {
 			printf '%s %s\n' "${file}" "${path}" >> "${imports}"
 		done
 	done
+
+	# rAthena applies each mod's entries as changes to what's loaded, so
+	# most lists (a monster's Drops, an item group's items) combine on
+	# their own. merge_mods.py warns where two mods set the same value
+	# (the later mod's is used) and writes db/import/mods-merged/ files,
+	# loaded last, for the fields rAthena would otherwise reset (an item's
+	# Jobs). A failure here leaves the mods loading as they are.
+	if ! merge_mods.py "${imports}" db/import/mods-merged; then
+		echo "[Warning]: couldn't check how the mods' database files combine" >&2
+	fi
 
 	# Each database's import file lists the mods' files under its Footer,
 	# which rAthena loads after the file's own entries, in this order.

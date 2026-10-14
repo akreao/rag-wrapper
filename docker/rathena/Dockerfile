@@ -29,7 +29,7 @@ FROM ubuntu:24.04
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      libmariadb3 libpcre3 zlib1g mariadb-client \
+      libmariadb3 libpcre3 zlib1g mariadb-client python3-yaml \
  && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --create-home --home-dir /rathena rathena
@@ -41,11 +41,11 @@ COPY --from=build /src/rathena/conf ./conf
 COPY --from=build /src/rathena/db ./db
 COPY --from=build /src/rathena/npc ./npc
 COPY --from=build /src/rathena/sql-files ./sql-files
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY entrypoint.sh merge_mods.py /usr/local/bin/
 
 RUN mkdir -p log save \
  && chown -R rathena:rathena /rathena \
- && chmod +x /usr/local/bin/entrypoint.sh
+ && chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/merge_mods.py
 
 USER rathena
 ENTRYPOINT ["entrypoint.sh"]

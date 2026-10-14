@@ -44,6 +44,9 @@ pub struct Mod {
     pub pending: bool,
     /// Errors and warnings about its files in the running map server's log.
     pub errors: Vec<String>,
+    /// Values it and another mod both set differently, from the running
+    /// map server's start; one of them is used.
+    pub clashes: Vec<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -58,6 +61,8 @@ pub struct Status {
 
 /// What `entrypoint.sh` prints on every start once it loads mods.
 const LOADER_LINE: &str = "Mods enabled:";
+/// How `merge_mods.py` starts a line about two mods setting one value differently.
+const CLASH: &str = "[Warning]: Mod clash in ";
 
 /// What a mod's files were when loaded: checksums of their names, sizes
 /// and modification times, all of them and the database ones alone.
@@ -223,6 +228,7 @@ pub fn status(dir: &Path, running: bool, log: &str) -> Status {
     let loaded = applied(dir);
     let applied: BTreeMap<&String, &Fingerprint> = loaded.iter().map(|(n, p)| (n, p)).collect();
     let mut errors = errors_by_mod(log);
+    let mut clashes = clashes_by_mod(log);
     let mut names = folders(dir);
     names.sort_by_key(|n| on.iter().position(|e| e == n).unwrap_or(usize::MAX));
     let mods: Vec<Mod> = names
@@ -246,6 +252,7 @@ pub fn status(dir: &Path, running: bool, log: &str) -> Status {
                 };
             Mod {
                 errors: errors.remove(&name).unwrap_or_default(),
+                clashes: clashes.remove(&name).unwrap_or_default(),
                 name,
                 enabled,
                 scripts,
@@ -299,6 +306,21 @@ pub fn move_mod(dir: &Path, name: &str, up: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// The clashes `merge_mods.py` reported at the map server's latest start,
+/// under each mod they name, without the warning tag.
+fn clashes_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
+    let latest = log.rfind(LOADER_LINE).map_or(log, |i| &log[i..]);
+    let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for line in latest.lines().map(clean) {
+        let Some(text) = line.strip_prefix("[Warning]: ").filter(|_| line.starts_with(CLASH)) else { continue };
+        let names: BTreeSet<&str> = mod_names(text).collect();
+        for name in names {
+            found.entry(name.to_owned()).or_default().push(text.to_owned());
+        }
+    }
+    found
+}
+
 /// rAthena's errors and warnings that name a file in a mod, by mod. Each
 /// starts at a line with its `[Error]` or `[Warning]` tag and runs until
 /// the next tagged line, which keeps a script error's code excerpt. A
@@ -332,7 +354,7 @@ fn errors_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
                 continue;
             }
             flush(&mut block);
-            if line.contains("[Error]") || line.contains("[Warning]") {
+            if (line.contains("[Error]") || line.contains("[Warning]")) && !line.starts_with(CLASH) {
                 block.push(line);
             }
         } else if !block.is_empty() && block.len() < MAX_ERROR_LINES && !line.trim().is_empty() {
@@ -532,6 +554,26 @@ script error on mods/shop/npc/shop.txt line 3
             "[Error]: Node \"Id\" is missing a value.\n[Error]: Occurred in file 'mods/items/db/item_db.yml' on line 4 and column 5."
         );
         assert!(!found.contains_key("other"));
+    }
+
+    #[test]
+    fn finds_clashes_from_the_latest_start() {
+        let log = "\
+Mods enabled: a b c
+[Warning]: Mod clash in item_db.yml, Id 501, Buy: mods/a/db/item_db.yml line 6 sets 11, mods/b/db/item_db.yml line 6 sets 22; the value from mods/b/ is used (later in load order)
+Mods enabled: a b c
+[Warning]: Mod clash in item_db.yml, Id 501, Buy: mods/a/db/item_db.yml line 6 sets 11, mods/c/db/item_db.yml line 6 sets 33; the value from mods/c/ is used (later in load order)
+[Warning]: mods/a/db/bogus.yml skipped: it isn't named after one of rAthena's databases in db/import
+";
+        let clashes = clashes_by_mod(log);
+        assert_eq!(clashes.keys().collect::<Vec<_>>(), ["a", "c"]);
+        assert_eq!(clashes["a"].len(), 1);
+        assert!(clashes["a"][0].starts_with("Mod clash in item_db.yml, Id 501, Buy: "));
+        assert_eq!(clashes["a"], clashes["c"]);
+        // Clashes aren't counted as errors too.
+        let errors = errors_by_mod(log);
+        assert_eq!(errors["a"], ["[Warning]: mods/a/db/bogus.yml skipped: it isn't named after one of rAthena's databases in db/import"]);
+        assert!(!errors.contains_key("c"));
     }
 
     #[test]

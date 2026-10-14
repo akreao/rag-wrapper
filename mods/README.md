@@ -23,9 +23,21 @@ mods/
 
 ## Turning mods on
 
-`enabled.txt` has one mod folder name per line; `#` starts a comment. Mods load in the order of this file, so when two change the same entry the later one wins. The Mods screen's arrows reorder it, and a mod switched on there goes to the end.
+`enabled.txt` has one mod folder name per line; `#` starts a comment. Mods load in the order of this file. The Mods screen's arrows reorder it, and a mod switched on there goes to the end.
 
 Changes apply when the game servers restart; no rebuild is needed. The database is backed up first when the restart loads a mod's `db/` files for the first time.
+
+## When two mods change the same entry
+
+Their changes combine. rAthena applies a mod's entry as changes to what's already loaded, so fields one mod leaves out keep the other's value, and lists combine: a monster's `Drops` (without an `Index`) gain both mods' drops, keyed lists such as a skill tree's skills or an item group's sub-groups keep both mods' entries, and maps like an item's `Jobs` or `Flags` get both mods' keys.
+
+When both set the same value differently (an item's `Buy`, the drop at one `Drops` `Index`, the same job in `Jobs`), the mod later in `enabled.txt` wins, and the Mods screen lists the clash under both mods. `const.yml` is the exception: rAthena keeps a constant's first value. Clashes never stop the server.
+
+Two details, from how rAthena reads each database:
+- An item's `Jobs` replaces the jobs it had rather than adding to them, so where more than one mod sets `Jobs` on the same item, the server combines them in a generated `db/import/mods-merged/item_db.yml`, loaded after the mods. Like any import, a mod's `Jobs` still replaces rAthena's own jobs for that item.
+- A few lists are replaced whole, and each mod's counts as one value: `Probability` in `abra_db.yml`, `Random` and a slot's `Options` in `item_randomopt_group.yml`, and `Order` in `item_enchant.yml`.
+
+`Header: Clear: true` in a mod's file empties that database, rAthena's own entries and earlier mods' included, before the file loads; the log warns about it.
 
 ## Problems
 
