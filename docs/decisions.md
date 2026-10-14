@@ -16,3 +16,10 @@ The server is for this machine and others on the same local network, not the int
 - The app detects the machine's LAN IP and uses it as `PUBLIC_IP`, so other PCs on the network are sent a reachable char and map address.
 - Ports 6900, 6121, 5121 and 8888 are published on the LAN. No port forwarding, public IP or DNS setup.
 - Moving to internet play later means changing `PUBLIC_IP` and tightening account defaults; nothing else in the stack has to change.
+
+## rAthena image: built locally
+
+The app builds the rAthena image on the user's machine with `docker compose build`, from `docker/rathena/Dockerfile`.
+
+- First start, and any change to `PACKETVER` or renewal mode, triggers a rebuild of roughly 5 to 10 minutes. The app shows build progress and logs while it runs.
+- No container registry or publishing CI is needed. Prebuilt images can be added once the client's `PACKETVER` is settled.
