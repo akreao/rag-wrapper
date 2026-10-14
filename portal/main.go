@@ -53,7 +53,7 @@ func main() {
 
 	conn := connectInfo{
 		Address:   env("PUBLIC_IP", "127.0.0.1"),
-		PacketVer: env("PACKETVER", "20220406"),
+		PacketVer: env("PACKETVER", "20250716"),
 		Overrides: env("OVERRIDES_DIR", "/overrides"),
 	}
 

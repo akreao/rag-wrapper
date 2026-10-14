@@ -56,7 +56,7 @@ func (c connectInfo) Loopback() bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// ClientDate shows PACKETVER as a date, e.g. 20220406 as 2022-04-06.
+// ClientDate shows PACKETVER as a date, e.g. 20250716 as 2025-07-16.
 func (c connectInfo) ClientDate() string {
 	t, err := time.Parse("20060102", c.PacketVer)
 	if err != nil {
