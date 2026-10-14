@@ -111,6 +111,9 @@ fn overview(app: State<App>) -> Overview {
 fn setup(app: State<App>, admin_user: String, admin_password: String, public_ip: Option<String>) -> Result<(), String> {
     envfile::check_account_field("The username", &admin_user)?;
     envfile::check_account_field("The password", &admin_password)?;
+    if let Some(ip) = &public_ip {
+        net::check_address(ip)?;
+    }
 
     let path = app.env_path();
     let fresh = !path.exists();
@@ -189,12 +192,19 @@ fn open_overrides(handle: AppHandle, app: State<App>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// `None` follows the detected LAN address on every start; `Some` pins one.
+/// `None` follows the detected LAN address on every start; `Some` pins one,
+/// such as a VPN address. Returns whether the address players are sent to
+/// changed, in which case running char and map servers need a restart.
 #[tauri::command]
-fn set_public_ip(app: State<App>, public_ip: Option<String>) -> Result<(), String> {
+fn set_public_ip(app: State<App>, public_ip: Option<String>) -> Result<bool, String> {
+    if let Some(ip) = &public_ip {
+        net::check_address(ip)?;
+    }
     let mut env = app.env().ok_or("Finish setup first.")?;
+    let before = env.get("PUBLIC_IP");
     apply_public_ip(&mut env, public_ip);
-    env.save().map_err(|e| e.to_string())
+    env.save().map_err(|e| e.to_string())?;
+    Ok(env.get("PUBLIC_IP") != before)
 }
 
 fn apply_public_ip(env: &mut EnvFile, public_ip: Option<String>) {
@@ -249,8 +259,9 @@ enum Step {
     Pin(update::ServerUpdate),
 }
 
-/// Runs `start`, `restart`, `stop`, `build`, `update`, `backup` or
-/// `restore` (of `file`), streaming its output as `task-line` events.
+/// Runs `start`, `restart`, `readdress` (after the address changed), `stop`,
+/// `build`, `update`, `backup` or `restore` (of `file`), streaming its
+/// output as `task-line` events.
 #[tauri::command]
 fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<String>) -> Result<(), String> {
     if app.closing.load(Ordering::SeqCst) {
@@ -263,17 +274,20 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
 
     let mut cmd = stack::compose(&app.dir);
     let steps = match kind.as_str() {
-        "start" | "restart" => {
+        "start" | "restart" | "readdress" => {
             let mut cmd = up_command(&app)?;
             // After a rebuild or update the new image needs a full `up`,
             // so `db-init` applies its database upgrades first; that
             // recreates every rAthena container anyway.
-            let new_image = kind == "restart"
+            let new_image = kind != "start"
                 && stack::runs_old_image(&app.dir, &app.env().and_then(|e| e.get("PACKETVER")).unwrap_or_default());
-            if kind == "restart" && !new_image {
+            if kind != "start" && !new_image {
                 // The game servers read their configs only when they start;
-                // the database and portal keep running.
-                cmd.args(["--no-deps", "--force-recreate"]).args(stack::GAME_SERVERS);
+                // the database keeps running. A new address only concerns
+                // the char and map servers, which hand it to the client,
+                // and the portal's "How to connect" page.
+                let services: &[&str] = if kind == "readdress" { &stack::READDRESSED } else { &stack::GAME_SERVERS };
+                cmd.args(["--no-deps", "--force-recreate"]).args(services);
             }
             vec![Step::Compose(cmd)]
         }

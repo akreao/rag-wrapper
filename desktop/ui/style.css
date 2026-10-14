@@ -186,6 +186,7 @@ label[hidden] { display: none; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); column-gap: 16px; }
 .row { display: flex; gap: 8px; margin-bottom: 10px; }
+.row[hidden] { display: none; }
 .notice {
   padding: 8px 10px;
   border-radius: 6px;
@@ -220,6 +221,7 @@ label[hidden] { display: none; }
 .update-bar[hidden] { display: none; }
 .update-bar p { margin: 0; flex: 1; }
 .update-bar button { flex: none; }
+#ip-confirm button { margin: 6px 8px 0 0; }
 
 .files { list-style: none; margin: 0 0 10px; padding: 0; font-size: 12px; }
 .files li { padding: 4px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
