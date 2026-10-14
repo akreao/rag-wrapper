@@ -48,7 +48,7 @@ services:
         RATHENA_REPO: ${RATHENA_REPO:-https://github.com/akreao/rathena.git}
         RATHENA_COMMIT: ${RATHENA_COMMIT:-b6f89abe300d821412380a2004385532d0d4d9b6}
         PACKETVER: ${PACKETVER:-20250716}
-        PRERE: ${PRERE:-no}
+        PRERE: ${PRERE:-yes}
     pull_policy: !reset null
     command: init
     restart: "no"

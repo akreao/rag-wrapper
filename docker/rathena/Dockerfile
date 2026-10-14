@@ -19,7 +19,7 @@ RUN git init -q /src/rathena \
 
 WORKDIR /src/rathena
 ARG PACKETVER=20250716
-ARG PRERE=no
+ARG PRERE=yes
 RUN ./configure --enable-packetver="${PACKETVER}" \
       $( [ "${PRERE}" = "yes" ] && echo "--enable-prere=yes" ) \
  && make server -j"$(nproc)"

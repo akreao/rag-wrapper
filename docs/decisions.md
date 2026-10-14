@@ -7,6 +7,7 @@ Choices made while planning rag-wrapper, newest last. Each says what was decided
 - **Fresh app**, not built on Ragnarok Offline.
 - **Linux only** for now. Docker is an accepted requirement.
 - **Real game client**, no roBrowser. `PACKETVER` defaults to 20250716, the client most people get through WARPGATE; 20220406 is the other common client and is offered as a preset in the app's Settings. Installs set up before this keep the value already in their `.env`.
+- **Pre-renewal by default** (`PRERE=yes`). Pre-renewal is the more polished mode in rAthena, while its Renewal content is incomplete and not up to date with kRO. Renewal stays selectable in the app's Settings. Installs set up before this keep the mode already in their `.env`.
 - rAthena is built from the `rag-wrapper` branch of `akreao/rathena` (see below).
 
 ## Who connects: LAN

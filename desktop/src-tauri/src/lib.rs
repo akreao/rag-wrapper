@@ -72,7 +72,7 @@ fn overview(app: State<App>) -> Overview {
         public_ip_auto: get("PUBLIC_IP_AUTO") != "no",
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
-        prere: get("PRERE") == "yes",
+        prere: get("PRERE") != "no",
         task: app.task.lock().unwrap().as_ref().map(|(k, _)| k.clone()),
     }
 }
