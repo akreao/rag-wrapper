@@ -76,6 +76,7 @@ struct Overview {
     configured: bool,
     admin_user: String,
     public_ip: String,
+    portal_port: String,
     public_ip_auto: bool,
     addresses: Vec<net::Address>,
     packetver: String,
@@ -102,6 +103,7 @@ fn overview(app: State<App>) -> Overview {
         configured: !get("ADMIN_USER").is_empty(),
         admin_user: get("ADMIN_USER"),
         public_ip: get("PUBLIC_IP"),
+        portal_port: env.as_ref().and_then(|e| e.get("PORTAL_PORT")).unwrap_or_else(|| "8080".into()),
         public_ip_auto: get("PUBLIC_IP_AUTO") != "no",
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
@@ -220,6 +222,20 @@ fn set_public_ip(app: State<App>, public_ip: Option<String>) -> Result<bool, Str
     Ok(env.get("PUBLIC_IP") != before)
 }
 
+/// The port players open the account portal on. Returns whether it
+/// changed, in which case a running portal needs restarting on it.
+#[tauri::command]
+fn set_portal_port(app: State<App>, port: u16) -> Result<bool, String> {
+    if port < 1024 {
+        return Err("Pick a port from 1024 to 65535.".into());
+    }
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    let before = env.get("PORTAL_PORT");
+    env.set("PORTAL_PORT", &port.to_string());
+    env.save().map_err(|e| e.to_string())?;
+    Ok(env.get("PORTAL_PORT") != before)
+}
+
 fn apply_public_ip(env: &mut EnvFile, public_ip: Option<String>) {
     match public_ip {
         Some(ip) => {
@@ -274,9 +290,12 @@ enum Step {
     Images(Vec<images::Image>, std::process::Command),
     /// Pulls the prebuilt images that aren't here yet, before a start.
     FetchMissing(Vec<images::Image>),
+    /// Checks that nothing else holds the ports the stack publishes.
+    Ports,
 }
 
-/// Runs `start`, `restart`, `readdress` (after the address changed), `stop`,
+/// Runs `start`, `restart`, `readdress` (after the address changed),
+/// `portal` (after the portal port changed), `stop`,
 /// `build`, `update`, `backup` or `restore` (of `file`), streaming its
 /// output as `task-line` events.
 #[tauri::command]
@@ -291,7 +310,7 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
 
     let mut cmd = stack::compose(&app.dir);
     let steps = match kind.as_str() {
-        "start" | "restart" | "readdress" => {
+        "start" | "restart" | "readdress" | "portal" => {
             let mut cmd = up_command(&app)?;
             // After a rebuild or update the new image needs a full `up`,
             // so `db-init` applies its database upgrades first; that
@@ -303,7 +322,11 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 // the database keeps running. A new address only concerns
                 // the char and map servers, which hand it to the client,
                 // and the portal's "How to connect" page.
-                let services: &[&str] = if kind == "readdress" { &stack::READDRESSED } else { &stack::GAME_SERVERS };
+                let services: &[&str] = match kind.as_str() {
+                    "readdress" => &stack::READDRESSED,
+                    "portal" => &["portal"],
+                    _ => &stack::GAME_SERVERS,
+                };
                 cmd.args(["--no-deps", "--force-recreate"]).args(services);
             }
             // A first start downloads the images rather than building them.
@@ -311,9 +334,9 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             // A mod's database files can change items or monsters players
             // already have, so the database is backed up before they load.
             if mods::new_databases(&app.mods_dir()).is_empty() {
-                vec![fetch, Step::Compose(cmd)]
+                vec![fetch, Step::Ports, Step::Compose(cmd)]
             } else {
-                vec![Step::Backup(backup::Reason::Mods), fetch, Step::Compose(cmd)]
+                vec![Step::Backup(backup::Reason::Mods), fetch, Step::Ports, Step::Compose(cmd)]
             }
         }
         "build" => {
@@ -370,6 +393,7 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 Step::Compose(cmd) => ctx.run(cmd),
                 Step::Images(wanted, build) => images::fetch_or_build(&ctx, &wanted, build),
                 Step::FetchMissing(wanted) => images::fetch_missing(&ctx, &wanted),
+                Step::Ports => stack::check_ports(&ctx.dir),
                 Step::Backup(reason) => backup::create(&ctx, reason, None).map(|_| ()),
                 Step::Daily => {
                     backup::daily(&ctx);
@@ -393,7 +417,7 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
         // An address change restarts the map server too, and a restore starts
         // the game servers again when they were running.
         let started = match kind.as_str() {
-            "start" | "restart" | "readdress" => true,
+            "start" | "restart" | "readdress" | "portal" => true,
             "restore" => stack::status(&ctx.dir)
                 .unwrap_or_default()
                 .iter()
@@ -609,6 +633,7 @@ pub fn run() {
             overview,
             setup,
             set_public_ip,
+            set_portal_port,
             save_build_settings,
             skip_server_update,
             game_settings,

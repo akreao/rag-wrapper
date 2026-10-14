@@ -234,6 +234,113 @@ fn parse_ps(text: &str) -> Vec<PsEntry> {
     text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
+/// What each service publishes, from the stack's compose config:
+/// (host port, service).
+fn published_ports(dir: &Path) -> Result<Vec<(u16, String)>, String> {
+    let mut config = compose(dir);
+    config.args(["config", "--format", "json"]);
+    Ok(parse_published(&output(config)?))
+}
+
+fn parse_published(json: &str) -> Vec<(u16, String)> {
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let mut ports: Vec<(u16, String)> = config["services"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .flat_map(|(service, def)| {
+            def["ports"].as_array().into_iter().flatten().filter_map(move |p| {
+                let published = match &p["published"] {
+                    serde_json::Value::String(s) => s.parse().ok(),
+                    v => v.as_u64().and_then(|n| u16::try_from(n).ok()),
+                }?;
+                Some((published, service.clone()))
+            })
+        })
+        .collect();
+    ports.sort();
+    ports.dedup();
+    ports
+}
+
+/// The host ports in a `docker ps` Ports column, such as
+/// `0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp`.
+fn parse_ps_ports(column: &str) -> Vec<u16> {
+    let mut ports = Vec::new();
+    for mapping in column.split(", ") {
+        let Some((host, _)) = mapping.split_once("->") else {
+            continue;
+        };
+        let Some((_, range)) = host.rsplit_once(':') else {
+            continue;
+        };
+        let (first, last) = range.split_once('-').unwrap_or((range, range));
+        if let (Ok(first), Ok(last)) = (first.parse::<u16>(), last.parse::<u16>()) {
+            ports.extend(first..=last);
+        }
+    }
+    ports
+}
+
+/// Before a start: finds a port the stack publishes that something else
+/// already holds, and says what holds it and how to free it, instead of
+/// Docker's "address already in use" halfway through the start.
+pub fn check_ports(dir: &Path) -> Result<(), String> {
+    // Without the config there's nothing to check; `up` reports the problem.
+    let Ok(wanted) = published_ports(dir) else {
+        return Ok(());
+    };
+    let mut ps = host::command("docker");
+    ps.args(["ps", "--format", "{{.Names}}\t{{.Label \"com.docker.compose.project\"}}\t{{.Ports}}"]);
+    let containers = output(ps).unwrap_or_default();
+    let holders: Vec<(&str, &str, Vec<u16>)> = containers
+        .lines()
+        .filter_map(|l| {
+            let mut cols = l.splitn(3, '\t');
+            Some((cols.next()?, cols.next()?, parse_ps_ports(cols.next().unwrap_or_default())))
+        })
+        .collect();
+
+    for (port, service) in wanted {
+        let what = match service.as_str() {
+            "portal" => "the account portal",
+            "login" => "the login server",
+            "char" => "the char server",
+            "map" => "the map server",
+            "web" => "rAthena's web server",
+            other => other,
+        };
+        let fix = if service == "portal" {
+            " or give the portal another port under Connecting"
+        } else {
+            ""
+        };
+        match holders.iter().find(|(_, _, ports)| ports.contains(&port)) {
+            // This stack's own container; `up` replaces it as needed.
+            Some((_, project, _)) if *project == PROJECT => {}
+            Some((name, _, _)) => {
+                return Err(format!(
+                    "Port {port}, for {what}, is taken by the Docker container {name}, which isn't part of this \
+                     server. Stop it (`docker stop {name}`){fix}, then start again."
+                ))
+            }
+            None => {
+                if let Err(e) = std::net::TcpListener::bind(("0.0.0.0", port)) {
+                    if e.kind() == std::io::ErrorKind::AddrInUse {
+                        return Err(format!(
+                            "Port {port}, for {what}, is in use by another program on this computer. \
+                             `sudo ss -ltnp 'sport = :{port}'` shows which one. Stop it{fix}, then start again."
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Starts `cmd` with stdout and stderr piped, calling `on_line` for each
 /// line of either from reader threads; stdin is left as `cmd` sets it.
 /// Returns the child and a handle that finishes once both streams close.
@@ -296,5 +403,18 @@ mod tests {
         let array = r#"[{"Service":"db-init","State":"exited","ExitCode":0,"Publishers":null}]"#;
         assert_eq!(parse_ps(array)[0].service, "db-init");
         assert!(parse_ps("").is_empty());
+    }
+
+    #[test]
+    fn reads_published_ports() {
+        let config = r#"{"services":{"portal":{"ports":[{"target":8080,"published":"9090","protocol":"tcp"}]},
+            "login":{"ports":[{"target":6900,"published":"6900"}]},"db":{}}}"#;
+        assert_eq!(parse_published(config), vec![(6900, "login".into()), (9090, "portal".into())]);
+        assert!(parse_published("not json").is_empty());
+
+        assert_eq!(parse_ps_ports("0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp"), vec![8080, 8080]);
+        assert_eq!(parse_ps_ports(":::8080->8080/tcp, 3306/tcp"), vec![8080]);
+        assert_eq!(parse_ps_ports("127.0.0.1:7000-7001->7000-7001/tcp"), vec![7000, 7001]);
+        assert!(parse_ps_ports("").is_empty());
     }
 }
