@@ -18,7 +18,7 @@ RUN git init -q /src/rathena \
  && git -C /src/rathena checkout -q FETCH_HEAD
 
 WORKDIR /src/rathena
-ARG PACKETVER=20220406
+ARG PACKETVER=20250716
 ARG PRERE=no
 RUN ./configure --enable-packetver="${PACKETVER}" \
       $( [ "${PRERE}" = "yes" ] && echo "--enable-prere=yes" ) \

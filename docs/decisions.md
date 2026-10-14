@@ -6,7 +6,7 @@ Choices made while planning rag-wrapper, newest last. Each says what was decided
 
 - **Fresh app**, not built on Ragnarok Offline.
 - **Linux only** for now. Docker is an accepted requirement.
-- **Real game client**, no roBrowser. `PACKETVER` is 20220406 until the client's date is confirmed.
+- **Real game client**, no roBrowser. `PACKETVER` defaults to 20250716, the client most people get through WARPGATE; 20220406 is the other common client and is offered as a preset in the app's Settings. Installs set up before this keep the value already in their `.env`.
 - rAthena is built from the `rag-wrapper` branch of `akreao/rathena` (see below).
 
 ## Who connects: LAN

@@ -79,7 +79,14 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 main { flex: 1; min-height: 0; padding: 16px 20px; }
 #setup { overflow: auto; }
 #dashboard { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
-#dashboard[hidden], #setup[hidden] { display: none; }
+#settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+  overflow: auto;
+}
+#dashboard[hidden], #setup[hidden], #settings[hidden] { display: none; }
 
 aside { display: flex; flex-direction: column; gap: 16px; overflow: auto; }
 
@@ -93,7 +100,7 @@ aside { display: flex; flex-direction: column; gap: 16px; overflow: auto; }
 .card p { margin: 0 0 10px; }
 
 label { display: block; margin-bottom: 10px; }
-input, select {
+input, select, textarea {
   display: block;
   width: 100%;
   margin-top: 4px;
@@ -154,3 +161,18 @@ a { color: var(--accent); }
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+textarea { resize: vertical; font: 13px/1.4 ui-monospace, monospace; }
+label.check { display: flex; gap: 8px; align-items: baseline; }
+label.check input { width: auto; margin: 0; }
+label[hidden] { display: none; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); column-gap: 16px; }
+.row { display: flex; gap: 8px; margin-bottom: 10px; }
+.notice {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--busy) 15%, var(--card));
+}
+.notice[hidden] { display: none; }
+.notice button { margin-left: 8px; }
