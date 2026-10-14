@@ -91,6 +91,10 @@ struct Overview {
     server_update: Option<update::ServerUpdate>,
     /// The game servers run an older image than the one built, and restart onto it when asked.
     restart_pending: bool,
+    /// The same for the portal alone, after a Rebuild that changed only the portal.
+    portal_restart_pending: bool,
+    /// Images here that only a Rebuild brings up to date.
+    rebuild: Option<images::Rebuild>,
     task: Option<String>,
 }
 
@@ -116,6 +120,11 @@ fn overview(app: State<App>) -> Overview {
         prere: get("PRERE") != "no",
         server_update: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(update::pending),
         restart_pending: docker_error.is_none() && stack::runs_old_image(&app.dir, &get("PACKETVER")),
+        portal_restart_pending: docker_error.is_none() && stack::portal_runs_old_image(&app.dir),
+        rebuild: env
+            .as_ref()
+            .filter(|_| docker_error.is_none() && !get("ADMIN_USER").is_empty())
+            .and_then(|env| images::rebuild(&app.dir, env)),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -298,6 +307,8 @@ enum Step {
     FetchMissing(Vec<images::Image>),
     /// Checks that nothing else holds the ports the stack publishes.
     Ports,
+    /// Notes what images `up` just built were made from.
+    Record(Vec<images::Image>),
 }
 
 /// Runs `start`, `restart`, `readdress` (after the address changed),
@@ -322,7 +333,8 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             // so `db-init` applies its database upgrades first; that
             // recreates every rAthena container anyway.
             let new_image = kind != "start"
-                && stack::runs_old_image(&app.dir, &app.env().and_then(|e| e.get("PACKETVER")).unwrap_or_default());
+                && (stack::runs_old_image(&app.dir, &app.env().and_then(|e| e.get("PACKETVER")).unwrap_or_default())
+                    || stack::portal_runs_old_image(&app.dir));
             if kind != "start" && !new_image {
                 // The game servers read their configs only when they start;
                 // the database keeps running. A new address only concerns
@@ -336,13 +348,16 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 cmd.args(["--no-deps", "--force-recreate"]).args(services);
             }
             // A first start downloads the images rather than building them.
-            let fetch = Step::FetchMissing(images::current(&app.dir, &app.env().ok_or("Finish setup first.")?));
+            let wanted = images::current(&app.dir, &app.env().ok_or("Finish setup first.")?);
+            // `up` builds any that couldn't be downloaded, from the current build files.
+            let missing = wanted.iter().filter(|i| !images::exists(&i.local)).cloned().collect();
+            let fetch = Step::FetchMissing(wanted);
             // A mod's database files can change items or monsters players
             // already have, so the database is backed up before they load.
             if mods::new_databases(&app.mods_dir()).is_empty() {
-                vec![fetch, Step::Ports, Step::Compose(cmd)]
+                vec![fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]
             } else {
-                vec![Step::Backup(backup::Reason::Mods), fetch, Step::Ports, Step::Compose(cmd)]
+                vec![Step::Backup(backup::Reason::Mods), fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]
             }
         }
         "build" => {
@@ -400,6 +415,10 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 Step::Images(wanted, build) => images::fetch_or_build(&ctx, &wanted, build),
                 Step::FetchMissing(wanted) => images::fetch_missing(&ctx, &wanted),
                 Step::Ports => stack::check_ports(&ctx.dir),
+                Step::Record(built) => {
+                    images::record(&ctx.dir, &built);
+                    Ok(())
+                }
                 Step::Backup(reason) => backup::create(&ctx, reason, None).map(|_| ()),
                 Step::Daily => {
                     backup::daily(&ctx);

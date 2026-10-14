@@ -35,10 +35,22 @@
     <button id="update" class="primary">Update server</button>
     <button id="skip-update" title="Stay on your current rAthena commit until an app version comes with another one">Not this one</button>
   </div>
-  <div id="restart-bar" class="update-bar" hidden>
+  <div id="rebuild-bar" class="update-bar" hidden>
     <p>
+      <strong id="rebuild-title"></strong>
+      <span id="rebuild-why"></span>
+      <br><span class="muted">Rebuilding backs up the database first. A running server stays on the old version until you restart it.</span>
+    </p>
+    <button id="rebuild-now" class="primary">Rebuild</button>
+  </div>
+  <div id="restart-bar" class="update-bar" hidden>
+    <p id="restart-server">
       <strong>A new server version is built.</strong>
       Players stay on the old one until the game servers restart, which disconnects everyone. Database upgrades run first.
+    </p>
+    <p id="restart-portal" hidden>
+      <strong>A new account portal is built.</strong>
+      The running portal stays on the old one until it restarts. Nobody in game is disconnected.
     </p>
     <button id="restart-new" class="primary">Restart on the new version</button>
   </div>

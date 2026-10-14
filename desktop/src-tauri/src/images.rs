@@ -8,10 +8,12 @@
 //! gets a stale one: the rAthena commit, PACKETVER and mode, and a hash of
 //! the build files bundled with the app (`docker/rathena/`, `portal/`).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::envfile::EnvFile;
@@ -23,12 +25,16 @@ use crate::task::Ctx;
 pub const KEY: &str = "PREBUILT_IMAGES";
 
 /// One image the stack needs, by its local name and the compose service that builds it.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Image {
     pub local: String,
     pub service: &'static str,
     /// The published image to pull, when there may be one.
     pub remote: Option<String>,
+    /// What it's made from, as its published tag names it:
+    /// `<PACKETVER>-<mode>-<commit>-<hash>` for rAthena, `<hash>` for the
+    /// portal. Empty when the build files can't be read.
+    pub source: String,
 }
 
 /// The rAthena and portal images for these settings. `commit` and `repo`
@@ -42,24 +48,26 @@ pub fn wanted(dir: &Path, env: &EnvFile, repo: &str, commit: &str) -> Vec<Image>
 
     // CI builds only the fork the app is released with.
     let official = bundled.get("RATHENA_REPO").as_deref() == Some(repo);
-    let rathena = (!registry.is_empty() && official && commit.len() >= 12 && !packetver.is_empty())
-        .then(|| dir_hash(&dir.join("docker/rathena")).ok())
-        .flatten()
-        .map(|hash| format!("{registry}-rathena:{packetver}-{mode}-{}-{hash}", &commit[..12]));
-    let portal = (!registry.is_empty())
-        .then(|| dir_hash(&dir.join("portal")).ok())
-        .flatten()
-        .map(|hash| format!("{registry}-portal:{hash}"));
+    let short = commit.get(..12).unwrap_or(commit);
+    let rathena_source = dir_hash(&dir.join("docker/rathena"))
+        .map(|hash| format!("{packetver}-{mode}-{short}-{hash}"))
+        .unwrap_or_default();
+    let rathena = (!registry.is_empty() && official && commit.len() >= 12 && !packetver.is_empty() && !rathena_source.is_empty())
+        .then(|| format!("{registry}-rathena:{rathena_source}"));
+    let portal_source = dir_hash(&dir.join("portal")).unwrap_or_default();
+    let portal = (!registry.is_empty() && !portal_source.is_empty()).then(|| format!("{registry}-portal:{portal_source}"));
     vec![
         Image {
             local: format!("rag-wrapper/rathena:{packetver}"),
             service: "db-init",
             remote: rathena,
+            source: rathena_source,
         },
         Image {
             local: "rag-wrapper/portal".into(),
             service: "portal",
             remote: portal,
+            source: portal_source,
         },
     ]
 }
@@ -132,10 +140,23 @@ fn pull(ctx: &Ctx, image: &Image) -> Result<(), String> {
     ctx.line(format!("Downloading the prebuilt image {remote}"));
     let mut cmd = host::command("docker");
     cmd.args(["pull", remote]);
-    ctx.run(cmd)?;
+    if let Err(e) = ctx.run(cmd) {
+        // Unless it was cancelled, Start can't replace this image by itself.
+        if ctx.check_cancelled().is_ok() {
+            remember(&ctx.dir, |state| {
+                state.unpublished.insert(remote.to_owned());
+            });
+        }
+        return Err(e);
+    }
     let mut tag = host::command("docker");
     tag.args(["tag", remote, &image.local]);
-    stack::output(tag).map(|_| ())
+    stack::output(tag)?;
+    remember(&ctx.dir, |state| {
+        state.unpublished.remove(remote);
+    });
+    record(&ctx.dir, std::slice::from_ref(image));
+    Ok(())
 }
 
 /// Gets every image: pulled where a published one exists, built here
@@ -150,14 +171,16 @@ pub fn fetch_or_build(ctx: &Ctx, images: &[Image], mut build: Command) -> Result
             if image.remote.is_some() {
                 ctx.line(format!("No prebuilt image to download ({e}); building {} on this computer.", image.local));
             }
-            to_build.push(image.service);
+            to_build.push(image.clone());
         }
     }
     if to_build.is_empty() {
         return Ok(());
     }
-    build.args(["--progress", "plain", "build"]).args(&to_build);
-    ctx.run(build)
+    build.args(["--progress", "plain", "build"]).args(to_build.iter().map(|i| i.service));
+    ctx.run(build)?;
+    record(&ctx.dir, &to_build);
+    Ok(())
 }
 
 /// Before a start: pulls any published image that isn't here yet or that
@@ -176,6 +199,134 @@ pub fn fetch_missing(ctx: &Ctx, images: &[Image]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+// ---- What each image was made from, for the "Rebuild" notice ----
+
+/// Kept in the stack folder; only the notice reads it, so nothing breaks without it.
+const STATE: &str = "images.json";
+
+#[derive(Serialize, Deserialize, Default, Debug)]
+struct State {
+    /// By local name: the image the app last pulled or built under it.
+    #[serde(default)]
+    built: BTreeMap<String, Built>,
+    /// Published tags the last try couldn't download, so Start won't
+    /// replace the image by itself.
+    #[serde(default)]
+    unpublished: BTreeSet<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct Built {
+    id: String,
+    source: String,
+}
+
+fn state_path(dir: &Path) -> PathBuf {
+    dir.join(STATE)
+}
+
+fn load(dir: &Path) -> State {
+    fs::read(state_path(dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// Changes the record. It only feeds a notice, so failing to write it
+/// never fails a task.
+fn remember(dir: &Path, change: impl FnOnce(&mut State)) {
+    let mut state = load(dir);
+    change(&mut state);
+    if let Ok(json) = serde_json::to_vec_pretty(&state) {
+        let _ = fs::write(state_path(dir), json);
+    }
+}
+
+/// Records what the images now here under these names were made from,
+/// after they were pulled or built from the current build files.
+pub fn record(dir: &Path, images: &[Image]) {
+    let made: Vec<(String, Built)> = images
+        .iter()
+        .filter(|i| !i.source.is_empty())
+        .filter_map(|i| Some((i.local.clone(), Built { id: image_id(&i.local)?, source: i.source.clone() })))
+        .collect();
+    if !made.is_empty() {
+        remember(dir, |state| state.built.extend(made));
+    }
+}
+
+/// Which images a Rebuild would replace. `needed` when the server was
+/// built for other build settings or another rAthena commit than `.env`
+/// names (a build that failed or was cancelled after saving, a hand-edited
+/// `.env`); otherwise only the app's build files changed, and a Rebuild is
+/// recommended.
+#[derive(Serialize, Debug, PartialEq, Default)]
+pub struct Rebuild {
+    pub needed: bool,
+    pub server: bool,
+    pub portal: bool,
+}
+
+/// The images here that are out of date and that Start won't replace by
+/// itself (nothing published to download, or the download failed).
+pub fn rebuild(dir: &Path, env: &EnvFile) -> Option<Rebuild> {
+    let state = load(dir);
+    let mut out = Rebuild::default();
+    for image in current(dir, env) {
+        let Some((id, tags)) = inspect(&image.local) else {
+            continue;
+        };
+        if let Some(needed) = stale(&image, &id, &tags, &state) {
+            out.needed |= needed;
+            if image.service == "portal" {
+                out.portal = true;
+            } else {
+                out.server = true;
+            }
+        }
+    }
+    (out.server || out.portal).then_some(out)
+}
+
+/// The local image's ID and every tag it carries.
+fn inspect(name: &str) -> Option<(String, Vec<String>)> {
+    let mut cmd = host::command("docker");
+    cmd.args(["image", "inspect", "--format", "{{.Id}}{{range .RepoTags}} {{.}}{{end}}", name]);
+    let out = stack::output(cmd).ok()?;
+    let mut words = out.split_whitespace().map(str::to_owned);
+    Some((words.next()?, words.collect()))
+}
+
+/// `Some(needed)` when the image with `id` and `tags` isn't made from
+/// what `image` wants and only a Rebuild replaces it; `None` when it's up
+/// to date, Start will replace it, or the app can't tell what it's made from.
+fn stale(image: &Image, id: &str, tags: &[String], state: &State) -> Option<bool> {
+    if image.source.is_empty() {
+        return None;
+    }
+    let remote = image.remote.as_deref();
+    if remote.is_some_and(|r| tags.iter().any(|t| t == r)) {
+        return None;
+    }
+    // A pulled image carries its published tag, which names its source.
+    // That covers images an older app version pulled before keeping records.
+    let published = || {
+        let repo = remote?.rsplit_once(':')?.0;
+        tags.iter().find_map(|t| t.strip_prefix(repo)?.strip_prefix(':'))
+    };
+    let built = match state.built.get(&image.local).filter(|b| b.id == id) {
+        Some(b) => b.source.as_str(),
+        None => published()?,
+    };
+    if built == image.source {
+        return None;
+    }
+    // Start downloads a newer published image (`fetch_missing`).
+    if remote.is_some_and(|r| !state.unpublished.contains(r)) {
+        return None;
+    }
+    // Everything before the build files' hash: PACKETVER, mode and commit.
+    let settings = |s: &str| s.rsplit_once('-').map(|(head, _)| head.to_owned()).unwrap_or_default();
+    Some(settings(built) != settings(&image.source))
 }
 
 #[cfg(test)]
@@ -245,6 +396,61 @@ mod tests {
         );
         assert_eq!(images[1].service, "portal");
         assert_eq!(images[1].remote.as_deref(), Some("ghcr.io/akreao/rag-wrapper-portal:724f36cd9cd7"));
+    }
+
+    fn rathena(source: &str, remote: bool) -> Image {
+        Image {
+            local: "rag-wrapper/rathena:20250716".into(),
+            service: "db-init",
+            remote: remote.then(|| format!("ghcr.io/akreao/rag-wrapper-rathena:{source}")),
+            source: source.into(),
+        }
+    }
+
+    fn built(local: &str, id: &str, source: &str) -> State {
+        let mut state = State::default();
+        state.built.insert(local.into(), Built { id: id.into(), source: source.into() });
+        state
+    }
+
+    #[test]
+    fn a_local_build_from_old_files_wants_a_rebuild() {
+        let image = rathena("20250716-prere-0123456789ab-newhash", false);
+        let state = built(&image.local, "sha256:1", "20250716-prere-0123456789ab-oldhash");
+        assert_eq!(stale(&image, "sha256:1", &[], &state), Some(false));
+        // Up to date, or another image than the one recorded: nothing to say.
+        let state = built(&image.local, "sha256:1", &image.source);
+        assert_eq!(stale(&image, "sha256:1", &[], &state), None);
+        assert_eq!(stale(&image, "sha256:2", &[], &state), None);
+    }
+
+    #[test]
+    fn other_build_settings_need_a_rebuild() {
+        // Saved Renewal, but the build was cancelled.
+        let image = rathena("20250716-re-0123456789ab-hash", false);
+        let state = built(&image.local, "sha256:1", "20250716-prere-0123456789ab-hash");
+        assert_eq!(stale(&image, "sha256:1", &[], &state), Some(true));
+    }
+
+    #[test]
+    fn start_replaces_a_published_image_unless_it_could_not() {
+        let image = rathena("20250716-prere-0123456789ab-newhash", true);
+        // Pulled by 0.1.0, before the app kept records: its published tag says what it is.
+        let tags = vec!["rag-wrapper/rathena:20250716".to_owned(), "ghcr.io/akreao/rag-wrapper-rathena:20250716-prere-0123456789ab-oldhash".to_owned()];
+        let mut state = State::default();
+        assert_eq!(stale(&image, "sha256:1", &tags, &state), None);
+        state.unpublished.insert(image.remote.clone().unwrap());
+        assert_eq!(stale(&image, "sha256:1", &tags, &state), Some(false));
+        // The wanted image itself.
+        let tags = vec![image.remote.clone().unwrap()];
+        assert_eq!(stale(&image, "sha256:1", &tags, &state), None);
+    }
+
+    #[test]
+    fn a_portal_change_is_only_recommended() {
+        let image = Image { local: "rag-wrapper/portal".into(), service: "portal", remote: None, source: "newhash".into() };
+        let state = built(&image.local, "sha256:1", "oldhash");
+        assert_eq!(stale(&image, "sha256:1", &[], &state), Some(false));
     }
 
     #[test]
