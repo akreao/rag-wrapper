@@ -19,6 +19,14 @@ impl EnvFile {
         })
     }
 
+    /// Reads settings from text, such as the bundled `.env.example`. Not for saving.
+    pub fn parse(text: &str) -> Self {
+        Self {
+            path: PathBuf::new(),
+            lines: text.lines().map(str::to_owned).collect(),
+        }
+    }
+
     pub fn get(&self, key: &str) -> Option<String> {
         self.lines.iter().find_map(|line| {
             let (k, v) = line.split_once('=')?;

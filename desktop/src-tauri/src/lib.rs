@@ -6,6 +6,7 @@ mod net;
 mod settings;
 mod stack;
 mod task;
+mod update;
 
 use std::path::PathBuf;
 use std::process::Child;
@@ -62,6 +63,8 @@ struct Overview {
     addresses: Vec<net::Address>,
     packetver: String,
     prere: bool,
+    /// The rAthena commit this app version comes with, when the server isn't on it yet.
+    server_update: Option<update::ServerUpdate>,
     task: Option<String>,
 }
 
@@ -84,6 +87,7 @@ fn overview(app: State<App>) -> Overview {
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
         prere: get("PRERE") != "no",
+        server_update: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(update::pending),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -210,10 +214,12 @@ enum Step {
     /// A backup if there's none from the last day; never fails the task.
     Daily,
     Restore(String),
+    /// Moves `.env` to the update's commit.
+    Pin(update::ServerUpdate),
 }
 
-/// Runs `start`, `restart`, `stop`, `build`, `backup` or `restore` (of
-/// `file`), streaming its output as `task-line` events.
+/// Runs `start`, `restart`, `stop`, `build`, `update`, `backup` or
+/// `restore` (of `file`), streaming its output as `task-line` events.
 #[tauri::command]
 fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<String>) -> Result<(), String> {
     if app.closing.load(Ordering::SeqCst) {
@@ -227,12 +233,7 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
     let mut cmd = stack::compose(&app.dir);
     let steps = match kind.as_str() {
         "start" | "restart" => {
-            let mut env = app.env().ok_or("Finish setup first.")?;
-            if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
-                apply_public_ip(&mut env, None);
-                env.save().map_err(|e| e.to_string())?;
-            }
-            cmd.args(["--progress", "plain", "up", "--detach"]);
+            let mut cmd = up_command(&app)?;
             if kind == "restart" {
                 // The game servers read their configs only when they start;
                 // the database and portal keep running.
@@ -244,6 +245,30 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             cmd.args(["--progress", "plain", "build"]);
             // A new build can upgrade the database on its next start.
             vec![Step::Backup(backup::Reason::Rebuild), Step::Compose(cmd)]
+        }
+        "update" => {
+            let env = app.env().ok_or("Finish setup first.")?;
+            let update = update::pending(&env).ok_or("The server is already on this version's rAthena.")?;
+            // The new commit goes into `.env` only once its image has built,
+            // so a failed or cancelled build leaves the update on offer.
+            cmd.env("RATHENA_REPO", &update.repo)
+                .env("RATHENA_COMMIT", &update.offered)
+                .args(["--progress", "plain", "build"]);
+            let running = stack::status(&app.dir)
+                .unwrap_or_default()
+                .iter()
+                .any(|s| stack::GAME_SERVERS.contains(&s.service.as_str()) && s.state == "running");
+            let mut steps = vec![
+                Step::Backup(backup::Reason::Update),
+                Step::Compose(cmd),
+                Step::Pin(update),
+            ];
+            // A running server moves to the new image now, which runs the
+            // database upgrades first; a stopped one does at its next Start.
+            if running {
+                steps.push(Step::Compose(up_command(&app)?));
+            }
+            steps
         }
         "stop" => {
             cmd.arg("down");
@@ -287,6 +312,11 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                     Ok(())
                 }
                 Step::Restore(file) => backup::restore(&ctx, &file),
+                Step::Pin(update) => {
+                    let mut env = EnvFile::load(&ctx.dir.join(".env")).map_err(|e| e.to_string())?;
+                    update::pin(&mut env, &update);
+                    env.save().map_err(|e| e.to_string())
+                }
             }
         });
         if let Err(e) = &result {
@@ -307,6 +337,19 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
         );
     });
     Ok(())
+}
+
+/// `docker compose up` for the whole stack, after re-detecting the LAN
+/// address unless one is pinned.
+fn up_command(app: &App) -> Result<std::process::Command, String> {
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
+        apply_public_ip(&mut env, None);
+        env.save().map_err(|e| e.to_string())?;
+    }
+    let mut cmd = stack::compose(&app.dir);
+    cmd.args(["--progress", "plain", "up", "--detach"]);
+    Ok(cmd)
 }
 
 /// Once `db-init` has finished, the admin account exists and the password
