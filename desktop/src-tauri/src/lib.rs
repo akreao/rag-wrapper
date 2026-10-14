@@ -1,7 +1,9 @@
+mod backup;
 mod envfile;
 mod net;
 mod settings;
 mod stack;
+mod task;
 
 use std::path::PathBuf;
 use std::process::Child;
@@ -13,11 +15,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use envfile::EnvFile;
+use task::{Ctx, Running};
 
 struct App {
     dir: PathBuf,
-    /// The running start, stop or build, if any. Only one at a time.
-    task: Arc<Mutex<Option<(String, Child)>>>,
+    /// Where database backups go.
+    backups: PathBuf,
+    /// The running start, stop, build, backup or restore, if any. Only one at a time.
+    task: task::Slot,
     logs: Mutex<Option<Child>>,
     /// Bumped on every log switch so the UI can drop lines from the old stream.
     logs_generation: AtomicU64,
@@ -73,7 +78,7 @@ fn overview(app: State<App>) -> Overview {
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
         prere: get("PRERE") != "no",
-        task: app.task.lock().unwrap().as_ref().map(|(k, _)| k.clone()),
+        task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
 
@@ -179,19 +184,27 @@ struct TaskEvent {
     ok: bool,
 }
 
-/// Runs `start`, `restart`, `stop` or `build`, streaming its output as `task-line` events.
+/// One step of a task, run in order until one fails.
+enum Step {
+    Compose(std::process::Command),
+    Backup(backup::Reason),
+    Restore(String),
+}
+
+/// Runs `start`, `restart`, `stop`, `build`, `backup` or `restore` (of
+/// `file`), streaming its output as `task-line` events.
 #[tauri::command]
-fn run_task(handle: AppHandle, app: State<App>, kind: String) -> Result<(), String> {
+fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<String>) -> Result<(), String> {
     if app.closing.load(Ordering::SeqCst) {
         return Err("The app is closing.".into());
     }
     let mut slot = app.task.lock().unwrap();
-    if let Some((running, _)) = slot.as_ref() {
-        return Err(format!("Wait for the current {running} to finish."));
+    if let Some(running) = slot.as_ref() {
+        return Err(format!("Wait for the current {} to finish.", running.kind));
     }
 
     let mut cmd = stack::compose(&app.dir);
-    match kind.as_str() {
+    let steps = match kind.as_str() {
         "start" | "restart" => {
             let mut env = app.env().ok_or("Finish setup first.")?;
             if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
@@ -204,36 +217,74 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String) -> Result<(), Stri
                 // the database and portal keep running.
                 cmd.args(["--no-deps", "--force-recreate"]).args(stack::GAME_SERVERS);
             }
+            vec![Step::Compose(cmd)]
         }
         "build" => {
             cmd.args(["--progress", "plain", "build"]);
+            // A new build can upgrade the database on its next start.
+            vec![Step::Backup(backup::Reason::Rebuild), Step::Compose(cmd)]
         }
         "stop" => {
             cmd.arg("down");
+            vec![Step::Compose(cmd)]
+        }
+        "backup" | "restore" => {
+            app.env().ok_or("Finish setup first.")?;
+            if kind == "backup" {
+                vec![Step::Backup(backup::Reason::Manual)]
+            } else {
+                vec![Step::Restore(file.ok_or("Pick a backup to restore.")?)]
+            }
         }
         _ => return Err(format!("Unknown task {kind}")),
-    }
+    };
 
-    let lines = handle.clone();
-    let (child, done) = stack::spawn_lines(cmd, move |line| {
-        let _ = lines.emit("task-line", line);
-    })
-    .map_err(|e| e.to_string())?;
-    *slot = Some((kind.clone(), child));
-    let _ = handle.emit("task", TaskEvent { kind: kind.clone(), running: true, ok: true });
+    *slot = Some(Running {
+        kind: kind.clone(),
+        pid: None,
+        cancelled: false,
+    });
+    drop(slot);
+    let _ = handle.emit(
+        "task",
+        TaskEvent {
+            kind: kind.clone(),
+            running: true,
+            ok: true,
+        },
+    );
 
-    let task = app.task.clone();
-    let dir = app.dir.clone();
+    let ctx = Ctx {
+        handle: handle.clone(),
+        dir: app.dir.clone(),
+        backups: app.backups.clone(),
+        slot: app.task.clone(),
+    };
     std::thread::spawn(move || {
-        let _ = done.join();
-        let finished = task.lock().unwrap().take();
-        let ok = finished
-            .and_then(|(_, mut child)| child.wait().ok())
-            .is_some_and(|s| s.success());
-        if ok && kind == "start" {
-            forget_admin_password(&dir);
+        let result = steps.into_iter().try_for_each(|step| {
+            ctx.check_cancelled()?;
+            match step {
+                Step::Compose(cmd) => ctx.run(cmd),
+                Step::Backup(reason) => backup::create(&ctx, reason, None).map(|_| ()),
+                Step::Restore(file) => backup::restore(&ctx, &file),
+            }
+        });
+        if let Err(e) = &result {
+            ctx.line(e.clone());
         }
-        let _ = handle.emit("task", TaskEvent { kind, running: false, ok });
+        let ok = result.is_ok();
+        if ok && kind == "start" {
+            forget_admin_password(&ctx.dir);
+        }
+        ctx.slot.lock().unwrap().take();
+        let _ = handle.emit(
+            "task",
+            TaskEvent {
+                kind,
+                running: false,
+                ok,
+            },
+        );
     });
     Ok(())
 }
@@ -241,7 +292,9 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String) -> Result<(), Stri
 /// Once `db-init` has finished, the admin account exists and the password
 /// has no further use, so no plain-text copy is kept in `.env`.
 fn forget_admin_password(dir: &std::path::Path) {
-    let Ok(mut env) = EnvFile::load(&dir.join(".env")) else { return };
+    let Ok(mut env) = EnvFile::load(&dir.join(".env")) else {
+        return;
+    };
     if env.get("ADMIN_PASSWORD").unwrap_or_default().is_empty() {
         return;
     }
@@ -257,9 +310,25 @@ fn forget_admin_password(dir: &std::path::Path) {
 
 #[tauri::command]
 fn cancel_task(app: State<App>) {
-    if let Some((_, child)) = app.task.lock().unwrap().as_ref() {
-        stack::interrupt(child);
+    if let Some(running) = app.task.lock().unwrap().as_mut() {
+        running.cancel();
     }
+}
+
+/// The backups, newest first.
+#[tauri::command]
+fn backups(app: State<App>) -> Vec<backup::Backup> {
+    backup::list(&app.backups)
+}
+
+/// Opens the backups folder in the file manager, so backups can be copied elsewhere.
+#[tauri::command]
+fn open_backups(handle: AppHandle, app: State<App>) -> Result<(), String> {
+    std::fs::create_dir_all(&app.backups).map_err(|e| e.to_string())?;
+    handle
+        .opener()
+        .open_path(app.backups.display().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -278,10 +347,13 @@ fn follow_logs(handle: AppHandle, app: State<App>, service: Option<String>) -> R
         let _ = old.kill();
         let _ = old.wait();
     }
-    let Some(service) = service else { return Ok(generation) };
+    let Some(service) = service else {
+        return Ok(generation);
+    };
 
     let mut cmd = stack::compose(&app.dir);
-    cmd.args(["logs", "--follow", "--no-log-prefix", "--tail", "500"]).arg(&service);
+    cmd.args(["logs", "--follow", "--no-log-prefix", "--tail", "500"])
+        .arg(&service);
     let (child, _) = stack::spawn_lines(cmd, move |line| {
         let _ = handle.emit("log-line", LogLine { generation, line });
     })
@@ -295,17 +367,22 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let dir = match stack::stack_dir_override() {
-                Some(dir) => dir,
+            let (dir, backups) = match stack::stack_dir_override() {
+                Some(dir) => {
+                    let backups = dir.join("backups");
+                    (dir, backups)
+                }
                 None => {
-                    let dir = app.path().app_data_dir()?.join("stack");
+                    let data = app.path().app_data_dir()?;
+                    let dir = data.join("stack");
                     let bundled = app.path().resource_dir()?.join("stack");
                     stack::install(&bundled, &dir)?;
-                    dir
+                    (dir, data.join("backups"))
                 }
             };
             app.manage(App {
                 dir,
+                backups,
                 task: Arc::new(Mutex::new(None)),
                 logs: Mutex::new(None),
                 logs_generation: AtomicU64::new(0),
@@ -324,6 +401,8 @@ pub fn run() {
             services,
             run_task,
             cancel_task,
+            backups,
+            open_backups,
             follow_logs
         ])
         .on_window_event(|window, event| {
@@ -352,12 +431,14 @@ pub fn run() {
 }
 
 /// The server only runs while the app is open: closing the window cancels
-/// any build or start, takes the stack down (the database volume is kept)
-/// and then exits.
+/// any build or start (a backup or restore is left to finish), takes the
+/// stack down (the database volume is kept) and then exits.
 fn stop_and_exit(handle: AppHandle) {
     let app = handle.state::<App>();
-    if let Some((_, child)) = app.task.lock().unwrap().as_ref() {
-        stack::interrupt(child);
+    if let Some(running) = app.task.lock().unwrap().as_mut() {
+        if !["backup", "restore"].contains(&running.kind.as_str()) {
+            running.cancel();
+        }
     }
     while app.task.lock().unwrap().is_some() {
         std::thread::sleep(std::time::Duration::from_millis(200));

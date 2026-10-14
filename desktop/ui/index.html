@@ -60,6 +60,17 @@
         <p id="portal" hidden><a href="#" id="portal-link">Open the account portal</a></p>
         <p class="hint">Admin account: <span id="admin-name"></span></p>
       </section>
+      <section class="card">
+        <h2>Backups</h2>
+        <div class="row">
+          <button id="backup-now">Back up now</button>
+          <button id="open-backups">Open folder</button>
+        </div>
+        <p class="hint">The database is also backed up before every rebuild. The newest 10 backups are kept.</p>
+        <p id="backup-error" class="error" hidden></p>
+        <ul id="backups"></ul>
+        <p id="no-backups" class="hint" hidden>No backups yet.</p>
+      </section>
     </aside>
     <section class="card logs">
       <div class="tabs">

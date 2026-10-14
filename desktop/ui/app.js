@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "stop" or "build" while one runs
+let task = null; // "start", "restart", "stop", "build", "backup" or "restore" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -181,7 +181,8 @@ async function refreshOverview() {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart"]) $(id).disabled = !ready || !!task;
+  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now"]) $(id).disabled = !ready || !!task;
+  for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("cancel").hidden = !["build", "start", "restart"].includes(task);
 }
 
@@ -365,14 +366,86 @@ $("portal-link").addEventListener("click", (e) => {
   invoke("plugin:opener|open_url", { url: e.target.dataset.url });
 });
 
+// ---- Backups ----
+
+const REASONS = {
+  manual: "Backed up by hand",
+  rebuild: "Before a rebuild",
+  "before-restore": "Before a restore",
+};
+
+function size(bytes) {
+  if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+  if (bytes >= 1 << 10) return `${Math.round(bytes / (1 << 10))} KB`;
+  return `${bytes} bytes`;
+}
+
+let confirming = null; // the backup whose restore is being confirmed
+
+async function refreshBackups() {
+  if (!overview?.configured) return;
+  const list = await invoke("backups");
+  $("no-backups").hidden = list.length > 0;
+  $("backups").replaceChildren(
+    ...list.map((b) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<span><span class="when"></span><br><span class="what muted"></span></span><button>Restore</button>`;
+      li.querySelector(".when").textContent = b.created.slice(0, 16);
+      li.querySelector(".what").textContent = `${REASONS[b.reason] || b.reason} · ${size(b.size)}`;
+      li.title = b.file;
+      li.querySelector("button").addEventListener("click", () => {
+        confirming = confirming === b.file ? null : b.file;
+        refreshBackups();
+      });
+      if (confirming === b.file) {
+        const p = document.createElement("p");
+        p.className = "confirm notice";
+        p.textContent =
+          "Replace the database with this backup? Everything since then is lost: accounts, characters, items. " +
+          "The servers stop while it loads; the current database is backed up first.";
+        const yes = document.createElement("button");
+        yes.className = "primary";
+        yes.textContent = "Restore";
+        yes.addEventListener("click", () => {
+          confirming = null;
+          li.querySelector(".confirm").remove();
+          runTask("restore", b.file);
+        });
+        const no = document.createElement("button");
+        no.textContent = "Cancel";
+        no.addEventListener("click", () => {
+          confirming = null;
+          refreshBackups();
+        });
+        p.append(document.createElement("br"), yes, no);
+        li.append(p);
+      }
+      return li;
+    }),
+  );
+  updateButtons();
+}
+
+$("backup-now").addEventListener("click", () => runTask("backup"));
+
+$("open-backups").addEventListener("click", async () => {
+  $("backup-error").hidden = true;
+  try {
+    await invoke("open_backups");
+  } catch (err) {
+    $("backup-error").textContent = `Couldn't open the folder: ${err}`;
+    $("backup-error").hidden = false;
+  }
+});
+
 // ---- Tasks ----
 
-async function runTask(kind) {
+async function runTask(kind, file) {
   activity.length = 0;
   clearProgress();
   await showView("activity");
   try {
-    await invoke("run_task", { kind });
+    await invoke("run_task", { kind, file: file ?? null });
   } catch (err) {
     push(activity, String(err));
     render();
@@ -396,11 +469,14 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", stop: "Stop", build: "Build" }[payload.kind];
+    const verb = { start: "Start", restart: "Restart", stop: "Stop", build: "Build", backup: "Backup", restore: "Restore" }[
+      payload.kind
+    ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);
     if (view === "activity") render();
     await refreshOverview();
     await refreshServices();
+    await refreshBackups();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
       if (payload.ok) await runTask("start");
@@ -430,5 +506,5 @@ listen("closing", async () => {
   await showView("activity");
 });
 
-refreshOverview().then(refreshServices);
+refreshOverview().then(refreshServices).then(refreshBackups);
 setInterval(refreshServices, 3000);
