@@ -14,3 +14,7 @@ Both versions of the 2025-07-16 steps (the patcher, and patching by hand with WA
 - **`DATA.INI` still comes from our patches.** Whatever the translation install leaves in `DATA.INI`, the patcher's patches rewrite it with `rag-wrapper.grf` above `data.grf` ([publish-client-patch.md](publish-client-patch.md)). WARPGATE's page says it won't overwrite `DATA.INI` or `clientinfo.xml` on updates, so the patched copy stays.
 - **Pre-Renewal is written into the page.** It matches the app's default mode; the portal doesn't know the build mode.
 - **Verified vs inferred (2026-10-14):** the LANG tab, the Renewal/Pre-Renewal choice, automatic translation updates and leaving `DATA.INI` alone come from WARPGATE's own site. The exact install button label isn't on the site, so the page doesn't name it. Nothing has been tried on Windows yet.
+
+## Only `clientinfo.xml`
+
+The portal no longer offers `sclientinfo.xml`, on the connect page, as a download or in the patcher zip (Steven, 2026-10-14). It was the same file under the name Sakray (kRO's test server) clients read, and nobody plays on a Sakray client. A copy left in a player's `data` folder from an earlier download is harmless.

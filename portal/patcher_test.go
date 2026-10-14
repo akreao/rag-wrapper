@@ -116,7 +116,7 @@ func TestPatcherRoutes(t *testing.T) {
 	}
 	if files[patcherName+".exe"] != "MZ" || files["licenses/rpatchur-LICENSE-MIT.txt"] != "MIT" ||
 		!strings.Contains(files[patcherName+".yml"], `"http://10.0.0.5:8080/patcher/plist.txt"`) ||
-		!strings.Contains(files["data/clientinfo.xml"], "<address>10.0.0.5</address>") || files["data/sclientinfo.xml"] == "" {
+		!strings.Contains(files["data/clientinfo.xml"], "<address>10.0.0.5</address>") || files["data/sclientinfo.xml"] != "" {
 		t.Fatalf("zip files: %v", files)
 	}
 

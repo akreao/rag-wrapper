@@ -66,7 +66,10 @@ func TestConnectRoutes(t *testing.T) {
 		t.Fatalf("GET /connect: %d\n%s", rec.Code, rec.Body)
 	}
 
-	for _, name := range []string{"clientinfo.xml", "sclientinfo.xml"} {
+	if rec := get(h, "/connect/sclientinfo.xml"); rec.Code != http.StatusNotFound {
+		t.Fatalf("sclientinfo.xml is still served: %d", rec.Code)
+	}
+	for _, name := range []string{"clientinfo.xml"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://10.0.0.5:8080/connect/"+name, nil))
 		body := rec.Body.String()

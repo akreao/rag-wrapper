@@ -71,7 +71,6 @@ func (c connectInfo) CharPort() int  { return charPort }
 func (c connectInfo) MapPort() int   { return mapPort }
 
 // clientInfo builds a clientinfo.xml that sends the client to this server.
-// sclientinfo.xml is the same file under the name Sakray clients look for.
 // It declares euc-kr like the stock file; the content is ASCII, since the
 // Settings screen only allows ASCII server names.
 // registerURL is the portal's sign-up page, which some clients open from
@@ -129,14 +128,12 @@ func (a *app) connect(req *request) error {
 	return nil
 }
 
-// clientInfoFile serves clientinfo.xml or sclientinfo.xml as a download.
-func (a *app) clientInfoFile(name string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-		w.Header().Set("Cache-Control", "no-store")
-		w.Write(a.conn.clientInfo("http://" + r.Host + "/register"))
-	}
+// clientInfoFile serves clientinfo.xml as a download.
+func (a *app) clientInfoFile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="clientinfo.xml"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(a.conn.clientInfo("http://" + r.Host + "/register"))
 }
 
 // PatcherZip and PatcherExe name the patcher download and the program in it.

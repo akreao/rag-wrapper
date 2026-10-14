@@ -19,13 +19,13 @@
     <li><strong>Make an account.</strong> {{if $.Account}}You're logged in as {{$.Account.UserID}}, so this is done.{{else}}<a href="/register">Create one here</a>; the game uses the same username and password.{{end}}</li>
     <li><strong>Install the Korean client.</strong> Get it with <a href="https://warp.legacygamers.net/" rel="noopener noreferrer">WARPGATE</a>: create a gate (a folder for the client) and let it download the client. You don't need WARPGATE's RAGEXE or WARP tabs; the patcher below brings the client exe this server uses.</li>
     <li><strong>Install the English translation.</strong> In WARPGATE, open the <em>LANG</em> tab, choose <em>Pre-Renewal</em> and install it. That's <a href="https://github.com/llchrisll/ROenglishRE" rel="noopener noreferrer">llchrisll's English translation</a>, and WARPGATE keeps it up to date. The client exe from the patcher already reads it.</li>
-    <li><strong>Download the patcher</strong> and extract everything in it into the client folder, the one with <code>data.grf</code> in it. It holds the patcher, its settings, and the connection files for the <code>data</code> folder; let it replace any copies already there.
+    <li><strong>Download the patcher</strong> and extract everything in it into the client folder, the one with <code>data.grf</code> in it. It holds the patcher, its settings, and the connection file for the <code>data</code> folder; let it replace any copies already there.
       <p class="downloads"><a class="button" href="/connect/{{.PatcherZip}}" download>Download the patcher</a></p>
       <small>If Windows says it protected your PC when you start the patcher, click <em>More info</em>, then <em>Run anyway</em>. It warns about any program that isn't signed by a known company.</small></li>
     <li><strong>Start <code>{{.PatcherExe}}</code></strong> in the client folder. It downloads this server's client and its custom files, then says it's ready; click <em>Play</em> and log in with your account. Start the game from the patcher every time, so you always have the server's newest files. If it can't connect, check that this PC can reach <code>{{.Address}}</code> and that the server's firewall lets the ports above through.</li>
   </ol>
-  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the patcher again, or just the connection files for the <code>data</code> folder:
-    <a href="/connect/clientinfo.xml" download>clientinfo.xml</a> and <a href="/connect/sclientinfo.xml" download>sclientinfo.xml</a>.</p>
+  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the patcher again, or just the connection file for the <code>data</code> folder:
+    <a href="/connect/clientinfo.xml" download>clientinfo.xml</a>.</p>
 </section>
 {{else}}<section>
   <h2>Steps</h2>
@@ -35,14 +35,13 @@
     {{if eq .PacketVer "20250716"}}<li><strong>Install the English translation.</strong> In WARPGATE, open the <em>LANG</em> tab, choose <em>Pre-Renewal</em> and install it. That's <a href="https://github.com/llchrisll/ROenglishRE" rel="noopener noreferrer">llchrisll's English translation</a>, and WARPGATE keeps it up to date.</li>
     <li><strong>Patch the client to read your own connection file.</strong> Unpatched, it ignores a custom <code>clientinfo.xml</code> and tries the official servers. Download <a href="https://github.com/CrazyBebop/WARP0716" rel="noopener noreferrer">WARP0716</a> (the green Code button, then Download ZIP) and unzip it. Copy the exe from WARPGATE into its <code>Inputs</code> folder, open <code>win32\WARP.exe</code>, load the exe, click <em>Select Recommended</em> and apply. The patched exe appears in <code>Outputs</code>; put it in your client folder. WARPGATE's own WARP tab doesn't work at the moment. This server hasn't published its own patched client yet; once it has, this page offers a patcher that does all of this.</li>
     {{else}}<li><strong>Patch the client to read your own connection file.</strong> Unpatched clients from recent years ignore a custom <code>clientinfo.xml</code> and try the official servers. Patch the client's <code>.exe</code> with <a href="https://github.com/Neo-Mind/WARP" rel="noopener noreferrer">WARP</a>, or another patcher that supports your client's date, and turn on at least <em>Restore the use of clientinfo xml</em> and <em>Read data folder first</em>. The patcher's own guide explains how to load a client and apply patches. This page doesn't hand out patched clients.</li>{{end}}
-    <li><strong>Download the connection files</strong> and put both in the client's <code>data</code> folder, next to the <code>.exe</code> (make the folder if it isn't there). Replace any copies already in it.{{if eq .PacketVer "20250716"}} WARPGATE leaves these files alone when it updates the client.{{end}}
+    <li><strong>Download the connection file</strong> and put it in the client's <code>data</code> folder, next to the <code>.exe</code> (make the folder if it isn't there). Replace any copy already in it.{{if eq .PacketVer "20250716"}} WARPGATE leaves this file alone when it updates the client.{{end}}
       <p class="downloads">
         <a class="button" href="/connect/clientinfo.xml" download>clientinfo.xml</a>
-        <a class="button" href="/connect/sclientinfo.xml" download>sclientinfo.xml</a>
       </p>
-      <small>They're the same file under the two names clients look for. If the patcher asked you for a custom file name, rename one of them to that.</small></li>
+      <small>If the patcher asked you for a custom file name, rename it to that.</small></li>
     <li><strong>Start the patched client and log in</strong> with your account. If it can't connect, check that this PC can reach <code>{{.Address}}</code> and that the server's firewall lets the ports above through.</li>
   </ol>
-  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the files again.</p>
+  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the file again.</p>
 </section>
 {{end}}{{end}}{{end}}
