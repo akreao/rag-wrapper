@@ -166,6 +166,14 @@ Roadmap feature 7's last pieces, added to the portal's admin pages: account sear
 - **Admin actions are logged to the portal's log.** Every group change, ban, unban, password reset and character move writes one line naming the admin, the action and the account or character. The desktop app shows the portal's log with the other services' logs. There's no history table or page; the log is lost when the container is recreated.
 - **Storage and cart are shown too.** The character page lists the cart below the inventory (when there's anything in it), and the account page lists the account's Kafra storage, which its characters share. "Where did my item go?" is the usual reason to look, and the answer is often storage. All read-only.
 
+# Live dashboard
+
+Questions asked about the desktop app's live view (roadmap feature 4, PR #11), one at a time. It shows who's online, uptime, and each container's CPU and memory, in the desktop app only.
+
+- **The live view has its own page.** A Dashboard button in the header, beside Settings and Backups, opens it: the characters online, then each container's CPU and memory. The main screen stays as it was, with Services and the Activity log. It only refreshes while the page is open, so `docker stats` doesn't run in the background.
+- **Uptime counts from the map server's start.** That's how long players have been able to play without a break; Restart game servers disconnects everyone, so it resets uptime too.
+- **CPU is a share of the whole computer.** `docker stats` counts percent of one core, which can read 300% on a busy multi-core PC; the app divides by the number of cores so 100% means the whole computer, like Task Manager. The numbers won't match `docker stats` or `top`.
+
 # Client patcher in the portal
 
 Roadmap feature 10's portal side: the portal hosts an [rpatchur](https://github.com/L1nkZ/rpatchur) patcher for players, and the "How to connect" page offers it. Publishing patches (the desktop app's "Publish client patch" button) is a separate piece of work.
