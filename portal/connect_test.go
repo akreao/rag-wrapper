@@ -36,6 +36,9 @@ func TestClientInfo(t *testing.T) {
 	if !(connectInfo{Address: "127.0.0.1"}).Loopback() {
 		t.Fatal("127.0.0.1 should be loopback")
 	}
+	if d := (connectInfo{PacketVer: "20250716"}).ClientDate(); d != "2025-07-16" {
+		t.Fatal(d)
+	}
 }
 
 func TestConnectRoutes(t *testing.T) {
@@ -46,6 +49,12 @@ func TestConnectRoutes(t *testing.T) {
 	h := a.routes()
 
 	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if loc := rec.Header().Get("Location"); loc != "/connect" {
+		t.Fatalf("GET / logged out redirects to %q", loc)
+	}
+
+	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/connect", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "10.0.0.5") ||
 		!strings.Contains(rec.Body.String(), "2022-04-06") {

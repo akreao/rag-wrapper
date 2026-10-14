@@ -82,7 +82,7 @@ func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /healthz", a.healthz)
-	mux.HandleFunc("GET /{$}", a.home)
+	mux.HandleFunc("GET /{$}", a.page(a.home))
 	mux.HandleFunc("GET /connect", a.page(a.connect))
 	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile("clientinfo.xml"))
 	mux.HandleFunc("GET /connect/sclientinfo.xml", a.clientInfoFile("sclientinfo.xml"))
@@ -232,8 +232,13 @@ func (a *app) healthz(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok\n"))
 }
 
-func (a *app) home(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/account", http.StatusSeeOther)
+// home sends players to their account, and visitors who aren't logged in
+// (most likely new players) to the setup steps.
+func (a *app) home(req *request) error {
+	if req.account == nil {
+		return a.redirect(req, "/connect", "")
+	}
+	return a.redirect(req, "/account", "")
 }
 
 // --- Logging in and out ---
