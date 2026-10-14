@@ -62,4 +62,6 @@ The workflow checks the tag matches the version, builds `rag-wrapper-0.2.0-x86_6
 
 Inside the AppImage, its launcher points `LD_LIBRARY_PATH`, `XDG_DATA_DIRS` and GTK's module paths at the libraries bundled with it. The app takes those entries out again for every program it starts (`docker`, and `xdg-open` for folders and web pages, in `src/host.rs`), so the host's own file manager and browser don't load the bundled libraries.
 
+Run from the AppImage, the app also writes an applications menu entry on every launch (`src/menu.rs`), pointing at the AppImage's current path.
+
 The UI is plain HTML, CSS and JavaScript in `ui/`; there is no npm step.

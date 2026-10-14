@@ -4,6 +4,7 @@ mod envfile;
 mod host;
 mod jobs;
 mod live;
+mod menu;
 mod net;
 mod settings;
 mod stack;
@@ -499,6 +500,10 @@ fn follow_logs(handle: AppHandle, app: State<App>, service: Option<String>) -> R
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            // A menu entry is a convenience: the app runs without one.
+            if let Err(e) = menu::install(&app.path().app_data_dir()?) {
+                eprintln!("Couldn't add the applications menu entry: {e}");
+            }
             // Backups and client files sit beside the stack, not in it.
             let (dir, data) = match stack::stack_dir_override() {
                 Some(dir) => (dir.clone(), dir),

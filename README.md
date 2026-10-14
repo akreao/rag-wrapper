@@ -13,7 +13,7 @@ chmod +x rag-wrapper-*-x86_64.AppImage
 ./rag-wrapper-*-x86_64.AppImage
 ```
 
-To update, download the new AppImage and run it instead of the old one; the server's settings, database, backups and client files stay where they are.
+After the first run it's in your applications menu too. To update, download the new AppImage and run it instead of the old one; the server's settings, database, backups and client files stay where they are.
 
 ## Running the server stack
 
