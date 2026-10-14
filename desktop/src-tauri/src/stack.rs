@@ -49,10 +49,18 @@ fn copy_dir(bundled: &Path, dest: &Path) -> std::io::Result<()> {
 pub fn compose(dir: &Path) -> Command {
     let mut cmd = Command::new("docker");
     cmd.current_dir(dir)
-        .args(["compose", "--ansi", "never", "--project-name", PROJECT, "--project-directory"])
+        .args([
+            "compose",
+            "--ansi",
+            "never",
+            "--project-name",
+            PROJECT,
+            "--project-directory",
+        ])
         .arg(dir)
         .arg("--file")
-        .arg(dir.join("compose.yaml"));
+        .arg(dir.join("compose.yaml"))
+        .stdin(Stdio::null());
     cmd
 }
 
@@ -182,23 +190,17 @@ fn parse_ps(text: &str) -> Vec<PsEntry> {
     if text.starts_with('[') {
         return serde_json::from_str(text).unwrap_or_default();
     }
-    text.lines()
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect()
+    text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
 }
 
 /// Starts `cmd` with stdout and stderr piped, calling `on_line` for each
-/// line of either from reader threads. Returns the child and a handle that
-/// finishes once both streams close.
+/// line of either from reader threads; stdin is left as `cmd` sets it.
+/// Returns the child and a handle that finishes once both streams close.
 pub fn spawn_lines<F>(mut cmd: Command, on_line: F) -> std::io::Result<(Child, thread::JoinHandle<()>)>
 where
     F: Fn(String) + Send + Sync + 'static,
 {
-    let mut child = cmd
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     let on_line = std::sync::Arc::new(on_line);
     let readers: Vec<_> = [
         Box::new(child.stdout.take().unwrap()) as Box<dyn Read + Send>,
@@ -230,8 +232,8 @@ where
 
 /// Asks a process to stop the way Ctrl+C would, so `docker compose` can
 /// cancel a build or log stream cleanly.
-pub fn interrupt(child: &Child) {
-    let _ = Command::new("kill").args(["-INT", &child.id().to_string()]).status();
+pub fn interrupt(pid: u32) {
+    let _ = Command::new("kill").args(["-INT", &pid.to_string()]).status();
 }
 
 pub fn stack_dir_override() -> Option<PathBuf> {

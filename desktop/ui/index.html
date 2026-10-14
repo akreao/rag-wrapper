@@ -13,6 +13,7 @@
     <span id="docker" class="muted"></span>
     <div class="actions">
       <button id="nav" hidden>Settings</button>
+      <button id="nav-backups" hidden>Backups</button>
       <button id="start" class="primary">Start server</button>
       <button id="stop">Stop</button>
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
@@ -147,6 +148,20 @@
       <p id="build-error" class="error" hidden></p>
       <button id="build-save" type="submit">Save and rebuild</button>
     </form>
+  </main>
+
+  <main id="backups-page" hidden>
+    <section class="card">
+      <h2>Backups</h2>
+      <div class="row">
+        <button id="backup-now">Back up now</button>
+        <button id="open-backups">Open folder</button>
+      </div>
+      <p class="hint">The database is also backed up before every rebuild, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones.</p>
+      <p id="backup-error" class="error" hidden></p>
+      <ul id="backups"></ul>
+      <p id="no-backups" class="hint" hidden>No backups yet.</p>
+    </section>
   </main>
 </body>
 </html>
