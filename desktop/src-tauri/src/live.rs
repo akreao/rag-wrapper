@@ -10,8 +10,9 @@ use crate::{host, jobs, stack};
 
 /// The characters rAthena marks online. The char server sets the flag and
 /// clears every one when it starts, so it's only meaningful while it runs.
-/// Uses the database's own account, not root.
-const PLAYERS: &str = r#"MYSQL_PWD="$MARIADB_PASSWORD" exec mariadb --user="$MARIADB_USER" --batch --skip-column-names "$MARIADB_DATABASE" \
+/// Uses the database's own account, not root. Takes the characters
+/// database as `$1`.
+const PLAYERS: &str = r#"MYSQL_PWD="$MARIADB_PASSWORD" exec mariadb --user="$MARIADB_USER" --batch --skip-column-names "$1" \
   -e 'SELECT name, class, base_level, job_level, last_map FROM `char` WHERE online = 1 ORDER BY name'"#;
 
 #[derive(Serialize, Default, Debug)]
@@ -78,7 +79,7 @@ pub fn read(dir: &Path) -> Live {
                 return None;
             }
             let mut cmd = stack::compose(dir);
-            cmd.args(["exec", "-T", "db", "sh", "-c", PLAYERS]);
+            cmd.args(["exec", "-T", "db", "sh", "-c", PLAYERS, "sh", stack::chars_db(dir)]);
             stack::output(cmd).ok().map(|t| parse_players(&t))
         });
         let uptime = scope.spawn(|| {

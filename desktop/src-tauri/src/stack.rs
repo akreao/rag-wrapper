@@ -33,6 +33,14 @@ pub const GAME_SERVERS: [&str; 3] = ["login", "char", "map"];
 pub const READDRESSED: [&str; 3] = ["char", "map", "portal"];
 
 /// The settings template, compiled in: Tauri's resource bundling skips dotfiles.
+/// The database with the characters of the game mode `.env` in `dir` sets
+/// (`PRERE`), one per mode; db-init makes it on the first start in that mode.
+pub fn chars_db(dir: &Path) -> &'static str {
+    let renewal = crate::envfile::EnvFile::load(&dir.join(".env"))
+        .is_ok_and(|env| env.get("PRERE").as_deref() == Some("no"));
+    if renewal { "ragnarok_re" } else { "ragnarok_prere" }
+}
+
 pub const ENV_EXAMPLE: &str = include_str!("../../../.env.example");
 
 /// Copies the stack files bundled with the app (compose.yaml, docker/,

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -62,7 +63,7 @@ func main() {
 		},
 	}
 
-	app, err := newApp(&store{db: db}, adminGroup, conn)
+	app, err := newApp(&store{db: db, chars: charsPrefix(cfg.DBName, conn.Renewal)}, adminGroup, conn)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,6 +90,16 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+// charsPrefix names the game mode's characters database, which db-init
+// makes next to the accounts database, as a prefix for its tables.
+func charsPrefix(accounts string, renewal bool) string {
+	name := env("CHAR_DB_NAME", accounts+"_prere")
+	if renewal {
+		name = env("CHAR_DB_NAME", accounts+"_re")
+	}
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`."
 }
 
 // waitForDB gives the database a minute to come up, so the portal can

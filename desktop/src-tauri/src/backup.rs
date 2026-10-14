@@ -1,4 +1,4 @@
-//! Database backups: gzipped `mariadb-dump`s of the `ragnarok` database in
+//! Database backups: gzipped `mariadb-dump`s of the `ragnarok` databases in
 //! the app's backups folder, the newest few kept, and loading one back.
 
 use std::fs::{self, File};
@@ -29,9 +29,14 @@ const SUFFIX: &str = ".sql.gz";
 /// MariaDB repairs them when they're next opened, but not under the dump's
 /// read lock, so the dump first repairs any that weren't closed properly.
 /// Its report goes to stderr, keeping stdout for the dump.
+///
+/// It holds the accounts database and each game mode's characters
+/// database there is so far, with the statements that create them.
 const DUMP: &str = r#"export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"
-mariadb-check --user=root --fast --auto-repair --silent ragnarok >&2 || exit
-exec mariadb-dump --user=root --lock-all-tables --routines --events --triggers ragnarok"#;
+dbs=$(mariadb --user=root --skip-column-names -e "SELECT schema_name FROM information_schema.schemata
+  WHERE schema_name IN ('ragnarok', 'ragnarok_prere', 'ragnarok_re') ORDER BY schema_name") || exit
+mariadb-check --user=root --fast --auto-repair --silent --databases $dbs >&2 || exit
+exec mariadb-dump --user=root --lock-all-tables --routines --events --triggers --databases $dbs"#;
 const LOAD: &str = r#"MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb --user=root"#;
 
 /// mariadb-dump's last line; a dump without it was cut short.
@@ -328,7 +333,7 @@ fn check(path: &Path) -> Result<(), String> {
 
 /// Replaces the database with a backup: checks the file, stops everything
 /// that uses the database, backs up the current database, loads the dump
-/// into an emptied `ragnarok` database, and starts the server again if it
+/// into emptied `ragnarok` databases, and starts the server again if it
 /// was running.
 pub fn restore(ctx: &Ctx, file: &str) -> Result<(), String> {
     if parse(file).is_none() {
@@ -392,8 +397,14 @@ fn load(ctx: &Ctx, path: &Path) -> Result<(), String> {
     ctx.track(Some(child.id()));
     let mut stdin = child.stdin.take().unwrap();
     let fed = (|| -> io::Result<()> {
-        // Tables made after the backup would otherwise survive the restore.
-        stdin.write_all(b"DROP DATABASE IF EXISTS ragnarok;\nCREATE DATABASE ragnarok;\nUSE ragnarok;\n")?;
+        // Tables and databases made after the backup would otherwise
+        // survive the restore. A backup from before each game mode had its
+        // own characters database names none, so it goes into `ragnarok`,
+        // and the next start moves its characters out again.
+        stdin.write_all(
+            b"DROP DATABASE IF EXISTS ragnarok;\nDROP DATABASE IF EXISTS ragnarok_prere;\nDROP DATABASE IF EXISTS ragnarok_re;\n\
+              CREATE DATABASE ragnarok;\nUSE ragnarok;\n",
+        )?;
         io::copy(&mut GzDecoder::new(BufReader::new(File::open(path)?)), &mut stdin)?;
         Ok(())
     })();
