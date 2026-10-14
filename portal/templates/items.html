@@ -1,0 +1,11 @@
+{{define "items"}}<table>
+  <thead><tr><th>Item</th><th>Amount</th><th>Cards</th><th></th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td>{{.Label}} <small class="note">#{{.ItemID}}</small></td>
+    <td>{{.Amount}}</td>
+    <td>{{range $i, $n := .CardNames}}{{if $i}}, {{end}}{{$n}}{{end}}</td>
+    <td>{{if .Equipped}}<span class="tag on">Equipped</span>{{end}}{{if not .Identified}}<span class="tag">Unidentified</span>{{end}}{{if .Broken}}<span class="tag bad">Broken</span>{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>{{end}}

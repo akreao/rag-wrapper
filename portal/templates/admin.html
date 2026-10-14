@@ -1,6 +1,6 @@
 {{define "content"}}<h1>Accounts</h1>
 <form method="get" action="/admin" class="search">
-  <input name="q" value="{{.Data.Query}}" placeholder="Username or email">
+  <input name="q" value="{{.Data.Query}}" placeholder="Username, email or character name">
   <button>Search</button>
 </form>
 {{with .Data.Accounts}}

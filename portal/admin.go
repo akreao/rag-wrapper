@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -53,6 +56,7 @@ type adminAccountData struct {
 	Target     *Account
 	Self       bool
 	Characters []Character
+	Storage    []Item
 }
 
 // target loads the account named in the URL, or writes a 404.
@@ -82,10 +86,14 @@ func (a *app) showAdminAccount(req *request, t *Account, errMsg string) error {
 	if err != nil {
 		return err
 	}
+	storage, err := a.store.storage(req.r.Context(), t.ID)
+	if err != nil {
+		return err
+	}
 	a.render(req, http.StatusOK, "admin_account", view{
 		Title: t.UserID,
 		Error: errMsg,
-		Data:  adminAccountData{Target: t, Self: t.ID == req.account.ID, Characters: chars},
+		Data:  adminAccountData{Target: t, Self: t.ID == req.account.ID, Characters: chars, Storage: storage},
 	})
 	return nil
 }
@@ -109,6 +117,7 @@ func (a *app) adminSetGroup(req *request) error {
 	if err := a.store.setGroup(req.r.Context(), t.ID, group); err != nil {
 		return err
 	}
+	a.audit(req, "set group of account %d %q to %d (%s)", t.ID, t.UserID, group, groupName(group))
 	return a.redirect(req, adminAccountURL(t), t.UserID+" is now in "+groupName(group)+". It applies from their next login.")
 }
 
@@ -142,6 +151,7 @@ func (a *app) adminBan(req *request) error {
 		return err
 	}
 	a.sessions.endAccount(t.ID, nil)
+	a.audit(req, "banned account %d %q (%s)", t.ID, t.UserID, req.r.PostFormValue("length"))
 	return a.redirect(req, adminAccountURL(t), t.UserID+" is banned.")
 }
 
@@ -153,6 +163,7 @@ func (a *app) adminUnban(req *request) error {
 	if err := a.store.unban(req.r.Context(), t.ID); err != nil {
 		return err
 	}
+	a.audit(req, "lifted the ban on account %d %q", t.ID, t.UserID)
 	return a.redirect(req, adminAccountURL(t), t.UserID+" can log in again.")
 }
 
@@ -174,7 +185,101 @@ func (a *app) adminSetPassword(req *request) error {
 		return err
 	}
 	a.sessions.endAccount(t.ID, nil)
+	a.audit(req, "set a new password for account %d %q", t.ID, t.UserID)
 	return a.redirect(req, adminAccountURL(t), "New password set for "+t.UserID+". Ask them to change it on their account page.")
 }
 
 func adminAccountURL(t *Account) string { return "/admin/accounts/" + strconv.Itoa(t.ID) }
+
+// --- Characters ---
+
+type adminCharacterData struct {
+	Character *Character
+	Owner     *Account
+	Items     []Item
+	Cart      []Item
+}
+
+// character loads the character named in the URL, or writes a 404.
+func (a *app) character(req *request) (*Character, error) {
+	id, err := strconv.Atoi(req.r.PathValue("id"))
+	if err != nil {
+		a.render(req, http.StatusNotFound, "error", view{Title: "No such character", Error: "There's no character with that number."})
+		return nil, nil
+	}
+	c, err := a.store.characterByID(req.r.Context(), id)
+	if err == nil && c == nil {
+		a.render(req, http.StatusNotFound, "error", view{Title: "No such character", Error: "There's no character with that number."})
+	}
+	return c, err
+}
+
+func (a *app) adminCharacter(req *request) error {
+	c, err := a.character(req)
+	if c == nil || err != nil {
+		return err
+	}
+	return a.showAdminCharacter(req, c, "")
+}
+
+func (a *app) showAdminCharacter(req *request, c *Character, errMsg string) error {
+	owner, err := a.store.accountByID(req.r.Context(), c.AccountID)
+	if err != nil {
+		return err
+	}
+	items, err := a.store.inventory(req.r.Context(), c.ID)
+	if err != nil {
+		return err
+	}
+	cart, err := a.store.cart(req.r.Context(), c.ID)
+	if err != nil {
+		return err
+	}
+	a.render(req, http.StatusOK, "admin_character", view{
+		Title: c.Name,
+		Error: errMsg,
+		Data:  adminCharacterData{Character: c, Owner: owner, Items: items, Cart: cart},
+	})
+	return nil
+}
+
+// adminMoveToSavePoint is for a character stuck somewhere it can't leave,
+// such as a map that crashes the client or a spot inside a wall.
+func (a *app) adminMoveToSavePoint(req *request) error {
+	return a.moveCharacter(req, "save point", a.store.moveToSavePoint, func(c *Character) string {
+		return c.Name + " will log in at " + c.SaveMap + " (" + strconv.Itoa(c.SaveX) + ", " + strconv.Itoa(c.SaveY) + ")."
+	})
+}
+
+// adminMoveToTown is for a character whose save point is itself the spot
+// it's stuck in.
+func (a *app) adminMoveToTown(req *request) error {
+	return a.moveCharacter(req, townMap, a.store.moveToTown, func(c *Character) string {
+		return c.Name + " will log in at " + townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + "), now also its save point."
+	})
+}
+
+func (a *app) moveCharacter(req *request, where string, move func(context.Context, int) error, done func(*Character) string) error {
+	c, err := a.character(req)
+	if c == nil || err != nil {
+		return err
+	}
+	err = move(req.r.Context(), c.ID)
+	if errors.Is(err, errCharacterOnline) {
+		c.Online = true
+		return a.showAdminCharacter(req, c, c.Name+" is in game. Ask the player to log out, or use @jumpto or @recall in game.")
+	}
+	if err != nil {
+		return err
+	}
+	a.audit(req, "moved character %d %q to %s", c.ID, c.Name, where)
+	return a.redirect(req, adminCharacterURL(c), done(c))
+}
+
+func adminCharacterURL(c *Character) string { return "/admin/characters/" + strconv.Itoa(c.ID) }
+
+// audit logs an admin action to the portal's log, which the desktop app
+// shows, so there's a record of who changed what.
+func (a *app) audit(req *request, format string, args ...any) {
+	log.Printf("admin %q (account %d): "+format, append([]any{req.account.UserID, req.account.ID}, args...)...)
+}

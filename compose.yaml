@@ -20,6 +20,8 @@ x-rathena: &rathena
     INTER_USER: ${INTER_USER:?set INTER_USER in .env}
     INTER_PASSWORD: ${INTER_PASSWORD:?set INTER_PASSWORD in .env}
     PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
+    # Matches the build; picks the item database for the portal's item names.
+    PRERE: ${PRERE:-yes}
     ADMIN_USER: ${ADMIN_USER:-}
     ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
 
