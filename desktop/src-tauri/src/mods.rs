@@ -1,5 +1,6 @@
 //! The Mods screen: server-side mods in the stack's `mods/` folder, one
-//! folder each, switched on by name in `mods/enabled.txt`. Compose mounts
+//! folder each, switched on by name in `mods/enabled.txt`, whose order is
+//! the load order. Compose mounts
 //! the folder into the rAthena containers, and `entrypoint.sh` loads the
 //! enabled mods' NPC scripts and database files on every start, so changes
 //! apply when the game servers restart.
@@ -20,8 +21,9 @@ use sha2::{Digest, Sha256};
 pub const ENABLED: &str = "enabled.txt";
 const APPLIED: &str = ".applied.json";
 
-const ENABLED_HEADER: &str = "# The mods that are on, one folder name per line. Rewritten by the\n\
-                              # desktop app's Mods screen; they load in alphabetical order.\n";
+const ENABLED_HEADER: &str = "# The mods that are on, one folder name per line, in load order: where\n\
+                              # two change the same entry, the later one wins. Rewritten by the\n\
+                              # desktop app's Mods screen.\n";
 
 /// Error and warning lines shown per mod, newest last.
 const MAX_ERRORS: usize = 20;
@@ -68,15 +70,26 @@ fn valid_name(name: &str) -> bool {
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
-/// The names in `enabled.txt`, whether or not their folders exist.
-fn enabled(dir: &Path) -> BTreeSet<String> {
+/// The names in `enabled.txt` in load order, whether or not their folders exist.
+fn enabled(dir: &Path) -> Vec<String> {
+    let mut seen = BTreeSet::new();
     fs::read_to_string(dir.join(ENABLED))
         .unwrap_or_default()
         .lines()
         .map(|l| l.split('#').next().unwrap_or_default().trim())
-        .filter(|l| !l.is_empty())
+        .filter(|l| !l.is_empty() && seen.insert(l.to_owned()))
         .map(str::to_owned)
         .collect()
+}
+
+fn write_enabled(dir: &Path, names: &[String]) -> Result<(), String> {
+    let mut text = ENABLED_HEADER.to_owned();
+    for n in names {
+        text.push_str(n);
+        text.push('\n');
+    }
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::write(dir.join(ENABLED), text).map_err(|e| e.to_string())
 }
 
 /// The files a mod loads, as `entrypoint.sh` finds them: `.txt` files
@@ -142,7 +155,7 @@ fn fingerprint(root: &Path) -> Fingerprint {
     }
 }
 
-/// The mod folders, sorted by name, the order they load in.
+/// The mod folders, sorted by name.
 fn folders(dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
     let mut names: Vec<String> = entries
@@ -155,8 +168,8 @@ fn folders(dir: &Path) -> Vec<String> {
     names
 }
 
-/// The enabled mods `entrypoint.sh` would load now, with their fingerprints.
-fn current(dir: &Path) -> BTreeMap<String, Fingerprint> {
+/// The enabled mods `entrypoint.sh` would load now, in order, with their fingerprints.
+fn current(dir: &Path) -> Vec<(String, Fingerprint)> {
     enabled(dir)
         .into_iter()
         .filter(|n| valid_name(n) && dir.join(n).is_dir())
@@ -167,7 +180,7 @@ fn current(dir: &Path) -> BTreeMap<String, Fingerprint> {
         .collect()
 }
 
-fn applied(dir: &Path) -> BTreeMap<String, Fingerprint> {
+fn applied(dir: &Path) -> Vec<(String, Fingerprint)> {
     fs::read(dir.join(APPLIED))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -186,7 +199,7 @@ pub fn record_applied(dir: &Path) -> io::Result<()> {
 /// The enabled mods whose database files the server hasn't loaded yet,
 /// which the next start backs up the database for.
 pub fn new_databases(dir: &Path) -> Vec<String> {
-    let applied = applied(dir);
+    let applied: BTreeMap<String, Fingerprint> = applied(dir).into_iter().collect();
     current(dir)
         .into_iter()
         .filter(|(name, print)| {
@@ -197,13 +210,17 @@ pub fn new_databases(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Every mod folder and its state. `running` says whether the map server
-/// is up, and `log` is its log, searched for errors in each mod's files.
+/// Every mod folder and its state: the enabled ones first, in load order,
+/// then the rest by name. `running` says whether the map server is up, and
+/// `log` is its log, searched for errors in each mod's files.
 pub fn status(dir: &Path, running: bool, log: &str) -> Status {
     let on = enabled(dir);
-    let applied = applied(dir);
+    let loaded = applied(dir);
+    let applied: BTreeMap<&String, &Fingerprint> = loaded.iter().map(|(n, p)| (n, p)).collect();
     let mut errors = errors_by_mod(log);
-    let mods: Vec<Mod> = folders(dir)
+    let mut names = folders(dir);
+    names.sort_by_key(|n| on.iter().position(|e| e == n).unwrap_or(usize::MAX));
+    let mods: Vec<Mod> = names
         .into_iter()
         .map(|name| {
             let root = dir.join(&name);
@@ -218,7 +235,7 @@ pub fn status(dir: &Path, running: bool, log: &str) -> Status {
             let enabled = on.contains(&name) && valid_name(&name);
             let pending = running
                 && match (enabled, applied.get(&name)) {
-                    (true, Some(a)) => *a != fingerprint(&root),
+                    (true, Some(a)) => **a != fingerprint(&root),
                     (true, None) => true,
                     (false, loaded) => loaded.is_some(),
                 };
@@ -235,7 +252,8 @@ pub fn status(dir: &Path, running: bool, log: &str) -> Status {
         .collect();
     Status {
         folder: dir.display().to_string(),
-        restart_needed: running && current(dir) != applied,
+        // A new order counts too.
+        restart_needed: running && current(dir) != loaded,
         mods,
     }
 }
@@ -249,18 +267,30 @@ pub fn set_enabled(dir: &Path, name: &str, on: bool) -> Result<(), String> {
         return Err(format!("There's no {name} folder in the mods folder any more."));
     }
     let mut names = enabled(dir);
+    names.retain(|n| n != name);
+    // A mod switched on loads last, after the ones already on.
     if on {
-        names.insert(name.to_owned());
+        names.push(name.to_owned());
+    }
+    write_enabled(dir, &names)
+}
+
+/// Moves an enabled mod one place earlier (`up`) or later in the load
+/// order, past the next mod whose folder still exists.
+pub fn move_mod(dir: &Path, name: &str, up: bool) -> Result<(), String> {
+    let mut names = enabled(dir);
+    let i = names.iter().position(|n| n == name).ok_or(format!("{name} isn't switched on."))?;
+    let exists = |n: &String| valid_name(n) && dir.join(n).is_dir();
+    let j = if up {
+        names[..i].iter().rposition(exists)
     } else {
-        names.remove(name);
+        names[i + 1..].iter().position(exists).map(|j| i + 1 + j)
+    };
+    if let Some(j) = j {
+        names.swap(i, j);
+        write_enabled(dir, &names)?;
     }
-    let mut text = ENABLED_HEADER.to_owned();
-    for n in names {
-        text.push_str(&n);
-        text.push('\n');
-    }
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    fs::write(dir.join(ENABLED), text).map_err(|e| e.to_string())
+    Ok(())
 }
 
 /// rAthena's errors and warnings that name a file in a mod, by mod. Each
@@ -390,7 +420,7 @@ mod tests {
         set_enabled(&dir, "shop", true).unwrap();
         assert!(set_enabled(&dir, "nope", true).is_err());
         assert!(set_enabled(&dir, "../x", false).is_err());
-        assert_eq!(fs::read_to_string(dir.join(ENABLED)).unwrap(), format!("{ENABLED_HEADER}shop\nwarper\n"));
+        assert_eq!(fs::read_to_string(dir.join(ENABLED)).unwrap(), format!("{ENABLED_HEADER}warper\nshop\n"));
 
         // Stopped: nothing is pending, it loads at the next start.
         assert!(!status(&dir, false, "").mods.iter().any(|m| m.pending));
@@ -422,6 +452,31 @@ mod tests {
         let s = status(&dir, true, "");
         assert!(s.restart_needed);
         assert!(s.mods.iter().find(|m| m.name == "shop").unwrap().pending);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_order_follows_enabled_txt() {
+        let dir = temp_dir("order");
+        for m in ["a", "b", "c", "d"] {
+            write(&dir, &format!("{m}/npc/x.txt"), "x");
+        }
+        write(&dir, ENABLED, "c\ngone\na\nc\n");
+        set_enabled(&dir, "b", true).unwrap();
+        assert_eq!(enabled(&dir), ["c", "gone", "a", "b"]);
+        let order = |dir: &Path| status(dir, false, "").mods.into_iter().map(|m| m.name).collect::<Vec<_>>();
+        assert_eq!(order(&dir), ["c", "a", "b", "d"]);
+
+        record_applied(&dir).unwrap();
+        // Up skips the missing folder; the first can't go further up.
+        move_mod(&dir, "a", true).unwrap();
+        assert_eq!(enabled(&dir), ["a", "gone", "c", "b"]);
+        move_mod(&dir, "a", true).unwrap();
+        move_mod(&dir, "b", false).unwrap();
+        assert_eq!(enabled(&dir), ["a", "gone", "c", "b"]);
+        assert!(move_mod(&dir, "d", true).is_err());
+        // Reordering waits for a restart too.
+        assert!(status(&dir, true, "").restart_needed);
         fs::remove_dir_all(dir).unwrap();
     }
 

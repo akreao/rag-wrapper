@@ -90,9 +90,8 @@ CONF
 }
 
 # mods/ is the mods folder from the host, one folder per mod, and
-# mods/enabled.txt names the ones that are on. Enabled mods load in
-# alphabetical order, so where two change the same database entry the
-# later name wins. In each mod:
+# mods/enabled.txt names the ones that are on, in load order, so where
+# two change the same database entry the later one wins. In each mod:
 #   npc/**/*.txt         scripts, loaded after rAthena's own (and kept by
 #                        @reloadscript) through npc/scripts_custom.conf
 #   db/*.yml             db/import-style YAML, named like rAthena's
@@ -116,7 +115,7 @@ enabled_mods() {
 					fi
 					;;
 			esac
-		done | LC_ALL=C sort -u
+		done | awk '!seen[$0]++'
 }
 
 apply_mods() {

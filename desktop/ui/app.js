@@ -732,6 +732,27 @@ function modItem(m) {
     badge.textContent = m.enabled ? "loads on restart" : "unloads on restart";
     label.append(badge);
   }
+  if (m.enabled) {
+    const arrows = document.createElement("span");
+    arrows.className = "order";
+    for (const [up, text, title] of [[true, "↑", "Load earlier"], [false, "↓", "Load later"]]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = text;
+      b.title = title;
+      b.addEventListener("click", async () => {
+        modsError(null);
+        try {
+          await invoke("move_mod", { name: m.name, up });
+        } catch (err) {
+          modsError(String(err));
+        }
+        await refreshMods();
+      });
+      arrows.append(b);
+    }
+    label.append(arrows);
+  }
   li.append(label);
 
   const parts = [];
@@ -773,6 +794,11 @@ async function refreshMods() {
   $("mods-folder").textContent = `Folder: ${s.folder}`;
   $("no-mods").hidden = s.mods.length > 0;
   $("mods").replaceChildren(...s.mods.map(modItem));
+  const on = $("mods").querySelectorAll(".order");
+  if (on.length) {
+    on[0].firstChild.disabled = true;
+    on[on.length - 1].lastChild.disabled = true;
+  }
   $("mods-pending").hidden = !s.restart_needed;
 }
 

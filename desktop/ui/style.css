@@ -98,6 +98,8 @@ main { flex: 1; min-height: 0; padding: 16px 20px; }
 #mods { list-style: none; margin: 0 0 10px; padding: 0; }
 #mods > li { padding: 8px 0; border-top: 1px solid var(--border); }
 #mods label.check { margin: 0; font-weight: 600; }
+#mods .order { margin-left: auto; display: flex; gap: 4px; }
+#mods .order button { padding: 0 8px; font-size: 12px; }
 #mods .what { font-size: 12px; margin: 2px 0 0 22px; overflow-wrap: anywhere; }
 #mods .badge { font-size: 11px; font-weight: normal; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--busy) 25%, var(--card)); }
 #mods .problem { font-size: 12px; margin: 2px 0 0 22px; color: var(--bad); }

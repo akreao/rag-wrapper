@@ -9,9 +9,9 @@ One folder per mod, named with letters, digits, `.`, `_` and `-` only:
 ```
 mods/
   enabled.txt
-  10-warper/
+  warper/
     npc/warper.txt
-  20-custom-items/
+  custom-items/
     npc/item_shop.txt
     db/item_db.yml
     db/pre-re/mob_db.yml
@@ -23,7 +23,7 @@ mods/
 
 ## Turning mods on
 
-`enabled.txt` has one mod folder name per line; `#` starts a comment. Enabled mods load in alphabetical order, whatever the order of this file, so when two change the same entry the later name wins. A number in front of the name (`10-`, `20-`) sets the order.
+`enabled.txt` has one mod folder name per line; `#` starts a comment. Mods load in the order of this file, so when two change the same entry the later one wins. The Mods screen's arrows reorder it, and a mod switched on there goes to the end.
 
 Changes apply when the game servers restart; no rebuild is needed. The database is backed up first when the restart brings in a mod with `db/` files, or changed ones.
 

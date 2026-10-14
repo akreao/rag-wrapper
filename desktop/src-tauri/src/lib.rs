@@ -504,6 +504,12 @@ fn set_mod_enabled(app: State<App>, name: String, enabled: bool) -> Result<(), S
     mods::set_enabled(&app.mods_dir(), &name, enabled)
 }
 
+/// Moves an enabled mod one place earlier or later in the load order.
+#[tauri::command]
+fn move_mod(app: State<App>, name: String, up: bool) -> Result<(), String> {
+    mods::move_mod(&app.mods_dir(), &name, up)
+}
+
 /// Opens the mods folder in the file manager, to add mods by copying folders in.
 #[tauri::command]
 fn open_mods(handle: AppHandle, app: State<App>) -> Result<(), String> {
@@ -594,6 +600,7 @@ pub fn run() {
             open_client_files,
             mods,
             set_mod_enabled,
+            move_mod,
             open_mods,
             follow_logs
         ])

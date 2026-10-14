@@ -249,7 +249,7 @@
         <li><code>npc/</code>: NPC scripts (<code>.txt</code>), loaded after rAthena's own.</li>
         <li><code>db/</code>: database files named like rAthena's <code>db/import</code> files (<code>item_db.yml</code>, <code>mob_db.yml</code>, ...). Files in <code>db/pre-re/</code> or <code>db/re/</code> only load in that game mode.</li>
       </ul>
-      <p class="hint">Mods load in alphabetical order, so when two change the same entry the later name wins; a number in front of a name sets the order. Nothing reaches the players' clients: new sprites or item names go out through Client patch.</p>
+      <p class="hint">The mods that are on load from top to bottom, so when two change the same entry the lower one wins; the arrows change the order. Nothing reaches the players' clients: new sprites or item names go out through Client patch.</p>
       <div class="row">
         <button id="open-mods">Open mods folder</button>
         <button id="mods-refresh">Check again</button>
@@ -264,7 +264,7 @@
       <p id="mods-error" class="error" hidden></p>
       <ul id="mods"></ul>
       <p id="no-mods" class="hint" hidden>No mods yet. Open the mods folder and copy a mod's folder in.</p>
-      <p class="hint">Switching a mod on or off applies the next time the game servers start.</p>
+      <p class="hint">Switching a mod on or off, or changing the order, applies the next time the game servers start. A mod switched on loads last.</p>
     </section>
   </main>
 </body>
