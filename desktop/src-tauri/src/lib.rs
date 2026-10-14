@@ -1,9 +1,11 @@
 mod backup;
 mod clientpatch;
 mod envfile;
+mod host;
 mod images;
 mod jobs;
 mod live;
+mod menu;
 mod mods;
 mod net;
 mod settings;
@@ -19,7 +21,6 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_opener::OpenerExt;
 
 use envfile::EnvFile;
 use task::{Ctx, Running};
@@ -186,16 +187,22 @@ fn save_game_settings(app: State<App>, settings: settings::GameSettings) -> Resu
     settings::save(&app.overrides_dir(), &settings)
 }
 
+/// Opens a web page (the account portal, an update's changes) in the browser.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(format!("Not a web address: {url}"));
+    }
+    host::open(url.as_ref())
+}
+
 /// Opens the overrides folder in the file manager, for settings the
 /// Settings screen doesn't cover.
 #[tauri::command]
-fn open_overrides(handle: AppHandle, app: State<App>) -> Result<(), String> {
+fn open_overrides(app: State<App>) -> Result<(), String> {
     let dir = app.overrides_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    handle
-        .opener()
-        .open_path(dir.display().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())
+    host::open(dir.as_os_str())
 }
 
 /// `None` follows the detected LAN address on every start; `Some` pins one,
@@ -458,12 +465,9 @@ fn backups(app: State<App>) -> Vec<backup::Backup> {
 
 /// Opens the backups folder in the file manager, so backups can be copied elsewhere.
 #[tauri::command]
-fn open_backups(handle: AppHandle, app: State<App>) -> Result<(), String> {
+fn open_backups(app: State<App>) -> Result<(), String> {
     std::fs::create_dir_all(&app.backups).map_err(|e| e.to_string())?;
-    handle
-        .opener()
-        .open_path(app.backups.display().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())
+    host::open(app.backups.as_os_str())
 }
 
 /// What the next client patch would carry, and the patches published so far.
@@ -490,12 +494,9 @@ async fn publish_client_patch(app: State<'_, App>) -> Result<clientpatch::Publis
 
 /// Opens the client-files folder in the file manager to add or change files.
 #[tauri::command]
-fn open_client_files(handle: AppHandle, app: State<App>) -> Result<(), String> {
+fn open_client_files(app: State<App>) -> Result<(), String> {
     clientpatch::ensure_folder(&app.client_files).map_err(|e| e.to_string())?;
-    handle
-        .opener()
-        .open_path(app.client_files.display().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())
+    host::open(app.client_files.as_os_str())
 }
 
 /// The mod folders, which are on, and which changes wait for a restart.
@@ -535,13 +536,10 @@ fn move_mod(app: State<App>, name: String, up: bool) -> Result<(), String> {
 
 /// Opens the mods folder in the file manager, to add mods by copying folders in.
 #[tauri::command]
-fn open_mods(handle: AppHandle, app: State<App>) -> Result<(), String> {
+fn open_mods(app: State<App>) -> Result<(), String> {
     let dir = app.mods_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    handle
-        .opener()
-        .open_path(dir.display().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())
+    host::open(dir.as_os_str())
 }
 
 #[derive(Serialize, Clone)]
@@ -578,8 +576,11 @@ fn follow_logs(handle: AppHandle, app: State<App>, service: Option<String>) -> R
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // A menu entry is a convenience: the app runs without one.
+            if let Err(e) = menu::install(&app.path().app_data_dir()?) {
+                eprintln!("Couldn't add the applications menu entry: {e}");
+            }
             // Backups and client files sit beside the stack, not in it.
             let (dir, data) = match stack::stack_dir_override() {
                 Some(dir) => (dir.clone(), dir),
@@ -604,6 +605,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            open_url,
             overview,
             setup,
             set_public_ip,

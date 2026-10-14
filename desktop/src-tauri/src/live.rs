@@ -2,12 +2,11 @@
 //! has been up, and each container's CPU and memory.
 
 use std::path::Path;
-use std::process::Command;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{jobs, stack};
+use crate::{host, jobs, stack};
 
 /// The characters rAthena marks online. The char server sets the flag and
 /// clears every one when it starts, so it's only meaningful while it runs.
@@ -83,13 +82,13 @@ pub fn read(dir: &Path) -> Live {
             stack::output(cmd).ok().map(|t| parse_players(&t))
         });
         let uptime = scope.spawn(|| {
-            let mut cmd = Command::new("docker");
+            let mut cmd = host::command("docker");
             cmd.args(["inspect", "--format", "{{.State.StartedAt}}"]).arg(name_of("map")?);
             let started = stack::output(cmd).ok()?;
             uptime_since(started.trim(), Utc::now())
         });
         let usage = scope.spawn(|| {
-            let mut cmd = Command::new("docker");
+            let mut cmd = host::command("docker");
             cmd.args(["stats", "--no-stream", "--format", "{{json .}}"])
                 .args(running.iter().map(|c| &c.name));
             let stats: Vec<Stats> = stack::output(cmd).map(|t| parse_lines(&t)).unwrap_or_default();

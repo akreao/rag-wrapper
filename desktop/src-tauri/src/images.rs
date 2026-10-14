@@ -15,7 +15,7 @@ use std::process::Command;
 use sha2::{Digest, Sha256};
 
 use crate::envfile::EnvFile;
-use crate::stack;
+use crate::{host, stack};
 use crate::task::Ctx;
 
 /// `.env` key with the registry prefix images are pulled from. Empty
@@ -106,7 +106,7 @@ fn walk(dir: &Path, prefix: &str, files: &mut Vec<String>) -> std::io::Result<()
 }
 
 pub fn exists(name: &str) -> bool {
-    let mut cmd = Command::new("docker");
+    let mut cmd = host::command("docker");
     cmd.args(["image", "inspect", "--format", "{{.Id}}", name]);
     stack::output(cmd).is_ok()
 }
@@ -116,10 +116,10 @@ pub fn exists(name: &str) -> bool {
 fn pull(ctx: &Ctx, image: &Image) -> Result<(), String> {
     let remote = image.remote.as_deref().ok_or("No prebuilt image for these settings.")?;
     ctx.line(format!("Downloading the prebuilt image {remote}"));
-    let mut cmd = Command::new("docker");
+    let mut cmd = host::command("docker");
     cmd.args(["pull", remote]);
     ctx.run(cmd)?;
-    let mut tag = Command::new("docker");
+    let mut tag = host::command("docker");
     tag.args(["tag", remote, &image.local]);
     stack::output(tag).map(|_| ())
 }

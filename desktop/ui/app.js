@@ -312,7 +312,7 @@ function renderUpdate(update) {
 
 $("update-changes").addEventListener("click", (e) => {
   e.preventDefault();
-  invoke("plugin:opener|open_url", { url: e.target.dataset.url });
+  invoke("open_url", { url: e.target.dataset.url });
 });
 
 $("skip-update").addEventListener("click", async () => {
@@ -597,7 +597,7 @@ $("build-form").addEventListener("submit", async (e) => {
 
 $("portal-link").addEventListener("click", (e) => {
   e.preventDefault();
-  invoke("plugin:opener|open_url", { url: e.target.dataset.url });
+  invoke("open_url", { url: e.target.dataset.url });
 });
 
 // ---- Backups ----

@@ -8,6 +8,8 @@ use std::thread;
 
 use serde::{Deserialize, Serialize};
 
+use crate::host;
+
 /// Fixed so the containers and the `db-data` volume keep their names
 /// wherever the stack files live.
 pub const PROJECT: &str = "rag-wrapper";
@@ -68,7 +70,7 @@ fn copy_dir(bundled: &Path, dest: &Path) -> std::io::Result<()> {
 }
 
 pub fn compose(dir: &Path) -> Command {
-    let mut cmd = Command::new("docker");
+    let mut cmd = host::command("docker");
     cmd.current_dir(dir)
         .args([
             "compose",
@@ -100,11 +102,11 @@ pub fn output(mut cmd: Command) -> Result<String, String> {
 
 /// Checks that Docker and its Compose plugin are usable by this user.
 pub fn check_docker() -> Result<String, String> {
-    let mut v = Command::new("docker");
+    let mut v = host::command("docker");
     v.args(["compose", "version", "--short"]);
     let version = output(v).map_err(|e| format!("Docker Compose isn't available: {e}"))?;
 
-    let mut info = Command::new("docker");
+    let mut info = host::command("docker");
     info.args(["info", "--format", "{{.ServerVersion}}"]);
     output(info).map_err(|e| {
         if e.contains("permission denied") {
@@ -119,7 +121,7 @@ pub fn check_docker() -> Result<String, String> {
 }
 
 pub fn volume_exists(name: &str) -> bool {
-    Command::new("docker")
+    host::command("docker")
         .args(["volume", "inspect", &format!("{PROJECT}_{name}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -136,9 +138,9 @@ pub fn runs_old_image(dir: &Path, packetver: &str) -> bool {
     let Some(container) = output(ps).ok().filter(|c| !c.trim().is_empty()) else {
         return false;
     };
-    let mut running = Command::new("docker");
+    let mut running = host::command("docker");
     running.args(["inspect", "--format", "{{.Image}}", container.trim()]);
-    let mut built = Command::new("docker");
+    let mut built = host::command("docker");
     built.args(["image", "inspect", "--format", "{{.Id}}", &format!("rag-wrapper/rathena:{packetver}")]);
     match (output(running), output(built)) {
         (Ok(running), Ok(built)) => running.trim() != built.trim(),
@@ -272,7 +274,7 @@ where
 /// Asks a process to stop the way Ctrl+C would, so `docker compose` can
 /// cancel a build or log stream cleanly.
 pub fn interrupt(pid: u32) {
-    let _ = Command::new("kill").args(["-INT", &pid.to_string()]).status();
+    let _ = host::command("kill").args(["-INT", &pid.to_string()]).status();
 }
 
 pub fn stack_dir_override() -> Option<PathBuf> {
