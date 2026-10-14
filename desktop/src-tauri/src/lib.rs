@@ -1,5 +1,7 @@
 mod backup;
 mod envfile;
+mod jobs;
+mod live;
 mod net;
 mod settings;
 mod stack;
@@ -179,6 +181,19 @@ fn services(app: State<App>) -> Result<Vec<stack::ServiceStatus>, String> {
         return Ok(Vec::new());
     }
     stack::status(&app.dir)
+}
+
+/// Who's online, uptime and each container's CPU and memory, for the
+/// main screen. Takes a couple of seconds, so it runs off the main thread.
+#[tauri::command]
+async fn live(app: State<'_, App>) -> Result<live::Live, String> {
+    if !app.env_path().exists() {
+        return Ok(live::Live::default());
+    }
+    let dir = app.dir.clone();
+    tauri::async_runtime::spawn_blocking(move || live::read(&dir))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Serialize, Clone)]
@@ -404,6 +419,7 @@ pub fn run() {
             save_game_settings,
             open_overrides,
             services,
+            live,
             run_task,
             cancel_task,
             backups,
