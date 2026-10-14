@@ -16,6 +16,7 @@
       <button id="nav" hidden>Settings</button>
       <button id="nav-backups" hidden>Backups</button>
       <button id="nav-patch" hidden>Client patch</button>
+      <button id="nav-mods" hidden>Mods</button>
       <button id="start" class="primary">Start server</button>
       <button id="stop">Stop</button>
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
@@ -213,7 +214,7 @@
         <button id="backup-now">Back up now</button>
         <button id="open-backups">Open folder</button>
       </div>
-      <p class="hint">The database is also backed up before every rebuild or server update, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones.</p>
+      <p class="hint">The database is also backed up before every rebuild or server update, before the server first loads a mod's database files, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones.</p>
       <p id="backup-error" class="error" hidden></p>
       <ul id="backups"></ul>
       <p id="no-backups" class="hint" hidden>No backups yet.</p>
@@ -250,6 +251,37 @@
       <h2>Published</h2>
       <ul id="patch-history" class="files"></ul>
       <p id="no-patches" class="hint">Nothing published yet. Until the first patch, the portal's How to connect page shows players how to patch the client by hand.</p>
+    </section>
+  </main>
+
+  <main id="mods-page" hidden>
+    <section class="card">
+      <h2>Mods</h2>
+      <p>Server-side custom content: NPC scripts and changes to rAthena's databases. Add a mod by copying its folder into the mods folder, one folder per mod:</p>
+      <ul class="hint">
+        <li><code>npc/</code>: NPC scripts (<code>.txt</code>), loaded after rAthena's own.</li>
+        <li><code>db/</code>: database files named like rAthena's <code>db/import</code> files (<code>item_db.yml</code>, <code>mob_db.yml</code>, ...). Files in <code>db/pre-re/</code> or <code>db/re/</code> only load in that game mode.</li>
+      </ul>
+      <p class="hint">The mods that are on load from top to bottom, so when two change the same entry the lower one wins; the arrows change the order. Nothing reaches the players' clients: new sprites or item names go out through Client patch.</p>
+      <div class="row">
+        <button id="open-mods">Open mods folder</button>
+        <button id="mods-refresh">Check again</button>
+      </div>
+      <p id="mods-folder" class="hint"></p>
+    </section>
+    <section class="card">
+      <p id="mods-rebuild" class="notice" hidden>
+        The running server was built before mods existed, so it ignores them. Rebuild the server to load mods, then restart it.
+        <button id="mods-rebuild-button" type="button">Rebuild</button>
+      </p>
+      <p id="mods-pending" class="notice" hidden>
+        Some changes wait for the game servers to restart, which disconnects everyone. When a mod's database files load for the first time, the database is backed up first.
+        <button id="mods-restart" type="button">Restart game servers</button>
+      </p>
+      <p id="mods-error" class="error" hidden></p>
+      <ul id="mods"></ul>
+      <p id="no-mods" class="hint" hidden>No mods yet. Open the mods folder and copy a mod's folder in.</p>
+      <p class="hint">Switching a mod on or off, or changing the order, applies the next time the game servers start. A mod switched on loads last.</p>
     </section>
   </main>
 </body>
