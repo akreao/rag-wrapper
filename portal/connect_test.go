@@ -42,7 +42,7 @@ func TestClientInfo(t *testing.T) {
 }
 
 func TestConnectRoutes(t *testing.T) {
-	a, err := newApp(nil, 99, connectInfo{Address: "10.0.0.5", PacketVer: "20220406"})
+	a, err := newApp(nil, 99, connectInfo{Address: "10.0.0.5", PacketVer: "20250716"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestConnectRoutes(t *testing.T) {
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/connect", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "10.0.0.5") ||
-		!strings.Contains(rec.Body.String(), "2022-04-06") {
+		!strings.Contains(rec.Body.String(), "2025-07-16") || !strings.Contains(rec.Body.String(), "WARPGATE") {
 		t.Fatalf("GET /connect: %d\n%s", rec.Code, rec.Body)
 	}
 
