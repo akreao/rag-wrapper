@@ -89,6 +89,89 @@ CONF
 	} > conf/import/map_conf.txt
 }
 
+# mods/ is the mods folder from the host, one folder per mod, and
+# mods/enabled.txt names the ones that are on, in load order, so where
+# two change the same database entry the later one wins. In each mod:
+#   npc/**/*.txt         scripts, loaded after rAthena's own (and kept by
+#                        @reloadscript) through npc/scripts_custom.conf
+#   db/*.yml             db/import-style YAML, named like rAthena's
+#   db/pre-re/*.yml,     database files (item_db.yml, mob_db.yml, ...);
+#   db/re/*.yml          the pre-re/ or re/ ones only in that mode
+# Problems are logged with the file's path, which the app looks for.
+enabled_mods() {
+	if [ ! -f mods/enabled.txt ]; then
+		return 0
+	fi
+	sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' mods/enabled.txt |
+		while IFS= read -r name; do
+			case "${name}" in
+				'') ;;
+				.* | *[!A-Za-z0-9._-]*)
+					echo "[Warning]: mods/${name}/ skipped: a mod's folder name may only use letters, digits, . _ and -" >&2
+					;;
+				*)
+					if [ -d "mods/${name}" ]; then
+						echo "${name}"
+					fi
+					;;
+			esac
+		done | awk '!seen[$0]++'
+}
+
+apply_mods() {
+	mode=re
+	if [ "${PRERE:-yes}" = "yes" ]; then
+		mode=pre-re
+	fi
+
+	# Start from rAthena's own import files, so a mod switched off since
+	# the last start leaves nothing behind.
+	for path in db/import-tmpl/*.yml; do
+		cp "${path}" "db/import/$(basename "${path}")"
+	done
+	if ! grep -qx 'import: npc/mods.conf' npc/scripts_custom.conf; then
+		printf '\nimport: npc/mods.conf\n' >> npc/scripts_custom.conf
+	fi
+	: > npc/mods.conf
+
+	# The desktop app looks for this line to tell an image that loads mods
+	# from one built before mods existed.
+	echo "Mods enabled: $(enabled_mods | tr '\n' ' ')"
+	imports=$(mktemp)
+	for name in $(enabled_mods); do
+		echo "Mod: ${name}"
+		if [ -d "mods/${name}/npc" ]; then
+			find "mods/${name}/npc" -type f -iname '*.txt' | LC_ALL=C sort | sed 's/^/npc: /' >> npc/mods.conf
+		fi
+		for path in "mods/${name}"/db/*.yml "mods/${name}/db/${mode}"/*.yml; do
+			if [ ! -f "${path}" ]; then
+				continue
+			fi
+			file=$(basename "${path}")
+			if [ ! -f "db/import-tmpl/${file}" ]; then
+				echo "[Warning]: ${path} skipped: it isn't named after one of rAthena's databases in db/import" >&2
+				continue
+			fi
+			printf '%s %s\n' "${file}" "${path}" >> "${imports}"
+		done
+	done
+
+	# Each database's import file lists the mods' files under its Footer,
+	# which rAthena loads after the file's own entries, in this order.
+	for file in $(cut -d ' ' -f 1 "${imports}" | sort -u); do
+		{
+			printf '\nFooter:\n  Imports:\n'
+			awk -v f="${file}" '$1 == f { sub(/^[^ ]+ /, ""); gsub(/\047/, "\047\047"); printf "    - Path: \047%s\047\n", $0 }' "${imports}"
+		} >> "db/import/${file}"
+	done
+	rm -f "${imports}"
+}
+
+# The files enabled mods add to one database, from its import file's Footer.
+mod_files() {
+	sed -n "s/^    - Path: '\(.*\)'\$/\1/p" "db/import/$1" 2>/dev/null | sed "s/''/'/g"
+}
+
 mysql_cmd() {
 	mysql --host="${DB_HOST}" --port="${DB_PORT}" --user="${DB_USER}" \
 		--password="${DB_PASSWORD}" "${DB_NAME}" "$@"
@@ -125,8 +208,9 @@ apply_upgrades() {
 
 # The portal shows item names (on its admin inventory page) from this
 # table. It is refilled on every start from the item database this image
-# was built with, pre-renewal or renewal, plus db/import/item_db.yml, so it
-# follows rAthena updates and custom items. Assumes rAthena's own YAML
+# was built with, pre-renewal or renewal, plus db/import/item_db.yml and the
+# enabled mods' item_db.yml, so it follows rAthena updates and custom
+# items. Assumes rAthena's own YAML
 # layout: "  - Id: 501" with "    Name: Red Potion" under it.
 load_item_names() {
 	mode=re
@@ -140,8 +224,11 @@ load_item_names() {
 			id int unsigned NOT NULL PRIMARY KEY,
 			name varchar(100) NOT NULL);"
 		echo "START TRANSACTION; DELETE FROM wrapper_item_names;"
-		# Later files win, so db/import comes last.
-		cat "db/${mode}"/item_db_*.yml db/import/item_db.yml 2>/dev/null | awk '
+		# Later files win, so db/import and then the mods come last.
+		{
+			cat "db/${mode}"/item_db_*.yml db/import/item_db.yml
+			mod_files item_db.yml | while IFS= read -r path; do cat "${path}"; done
+		} 2>/dev/null | awk '
 			{ sub(/\r$/, "") }
 			/^  - Id:/ { id = $3 + 0; next }
 			/^    Name:/ && id > 0 {
@@ -193,6 +280,7 @@ init_db() {
 }
 
 write_imports
+apply_mods
 
 case "${1:-}" in
 	init)  init_db ;;

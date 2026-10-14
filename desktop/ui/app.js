@@ -276,6 +276,7 @@ async function refreshOverview() {
   $("nav-backups").hidden = !overview.configured;
   $("nav-live").hidden = !overview.configured;
   $("nav-patch").hidden = !overview.configured;
+  $("nav-mods").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
     if ($("setup-ip").value !== "other") {
@@ -335,7 +336,7 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "backup-now", "update", "skip-update", "restart-new", "ip-yes"])
+  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "ip-yes"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("cancel").hidden = !["build", "update", "start", "restart", "readdress"].includes(task);
@@ -352,10 +353,12 @@ function showPage(next) {
   $("backups-page").hidden = next !== "backups";
   $("live-page").hidden = next !== "live";
   $("patch-page").hidden = next !== "patch";
+  $("mods-page").hidden = next !== "mods";
   $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
   $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
   $("nav-live").textContent = page === "live" ? "Back to server" : "Dashboard";
   $("nav-patch").textContent = page === "patch" ? "Back to server" : "Client patch";
+  $("nav-mods").textContent = page === "mods" ? "Back to server" : "Mods";
   if (next === "live") refreshLive();
 }
 
@@ -604,6 +607,7 @@ const REASONS = {
   rebuild: "Before a rebuild",
   update: "Before a server update",
   "before-restore": "Before a restore",
+  mods: "Before loading a mod's database files",
   daily: "Daily, on stop or close",
 };
 
@@ -799,6 +803,144 @@ $("publish").addEventListener("click", async () => {
   }
 });
 
+// ---- Mods: server-side scripts and database files, applied on restart ----
+
+function modsError(text) {
+  $("mods-error").textContent = text || "";
+  $("mods-error").hidden = !text;
+}
+
+function modItem(m) {
+  const li = document.createElement("li");
+  const label = document.createElement("label");
+  label.className = "check";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = m.enabled;
+  // A mod that can't load can still be switched off.
+  box.disabled = !!m.problem && !m.enabled;
+  box.addEventListener("change", async () => {
+    modsError(null);
+    box.disabled = true;
+    try {
+      await invoke("set_mod_enabled", { name: m.name, enabled: box.checked });
+    } catch (err) {
+      modsError(String(err));
+    }
+    await refreshMods();
+  });
+  const name = document.createElement("span");
+  name.textContent = m.name;
+  label.append(box, name);
+  if (m.pending) {
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = m.enabled ? "loads on restart" : "unloads on restart";
+    label.append(badge);
+  }
+  if (m.enabled) {
+    const arrows = document.createElement("span");
+    arrows.className = "order";
+    for (const [up, text, title] of [[true, "↑", "Load earlier"], [false, "↓", "Load later"]]) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = text;
+      b.title = title;
+      b.addEventListener("click", async () => {
+        modsError(null);
+        try {
+          await invoke("move_mod", { name: m.name, up });
+        } catch (err) {
+          modsError(String(err));
+        }
+        await refreshMods();
+      });
+      arrows.append(b);
+    }
+    label.append(arrows);
+  }
+  li.append(label);
+
+  const parts = [];
+  if (m.scripts.length) parts.push(count(m.scripts.length, "script", "scripts"));
+  if (m.databases.length) parts.push(m.databases.join(", "));
+  if (parts.length) {
+    const what = document.createElement("p");
+    what.className = "what muted";
+    what.textContent = parts.join(" · ");
+    what.title = [...m.scripts, ...m.databases].join("\n");
+    li.append(what);
+  }
+  if (m.problem) {
+    const p = document.createElement("p");
+    p.className = "problem";
+    p.textContent = m.problem;
+    li.append(p);
+  }
+  if (m.errors.length) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = `${count(m.errors.length, "error or warning", "errors or warnings")} in the map server's log`;
+    const pre = document.createElement("pre");
+    pre.textContent = m.errors.join("\n\n");
+    details.append(summary, pre);
+    li.append(details);
+  }
+  return li;
+}
+
+async function refreshMods() {
+  let s;
+  try {
+    s = await invoke("mods");
+  } catch (err) {
+    modsError(String(err));
+    return;
+  }
+  $("mods-folder").textContent = `Folder: ${s.folder}`;
+  $("no-mods").hidden = s.mods.length > 0;
+  $("mods").replaceChildren(...s.mods.map(modItem));
+  const on = $("mods").querySelectorAll(".order");
+  if (on.length) {
+    on[0].firstChild.disabled = true;
+    on[on.length - 1].lastChild.disabled = true;
+  }
+  $("mods-rebuild").hidden = !s.rebuild_needed;
+  $("mods-pending").hidden = !s.restart_needed || s.rebuild_needed;
+}
+
+$("nav-mods").addEventListener("click", async () => {
+  if (page === "mods") return showPage("dashboard");
+  modsError(null);
+  showPage("mods");
+  await refreshMods();
+});
+
+$("mods-refresh").addEventListener("click", () => {
+  modsError(null);
+  refreshMods();
+});
+
+$("open-mods").addEventListener("click", async () => {
+  modsError(null);
+  try {
+    await invoke("open_mods");
+  } catch (err) {
+    modsError(`Couldn't open the folder: ${err}`);
+  }
+});
+
+// A rebuild backs up first; the "Restart on the new version" bar then appears.
+$("mods-rebuild-button").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("build");
+});
+
+$("mods-restart").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("restart");
+});
+
 // ---- Tasks ----
 
 async function runTask(kind, file) {
@@ -839,6 +981,7 @@ listen("task", async ({ payload }) => {
     await refreshServices();
     await refreshBackups();
     refreshLive();
+    if (page === "mods") refreshMods();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
       if (payload.ok) await runTask("start");

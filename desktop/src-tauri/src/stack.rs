@@ -22,6 +22,10 @@ pub const OVERRIDES: &str = "overrides";
 /// across app updates like the overrides.
 pub const PATCHES: &str = "patches";
 
+/// Server-side mods, mounted into the rAthena containers as `mods/`.
+/// Kept across app updates like the overrides.
+pub const MODS: &str = "mods";
+
 /// The services that read the overrides, restarted to apply them.
 pub const GAME_SERVERS: [&str; 3] = ["login", "char", "map"];
 
@@ -32,13 +36,14 @@ pub const READDRESSED: [&str; 3] = ["char", "map", "portal"];
 pub const ENV_EXAMPLE: &str = include_str!("../../../.env.example");
 
 /// Copies the stack files bundled with the app (compose.yaml, docker/,
-/// portal/, the overrides and patches READMEs) and `.env.example` into
-/// `dest`, replacing older copies. `.env`, the user's override files and
-/// published patches are never bundled, so they survive app updates.
+/// portal/, the overrides, patches and mods READMEs) and `.env.example`
+/// into `dest`, replacing older copies. `.env`, the user's override files,
+/// published patches and mods are never bundled, so they survive app updates.
 pub fn install(bundled: &Path, dest: &Path) -> std::io::Result<()> {
     copy_dir(bundled, dest)?;
     fs::create_dir_all(dest.join(OVERRIDES))?;
     fs::create_dir_all(dest.join(PATCHES))?;
+    fs::create_dir_all(dest.join(MODS))?;
     fs::write(dest.join(".env.example"), ENV_EXAMPLE)
 }
 

@@ -9,9 +9,11 @@ x-rathena: &rathena
   pull_policy: never
   restart: on-failure
   # Config overrides from the desktop app's Settings screen or written by
-  # hand; entrypoint.sh imports them after rAthena's stock configs.
+  # hand; entrypoint.sh imports them after rAthena's stock configs. It
+  # also loads the mods switched on in mods/enabled.txt.
   volumes:
     - ./overrides:/rathena/conf/user:ro
+    - ./mods:/rathena/mods:ro
   environment:
     DB_HOST: db
     DB_NAME: ragnarok
