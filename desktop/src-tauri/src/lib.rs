@@ -3,6 +3,7 @@ mod clientpatch;
 mod envfile;
 mod jobs;
 mod live;
+mod mods;
 mod net;
 mod settings;
 mod stack;
@@ -54,6 +55,10 @@ impl App {
 
     fn patches_dir(&self) -> PathBuf {
         self.dir.join(stack::PATCHES)
+    }
+
+    fn mods_dir(&self) -> PathBuf {
+        self.dir.join(stack::MODS)
     }
 
     fn ctx(&self, handle: &AppHandle) -> Ctx {
@@ -275,7 +280,13 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 // the database and portal keep running.
                 cmd.args(["--no-deps", "--force-recreate"]).args(stack::GAME_SERVERS);
             }
-            vec![Step::Compose(cmd)]
+            // A mod's database files can change items or monsters players
+            // already have, so the database is backed up before they load.
+            if mods::new_databases(&app.mods_dir()).is_empty() {
+                vec![Step::Compose(cmd)]
+            } else {
+                vec![Step::Backup(backup::Reason::Mods), Step::Compose(cmd)]
+            }
         }
         "build" => {
             cmd.args(["--progress", "plain", "build"]);
@@ -349,6 +360,20 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
         let ok = result.is_ok();
         if ok && kind == "start" {
             forget_admin_password(&ctx.dir);
+        }
+        // A restore starts the game servers again when they were running.
+        let started = match kind.as_str() {
+            "start" | "restart" => true,
+            "restore" => stack::status(&ctx.dir)
+                .unwrap_or_default()
+                .iter()
+                .any(|s| s.service == "map" && s.state == "running"),
+            _ => false,
+        };
+        if ok && started {
+            if let Err(e) = mods::record_applied(&ctx.dir.join(stack::MODS)) {
+                ctx.line(format!("Couldn't record the loaded mods: {e}"));
+            }
         }
         ctx.slot.lock().unwrap().take();
         let _ = handle.emit(
@@ -450,6 +475,46 @@ fn open_client_files(handle: AppHandle, app: State<App>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// The mod folders, which are on, and which changes wait for a restart.
+/// Reads the map server's log for errors, so it runs off the main thread.
+#[tauri::command]
+async fn mods(app: State<'_, App>) -> Result<mods::Status, String> {
+    let (dir, mods) = (app.dir.clone(), app.mods_dir());
+    tauri::async_runtime::spawn_blocking(move || {
+        let running = stack::status(&dir)
+            .unwrap_or_default()
+            .iter()
+            .any(|s| s.service == "map" && s.state == "running");
+        let log = if running {
+            let mut logs = stack::compose(&dir);
+            logs.args(["logs", "--no-log-prefix", "map"]);
+            stack::output(logs).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        mods::status(&mods, running, &log)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Switches a mod on or off; it applies when the game servers restart.
+#[tauri::command]
+fn set_mod_enabled(app: State<App>, name: String, enabled: bool) -> Result<(), String> {
+    mods::set_enabled(&app.mods_dir(), &name, enabled)
+}
+
+/// Opens the mods folder in the file manager, to add mods by copying folders in.
+#[tauri::command]
+fn open_mods(handle: AppHandle, app: State<App>) -> Result<(), String> {
+    let dir = app.mods_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    handle
+        .opener()
+        .open_path(dir.display().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Serialize, Clone)]
 struct LogLine {
     generation: u64,
@@ -527,6 +592,9 @@ pub fn run() {
             client_patch,
             publish_client_patch,
             open_client_files,
+            mods,
+            set_mod_enabled,
+            open_mods,
             follow_logs
         ])
         .on_window_event(|window, event| {

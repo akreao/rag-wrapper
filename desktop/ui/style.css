@@ -49,10 +49,11 @@ header {
   background: var(--card);
 }
 
-h1 { font-size: 17px; margin: 0; }
+h1 { font-size: 17px; margin: 0; white-space: nowrap; }
+header > .muted { white-space: nowrap; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; }
 
-.actions { margin-left: auto; display: flex; gap: 8px; }
+.actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 button {
   font: inherit;
@@ -63,6 +64,7 @@ button {
   color: var(--text);
   cursor: pointer;
 }
+.actions button { white-space: nowrap; }
 button:disabled { opacity: .5; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 
@@ -90,6 +92,18 @@ main { flex: 1; min-height: 0; padding: 16px 20px; }
 #patch-page { overflow: auto; display: flex; flex-direction: column; gap: 16px; }
 #patch-page .card { max-width: 760px; width: 100%; }
 #patch-page[hidden] { display: none; }
+#mods-page { overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+#mods-page .card { max-width: 760px; width: 100%; }
+#mods-page[hidden], #mods-error[hidden], #no-mods[hidden] { display: none; }
+#mods { list-style: none; margin: 0 0 10px; padding: 0; }
+#mods > li { padding: 8px 0; border-top: 1px solid var(--border); }
+#mods label.check { margin: 0; font-weight: 600; }
+#mods .what { font-size: 12px; margin: 2px 0 0 22px; overflow-wrap: anywhere; }
+#mods .badge { font-size: 11px; font-weight: normal; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--busy) 25%, var(--card)); }
+#mods .problem { font-size: 12px; margin: 2px 0 0 22px; color: var(--bad); }
+#mods details { margin: 4px 0 0 22px; font-size: 12px; }
+#mods summary { color: var(--bad); cursor: pointer; }
+#mods pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 #live-page { overflow: auto; display: flex; flex-direction: column; gap: 16px; }
 #live-page .card { max-width: 760px; width: 100%; }
 #live-page[hidden] { display: none; }

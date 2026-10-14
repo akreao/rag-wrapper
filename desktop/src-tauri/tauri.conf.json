@@ -38,7 +38,8 @@
       "../../docker/": "stack/docker/",
       "../../portal/": "stack/portal/",
       "../../overrides/README.md": "stack/overrides/README.md",
-      "../../patches/README.md": "stack/patches/README.md"
+      "../../patches/README.md": "stack/patches/README.md",
+      "../../mods/README.md": "stack/mods/README.md"
     },
     "category": "Game"
   }

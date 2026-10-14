@@ -4,5 +4,7 @@
 !/overrides/README.md
 /patches/*
 !/patches/README.md
+/mods/*
+!/mods/README.md
 /backups/
 /client-files/

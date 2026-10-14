@@ -33,6 +33,8 @@ Settings in `.env`:
 
 Gameplay settings (rates, server name, message of the day and anything else in rAthena's configs) go in [`overrides/`](overrides/README.md) as rAthena `conf/import`-style files; restart the game servers (`docker compose up -d --force-recreate login char map`) to apply them. The desktop app's Settings screen writes the common ones for you.
 
+Server-side mods (NPC scripts and rAthena database changes) go in [`mods/`](mods/README.md), one folder per mod, switched on by name in `mods/enabled.txt`; they load when the game servers restart. The desktop app's Mods screen lists them and switches them on and off.
+
 `docker compose down` stops everything; the database lives in the `db-data` volume and survives restarts. `docker compose down -v` deletes it.
 
 ## Account portal
