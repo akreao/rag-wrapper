@@ -61,13 +61,9 @@ cargo tauri build                  # the AppImage, in target/release/bundle/appi
 
 ## Releasing
 
-Releases are AppImages built by GitHub Actions ([`release.yml`](../.github/workflows/release.yml)) on Ubuntu 22.04, so they run on distributions with an older glibc than the newest Ubuntu. To release, set the new version in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`, merge it, then push a matching tag:
+Releases are AppImages built by GitHub Actions ([`release.yml`](../.github/workflows/release.yml)) on Ubuntu 22.04, so they run on distributions with an older glibc than the newest Ubuntu. To release, raise the version in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (they must match) and add the release notes as `docs/releases/<version>.md`, in one PR. When it merges, the workflow sees that `main`'s version has no release yet, builds `rag-wrapper-<version>-x86_64.AppImage` and publishes it as release `v<version>`, creating the tag itself. Nobody pushes tags. Pushes to `main` that leave the version alone build nothing.
 
-```sh
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-The workflow checks the tag matches the version, builds `rag-wrapper-0.2.0-x86_64.AppImage` and publishes it as a GitHub release, with the rAthena commit it pins in the notes. Pull requests that change the packaging build the AppImage too and keep it as a workflow artifact for 14 days; **Run workflow** on the Release workflow does the same for any branch.
+Pull requests that change the packaging or the release notes build the AppImage too and keep it as a workflow artifact for 14 days; **Run workflow** on the Release workflow does the same for any branch.
 
 Inside the AppImage, its launcher points `LD_LIBRARY_PATH`, `XDG_DATA_DIRS` and GTK's module paths at the libraries bundled with it. The app takes those entries out again for every program it starts (`docker`, and `xdg-open` for folders and web pages, in `src/host.rs`), so the host's own file manager and browser don't load the bundled libraries.
 
