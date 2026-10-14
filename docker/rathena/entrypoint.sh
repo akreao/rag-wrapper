@@ -72,7 +72,10 @@ new_account: no
 CONF
 	} > conf/import/login_conf.txt
 
+	# No PIN code window before character select: accounts already have a
+	# portal password, and a forgotten PIN can only be reset in the database.
 	{ user_import char_conf.txt; cat <<CONF
+pincode_enabled: no
 userid: ${INTER_USER}
 passwd: ${INTER_PASSWORD}
 login_ip: ${LOGIN_HOST}
