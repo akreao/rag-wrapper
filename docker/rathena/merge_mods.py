@@ -28,12 +28,18 @@ don't combine on their own, and this script handles them:
   Rate is a clash.
 
 Usage: merge_mods.py IMPORTS OUT_DIR
+       merge_mods.py --check MODS_DIR pre-re|re
 
 IMPORTS lists the mods' files in load order, "<database file> <path>" per
 line, as entrypoint.sh builds it. Files written to OUT_DIR are added to
 IMPORTS, after the mods, so they load last, and the copies replace their
 originals in IMPORTS. Problems are printed as
 rAthena-style [Warning] lines with the files' paths.
+
+--check only prints the warnings, for the mods MODS_DIR/enabled.txt names
+in that game mode, finding their files the way entrypoint.sh does. The
+desktop app runs it in the rAthena image whenever the mods change, so the
+Mods screen shows clashes before a restart.
 """
 
 import os
@@ -431,9 +437,42 @@ def header(file):
     return ["Header:"] + [f"  {k.value}: {v.value}" for k, v in node.value if k.value in ("Type", "Version")]
 
 
+def enabled(mods_dir, mode):
+    """The mods' database files in load order, as entrypoint.sh lists them:
+    (database file, path) for each enabled mod's db/*.yml and
+    db/<mode>/*.yml named after one of rAthena's import files."""
+    try:
+        with open(os.path.join(mods_dir, "enabled.txt"), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    names = []
+    for line in lines:
+        name = line.split("#", 1)[0].strip()
+        valid = name and not name.startswith(".") and all(c.isascii() and (c.isalnum() or c in "._-") for c in name)
+        if valid and name not in names and os.path.isdir(os.path.join(mods_dir, name)):
+            names.append(name)
+    files = []
+    for name in names:
+        for sub in ("db", f"db/{mode}"):
+            folder = os.path.join(mods_dir, name, sub)
+            try:
+                found = sorted(os.listdir(folder))
+            except OSError:
+                continue
+            for file in found:
+                path = os.path.join(folder, file)
+                if file.endswith(".yml") and os.path.isfile(path) and os.path.isfile(os.path.join(IMPORT_TMPL, file)):
+                    files.append((file, path))
+    return files
+
+
 def main(argv):
+    if len(argv) == 4 and argv[1] == "--check" and argv[3] in ("pre-re", "re"):
+        check(enabled(argv[2], argv[3]))
+        return 0
     if len(argv) != 3:
-        print("usage: merge_mods.py IMPORTS OUT_DIR", file=sys.stderr)
+        print("usage: merge_mods.py IMPORTS OUT_DIR | --check MODS_DIR pre-re|re", file=sys.stderr)
         return 64
     imports_path, out_dir = argv[1], argv[2]
     with open(imports_path, encoding="utf-8") as f:
