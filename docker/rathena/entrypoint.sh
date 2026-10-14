@@ -123,6 +123,47 @@ apply_upgrades() {
 	done
 }
 
+# The portal shows item names (on its admin inventory page) from this
+# table. It is refilled on every start from the item database this image
+# was built with, pre-renewal or renewal, plus db/import/item_db.yml, so it
+# follows rAthena updates and custom items. Assumes rAthena's own YAML
+# layout: "  - Id: 501" with "    Name: Red Potion" under it.
+load_item_names() {
+	mode=re
+	if [ "${PRERE:-yes}" = "yes" ]; then
+		mode=pre-re
+	fi
+	# Only the portal uses these names, so a failure here doesn't stop the
+	# servers from starting.
+	if ! {
+		echo "CREATE TABLE IF NOT EXISTS wrapper_item_names (
+			id int unsigned NOT NULL PRIMARY KEY,
+			name varchar(100) NOT NULL);"
+		echo "START TRANSACTION; DELETE FROM wrapper_item_names;"
+		# Later files win, so db/import comes last.
+		cat "db/${mode}"/item_db_*.yml db/import/item_db.yml 2>/dev/null | awk '
+			{ sub(/\r$/, "") }
+			/^  - Id:/ { id = $3 + 0; next }
+			/^    Name:/ && id > 0 {
+				name = substr($0, index($0, ":") + 1)
+				sub(/^ +/, "", name)
+				if (name ~ /^"/) { name = substr(name, 2); sub(/".*$/, "", name) }
+				else { sub(/[ \t]+#.*$/, "", name); sub(/ +$/, "", name) }
+				gsub(/\\/, "\\\\", name); gsub(/\047/, "\047\047", name)
+				if (n % 500 == 0) printf "%sREPLACE INTO wrapper_item_names VALUES ", (n ? ";\n" : "")
+				else printf ","
+				printf "(%d,\047%s\047)", id, name
+				n++; id = 0
+			}
+			END { if (n) print ";" }'
+		echo "COMMIT;"
+	} | mysql_cmd; then
+		echo "Couldn't load item names; the portal will show item numbers" >&2
+		return 0
+	fi
+	echo "Item names loaded: $(mysql_cmd -N -e "SELECT COUNT(*) FROM wrapper_item_names")"
+}
+
 init_db() {
 	if [ -z "$(mysql_cmd -N -e "SHOW TABLES LIKE 'login'")" ]; then
 		echo "Empty database: importing rAthena schema"
@@ -147,6 +188,7 @@ init_db() {
 			echo "Created admin account ${ADMIN_USER}"
 		fi
 	fi
+	load_item_names
 	echo "Database ready"
 }
 

@@ -41,6 +41,8 @@ func (a *Account) BannedUntil() time.Time { return time.Unix(a.UnbanTime, 0) }
 
 // Character is a row of rAthena's char table.
 type Character struct {
+	ID        int
+	AccountID int
 	Slot      int
 	Name      string
 	Class     int
@@ -48,8 +50,23 @@ type Character struct {
 	JobLevel  int
 	Zeny      int64
 	LastMap   string
+	LastX     int
+	LastY     int
+	SaveMap   string
+	SaveX     int
+	SaveY     int
 	Online    bool
 	Deleting  bool
+}
+
+// InTown reports whether the character is in the fallback town and saved there.
+func (c Character) InTown() bool {
+	return c.AtSavePoint() && c.SaveMap == townMap && c.SaveX == townX && c.SaveY == townY
+}
+
+// AtSavePoint reports whether the character would log in at its save point.
+func (c Character) AtSavePoint() bool {
+	return c.LastMap == c.SaveMap && c.LastX == c.SaveX && c.LastY == c.SaveY
 }
 
 func (c Character) JobName() string { return jobName(c.Class) }
@@ -134,35 +151,103 @@ func (s *store) setDetails(ctx context.Context, id int, email, birthdate string)
 	return err
 }
 
+const characterColumns = "`char_id`, `account_id`, `char_num`, `name`, `class`, `base_level`, `job_level`, `zeny`, " +
+	"`last_map`, `last_x`, `last_y`, `save_map`, `save_x`, `save_y`, `online`, `delete_date`"
+
+func scanCharacter(row interface{ Scan(...any) error }) (Character, error) {
+	var c Character
+	var online, deleteDate int64
+	err := row.Scan(&c.ID, &c.AccountID, &c.Slot, &c.Name, &c.Class, &c.BaseLevel, &c.JobLevel, &c.Zeny,
+		&c.LastMap, &c.LastX, &c.LastY, &c.SaveMap, &c.SaveX, &c.SaveY, &online, &deleteDate)
+	c.Online = online != 0
+	c.Deleting = deleteDate != 0
+	return c, err
+}
+
 func (s *store) characters(ctx context.Context, accountID int) ([]Character, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT `char_num`, `name`, `class`, `base_level`, `job_level`, `zeny`, `last_map`, `online`, `delete_date` "+
-			"FROM `char` WHERE `account_id` = ? ORDER BY `char_num`", accountID)
+		"SELECT "+characterColumns+" FROM `char` WHERE `account_id` = ? ORDER BY `char_num`", accountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var chars []Character
 	for rows.Next() {
-		var c Character
-		var online, deleteDate int64
-		if err := rows.Scan(&c.Slot, &c.Name, &c.Class, &c.BaseLevel, &c.JobLevel, &c.Zeny, &c.LastMap, &online, &deleteDate); err != nil {
+		c, err := scanCharacter(rows)
+		if err != nil {
 			return nil, err
 		}
-		c.Online = online != 0
-		c.Deleting = deleteDate != 0
 		chars = append(chars, c)
 	}
 	return chars, rows.Err()
 }
 
-// searchAccounts lists player accounts whose name or email contains q,
-// newest first.
+// characterByID returns nil, nil when there's no such character.
+func (s *store) characterByID(ctx context.Context, id int) (*Character, error) {
+	c, err := scanCharacter(s.db.QueryRowContext(ctx, "SELECT "+characterColumns+" FROM `char` WHERE `char_id` = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+var errCharacterOnline = errors.New("character is online")
+
+// The town a character is sent to when its save point is the problem:
+// rAthena's own fallback (default_map in char_athena.conf).
+const (
+	townMap = "prontera"
+	townX   = 156
+	townY   = 191
+)
+
+// moveToSavePoint puts an offline character back at its save point.
+func (s *store) moveToSavePoint(ctx context.Context, id int) error {
+	return s.moveOffline(ctx, id, "`last_map` = `save_map`, `last_x` = `save_x`, `last_y` = `save_y`")
+}
+
+// moveToTown puts an offline character in Prontera and saves it there,
+// for a character whose save point is itself where it's stuck.
+func (s *store) moveToTown(ctx context.Context, id int) error {
+	return s.moveOffline(ctx, id, "`last_map` = ?, `last_x` = ?, `last_y` = ?, `save_map` = ?, `save_x` = ?, `save_y` = ?",
+		townMap, townX, townY, townMap, townX, townY)
+}
+
+// moveOffline changes where a character logs in. The char server reads the
+// position from the database when the character is next selected, so this
+// is only safe while it is offline; the online check is part of the
+// update, so a player who logs in at the same moment wins.
+func (s *store) moveOffline(ctx context.Context, id int, set string, args ...any) error {
+	res, err := s.db.ExecContext(ctx,
+		"UPDATE `char` SET "+set+", `last_instanceid` = 0 WHERE `char_id` = ? AND `online` = 0", append(args, id)...)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n > 0 {
+		return err
+	}
+	// Nothing changed: either it's online, or it was already there.
+	var online int
+	if err := s.db.QueryRowContext(ctx, "SELECT `online` FROM `char` WHERE `char_id` = ?", id).Scan(&online); err != nil {
+		return err
+	}
+	if online != 0 {
+		return errCharacterOnline
+	}
+	return nil
+}
+
+// searchAccounts lists player accounts whose name or email, or the name of
+// one of whose characters, contains q, newest first.
 func (s *store) searchAccounts(ctx context.Context, q string, limit, offset int) ([]*Account, error) {
 	like := "%" + escapeLike(q) + "%"
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT "+accountColumns+" FROM `login` WHERE `sex` <> 'S' AND (`userid` LIKE ? OR `email` LIKE ?) "+
-			"ORDER BY `account_id` DESC LIMIT ? OFFSET ?", like, like, limit, offset)
+		"SELECT "+accountColumns+" FROM `login` WHERE `sex` <> 'S' AND (`userid` LIKE ? OR `email` LIKE ? "+
+			"OR `account_id` IN (SELECT `account_id` FROM `char` WHERE `name` LIKE ?)) "+
+			"ORDER BY `account_id` DESC LIMIT ? OFFSET ?", like, like, like, limit, offset)
 	if err != nil {
 		return nil, err
 	}
