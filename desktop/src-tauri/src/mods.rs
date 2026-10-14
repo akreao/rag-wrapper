@@ -201,16 +201,16 @@ pub fn record_applied(dir: &Path) -> io::Result<()> {
     fs::write(dir.join(APPLIED), json)
 }
 
-/// The enabled mods whose database files the server hasn't loaded yet,
-/// which the next start backs up the database for.
+/// The enabled mods whose database files the server hasn't loaded before,
+/// which the next start backs up the database for. Edits to a mod whose
+/// database files already loaded don't count, so testing changes doesn't
+/// push older automatic backups out.
 pub fn new_databases(dir: &Path) -> Vec<String> {
     let applied: BTreeMap<String, Fingerprint> = applied(dir).into_iter().collect();
+    let none = checksum(dir, &[]);
     current(dir)
         .into_iter()
-        .filter(|(name, print)| {
-            let (_, databases) = files(&dir.join(name));
-            !databases.is_empty() && applied.get(name).map(|a| &a.db) != Some(&print.db)
-        })
+        .filter(|(name, print)| print.db != none && applied.get(name).is_none_or(|a| a.db == none))
         .map(|(name, _)| name)
         .collect()
 }
@@ -446,11 +446,14 @@ mod tests {
         record_applied(&dir).unwrap();
         assert!(new_databases(&dir).is_empty());
 
-        // Editing a file is a change too.
+        // Editing a file waits for a restart but needs no new backup.
         std::thread::sleep(std::time::Duration::from_millis(20));
         write(&dir, "items/db/item_db.yml", "changed");
-        assert_eq!(new_databases(&dir), ["items"]);
+        assert!(new_databases(&dir).is_empty());
         assert!(status(&dir, true, "").mods.iter().find(|m| m.name == "items").unwrap().pending);
+        // A loaded mod that gains its first database file does.
+        write(&dir, "shop/db/mob_db.yml", "x");
+        assert_eq!(new_databases(&dir), ["shop"]);
         record_applied(&dir).unwrap();
 
         // Switching off shows as pending until the restart.

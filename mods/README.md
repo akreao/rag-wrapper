@@ -25,7 +25,7 @@ mods/
 
 `enabled.txt` has one mod folder name per line; `#` starts a comment. Mods load in the order of this file, so when two change the same entry the later one wins. The Mods screen's arrows reorder it, and a mod switched on there goes to the end.
 
-Changes apply when the game servers restart; no rebuild is needed. The database is backed up first when the restart brings in a mod with `db/` files, or changed ones.
+Changes apply when the game servers restart; no rebuild is needed. The database is backed up first when the restart loads a mod's `db/` files for the first time.
 
 ## Problems
 
