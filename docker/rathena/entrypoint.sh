@@ -68,6 +68,35 @@ mysql_cmd() {
 		--password="${DB_PASSWORD}" "${DB_NAME}" "$@"
 }
 
+# rAthena ships schema changes as sql-files/upgrades/upgrade_YYYYMMDD*.sql.
+# main.sql already includes every upgrade up to the commit it came from, so
+# the first time the tracking table is empty all current files are recorded
+# as applied. After that, files that arrive with a newer RATHENA_COMMIT are
+# run once each, in date order. Some upstream files are not safe to re-run,
+# which is why they are tracked rather than replayed.
+apply_upgrades() {
+	mysql_cmd -e "CREATE TABLE IF NOT EXISTS wrapper_sql_upgrades (
+		file varchar(64) NOT NULL PRIMARY KEY,
+		applied_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+
+	baseline=
+	if [ "$(mysql_cmd -N -e "SELECT COUNT(*) FROM wrapper_sql_upgrades")" = "0" ]; then
+		baseline=yes
+	fi
+
+	for path in $(ls sql-files/upgrades/upgrade_*.sql | sort); do
+		file=$(basename "${path}")
+		if [ -n "$(mysql_cmd -N -e "SELECT 1 FROM wrapper_sql_upgrades WHERE file='${file}'")" ]; then
+			continue
+		fi
+		if [ -z "${baseline}" ]; then
+			echo "Applying upgrade ${file}"
+			mysql_cmd < "${path}"
+		fi
+		mysql_cmd -e "INSERT INTO wrapper_sql_upgrades (file) VALUES ('${file}')"
+	done
+}
+
 init_db() {
 	if [ -z "$(mysql_cmd -N -e "SHOW TABLES LIKE 'login'")" ]; then
 		echo "Empty database: importing rAthena schema"
@@ -78,6 +107,8 @@ init_db() {
 	else
 		echo "Schema already present: skipping import"
 	fi
+
+	apply_upgrades
 
 	# Account 1 is the server-to-server login; replace the stock s1/p1.
 	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass=MD5('${INTER_PASSWORD}') WHERE account_id=1"
