@@ -74,3 +74,11 @@ Questions asked about the finished portal (PR #2), one at a time.
 - **Bans don't kick players already in game.** The portal only writes the database, so a ban stops the next login. The ban form tells admins to use `@kick` in game for someone who's online. No rathena fork change for this.
 - **Birthdate is required at sign-up.** With `char_del_option: 2` the game checks the birthdate when a player deletes a character, so an account without one could never delete characters. Players can change it on their account page.
 - **Admin pages are for Admins (group 99) only.** Lower GM groups such as Law Enforcement get no portal access. A moderator role (ban and reset, but no GM-level changes) can be added later if needed.
+
+## CI: GitHub Actions
+
+Questions asked about the CI workflow (PR #5), one at a time.
+
+`.github/workflows/ci.yml` runs on every PR and every push to `main`: the portal's `gofmt`, `go vet` and `go test`; `docker compose config` and `shellcheck` on the entrypoint; and a build of the rAthena image, only when `docker/rathena/`, `.env.example`, `compose.yaml` or the workflow changes.
+
+- **CI must pass before a PR merges to `main`.** The checks are required in the branch settings, so a broken portal or a bad rAthena pin can't land by accident. A skipped rAthena image job counts as passed.
