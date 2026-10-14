@@ -86,8 +86,9 @@ func patcherConfig(base, serverName string) []byte {
 	cfg := map[string]any{
 		"window": map[string]any{"title": serverName + " patcher", "width": 600, "height": 360, "resizable": false},
 		"play":   map[string]any{"path": clientExe, "arguments": []string{}, "exit_on_success": true},
-		// No setup button on the page; rpatchur still wants the section.
-		"setup": map[string]any{"path": "Setup.exe", "arguments": []string{}, "exit_on_success": false},
+		// The page's Settings button: the client's own settings program,
+		// which the WARPGATE client ships as opensetup.exe.
+		"setup": map[string]any{"path": "opensetup.exe", "arguments": []string{}, "exit_on_success": false},
 		"web": map[string]any{
 			"index_url":              base + "/patcher/",
 			"preferred_patch_server": serverName,
@@ -112,7 +113,7 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The patcher isn't in this portal's image. Rebuild the portal with docker compose build portal.", http.StatusNotFound)
 		return
 	}
-	base := "http://" + r.Host
+	base := a.conn.BaseURL(r)
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	add := func(name string, data []byte) error {
@@ -184,7 +185,7 @@ func (a *app) patchFile(w http.ResponseWriter, r *http.Request) {
 // old IE engine, so the page and its script stay plain (no CSS variables,
 // no modern JavaScript).
 func (a *app) patcherPage(w http.ResponseWriter, r *http.Request) {
-	base := "http://" + r.Host
+	base := a.conn.BaseURL(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-UA-Compatible", "IE=edge")
