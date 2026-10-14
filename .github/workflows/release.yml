@@ -1,0 +1,91 @@
+# Builds the desktop app as an AppImage.
+#
+# A tag like v0.2.0 publishes it as a GitHub release; the tag must match the
+# app's version in desktop/src-tauri/tauri.conf.json. Pull requests that touch
+# the packaging, and a manual run, build it and keep it as a workflow artifact.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'desktop/src-tauri/tauri.conf.json'
+      - 'desktop/src-tauri/Cargo.toml'
+      - 'desktop/src-tauri/Cargo.lock'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  appimage:
+    name: AppImage
+    # The oldest supported Ubuntu, so the AppImage runs on distributions
+    # with an older glibc than the build machine's.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches the app's version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the app's version $version in tauri.conf.json"
+            exit 1
+          fi
+      - name: Tauri's system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev file
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          cache-bin: true
+      - name: Tauri's CLI
+        run: cargo install tauri-cli --version "^2" --locked
+      - name: Build the AppImage
+        working-directory: desktop/src-tauri
+        run: cargo tauri build --bundles appimage
+      - name: Name it after the version
+        id: appimage
+        run: |
+          version=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          name="rag-wrapper-$version-x86_64.AppImage"
+          mv desktop/src-tauri/target/release/bundle/appimage/*.AppImage "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+      - name: It holds the stack files
+        run: |
+          chmod +x "${{ steps.appimage.outputs.name }}"
+          "./${{ steps.appimage.outputs.name }}" --appimage-extract > /dev/null
+          test -x squashfs-root/AppRun
+          test -f squashfs-root/usr/lib/rag-wrapper/stack/compose.yaml
+          test -d squashfs-root/usr/lib/rag-wrapper/stack/docker/rathena
+          rm -rf squashfs-root
+      - uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          name: ${{ steps.appimage.outputs.name }}
+          path: ${{ steps.appimage.outputs.name }}
+          retention-days: 14
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(sed -n 's/^RATHENA_COMMIT=//p' .env.example)
+          {
+            echo "Server: rAthena [\`${commit:0:7}\`](https://github.com/akreao/rathena/commit/$commit) on the \`rag-wrapper\` branch, built on first start."
+            echo
+            echo "Download the AppImage, make it executable (\`chmod +x\`) and run it. It needs Docker with the Compose plugin, and FUSE 2 (\`libfuse2\`, or \`libfuse2t64\` on Ubuntu 24.04)."
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" "${{ steps.appimage.outputs.name }}" \
+            --title "rag-wrapper $GITHUB_REF_NAME" --notes-file notes.md --generate-notes --verify-tag
