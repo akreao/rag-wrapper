@@ -57,3 +57,11 @@ On the first start, the desktop app asks for an admin username and password. The
 
 - This is the desktop app's only account-related job; everything after it happens in the portal.
 - Nobody on the LAN can claim admin by registering first.
+
+## Web portal: Go
+
+A single Go binary serving plain server-rendered HTML, no JavaScript framework, in its own small image in the Compose stack.
+
+## Desktop app: Tauri
+
+Tauri, as proposed in the first plan and not changed since. It drives `docker compose` for start, stop, status, logs and builds, and runs the first-run admin setup.

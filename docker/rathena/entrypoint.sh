@@ -17,10 +17,14 @@ set -eu
 # The address the game client is told to connect to for char and map.
 : "${PUBLIC_IP:=127.0.0.1}"
 
+# Optional: the admin account the desktop app asks for on first run.
+: "${ADMIN_USER:=}"
+: "${ADMIN_PASSWORD:=}"
+
 # These end up in SQL and config files, so keep them to plain characters.
-case "${INTER_USER}${INTER_PASSWORD}" in
+case "${INTER_USER}${INTER_PASSWORD}${ADMIN_USER}${ADMIN_PASSWORD}" in
 	*[!A-Za-z0-9_]*)
-		echo "INTER_USER and INTER_PASSWORD may only use letters, digits and _" >&2
+		echo "INTER_USER, INTER_PASSWORD, ADMIN_USER and ADMIN_PASSWORD may only use letters, digits and _" >&2
 		exit 64
 		;;
 esac
@@ -37,6 +41,12 @@ write_imports() {
 			echo "${db}_db: ${DB_NAME}"
 		done
 	} > conf/import/inter_conf.txt
+
+	# Passwords are stored as MD5; accounts come from the portal, not _M/_F.
+	cat > conf/import/login_conf.txt <<CONF
+use_MD5_passwords: yes
+new_account: no
+CONF
 
 	cat > conf/import/char_conf.txt <<CONF
 userid: ${INTER_USER}
@@ -70,7 +80,16 @@ init_db() {
 	fi
 
 	# Account 1 is the server-to-server login; replace the stock s1/p1.
-	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass='${INTER_PASSWORD}' WHERE account_id=1"
+	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass=MD5('${INTER_PASSWORD}') WHERE account_id=1"
+
+	# Group 99 is Admin in conf/groups.yml. Only created once; later runs
+	# leave an existing account alone.
+	if [ -n "${ADMIN_USER}" ] && [ -n "${ADMIN_PASSWORD}" ]; then
+		if [ -z "$(mysql_cmd -N -e "SELECT 1 FROM login WHERE userid='${ADMIN_USER}'")" ]; then
+			mysql_cmd -e "INSERT INTO login (userid, user_pass, sex, email, group_id) VALUES ('${ADMIN_USER}', MD5('${ADMIN_PASSWORD}'), 'M', 'a@a.com', 99)"
+			echo "Created admin account ${ADMIN_USER}"
+		fi
+	fi
 	echo "Database ready"
 }
 
