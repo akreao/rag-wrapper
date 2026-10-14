@@ -86,7 +86,9 @@ main { flex: 1; min-height: 0; padding: 16px 20px; }
   align-items: start;
   overflow: auto;
 }
-#dashboard[hidden], #setup[hidden], #settings[hidden] { display: none; }
+#backups-page { overflow: auto; }
+#backups-page .card { max-width: 640px; }
+#dashboard[hidden], #setup[hidden], #settings[hidden], #backups-page[hidden] { display: none; }
 
 aside { display: flex; flex-direction: column; gap: 16px; overflow: auto; }
 

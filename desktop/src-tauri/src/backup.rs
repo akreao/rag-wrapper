@@ -24,7 +24,14 @@ const SUFFIX: &str = ".sql.gz";
 /// Most of rAthena's tables are MyISAM, so a consistent dump of a running
 /// server needs a global read lock rather than `--single-transaction`.
 /// Writes pause for the few seconds the dump takes.
-const DUMP: &str = r#"MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb-dump --user=root --lock-all-tables --routines --events --triggers ragnarok"#;
+///
+/// MyISAM tables left open by an unclean shutdown are marked crashed.
+/// MariaDB repairs them when they're next opened, but not under the dump's
+/// read lock, so the dump first repairs any that weren't closed properly.
+/// Its report goes to stderr, keeping stdout for the dump.
+const DUMP: &str = r#"export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"
+mariadb-check --user=root --fast --auto-repair --silent ragnarok >&2 || exit
+exec mariadb-dump --user=root --lock-all-tables --routines --events --triggers ragnarok"#;
 const LOAD: &str = r#"MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb --user=root"#;
 
 /// mariadb-dump's last line; a dump without it was cut short.

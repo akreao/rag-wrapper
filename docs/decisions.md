@@ -135,3 +135,4 @@ Questions asked about the finished desktop app (PR #3), one at a time.
 Questions asked about database backup and restore (PR #9), one at a time.
 
 - **Backups made by hand are kept apart from automatic ones.** The newest 10 made with "Back up now" are kept, and separately the newest 10 made automatically (before a rebuild or a restore). A run of rebuilds never pushes out a backup someone made on purpose.
+- **Backups have their own screen.** A Backups button in the header, beside Settings, opens the list with Back up now and Open folder. Starting a backup or a restore switches to the main screen so its progress shows in the Activity log.

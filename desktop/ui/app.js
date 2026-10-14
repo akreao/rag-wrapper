@@ -167,6 +167,7 @@ async function refreshOverview() {
 
   $("setup").hidden = overview.configured;
   $("nav").hidden = !overview.configured;
+  $("nav-backups").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
     fillAddresses($("setup-ip"), null, true);
@@ -186,7 +187,7 @@ function updateButtons() {
   $("cancel").hidden = !["build", "start", "restart"].includes(task);
 }
 
-// ---- Pages: the dashboard and Settings ----
+// ---- Pages: the dashboard, Settings and Backups ----
 
 let page = "dashboard";
 
@@ -194,18 +195,24 @@ function showPage(next) {
   if (next) page = next;
   $("dashboard").hidden = next !== "dashboard";
   $("settings").hidden = next !== "settings";
+  $("backups-page").hidden = next !== "backups";
   $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
+  $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
 }
 
 $("nav").addEventListener("click", async () => {
-  if (page === "dashboard") {
-    $("game-saved").hidden = true;
-    $("game-error").hidden = true;
-    await loadGameSettings();
-    showPage("settings");
-  } else {
-    showPage("dashboard");
-  }
+  if (page === "settings") return showPage("dashboard");
+  $("game-saved").hidden = true;
+  $("game-error").hidden = true;
+  await loadGameSettings();
+  showPage("settings");
+});
+
+$("nav-backups").addEventListener("click", async () => {
+  if (page === "backups") return showPage("dashboard");
+  $("backup-error").hidden = true;
+  await refreshBackups();
+  showPage("backups");
 });
 
 const serverRunning = () => lastServices.some((s) => ["login", "char", "map"].includes(s.service) && s.state === "running");
@@ -409,6 +416,7 @@ async function refreshBackups() {
         yes.addEventListener("click", () => {
           confirming = null;
           li.querySelector(".confirm").remove();
+          showPage("dashboard");
           runTask("restore", b.file);
         });
         const no = document.createElement("button");
@@ -426,7 +434,11 @@ async function refreshBackups() {
   updateButtons();
 }
 
-$("backup-now").addEventListener("click", () => runTask("backup"));
+// Progress shows in the Activity log on the main screen.
+$("backup-now").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("backup");
+});
 
 $("open-backups").addEventListener("click", async () => {
   $("backup-error").hidden = true;
