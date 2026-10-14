@@ -106,9 +106,23 @@ fn walk(dir: &Path, prefix: &str, files: &mut Vec<String>) -> std::io::Result<()
 }
 
 pub fn exists(name: &str) -> bool {
+    image_id(name).is_some()
+}
+
+fn image_id(name: &str) -> Option<String> {
     let mut cmd = host::command("docker");
     cmd.args(["image", "inspect", "--format", "{{.Id}}", name]);
-    stack::output(cmd).is_ok()
+    stack::output(cmd).ok().map(|id| id.trim().to_owned())
+}
+
+/// Whether the image under the stack's name is the published one these
+/// settings want. After an app update ships new build files, the wanted
+/// tag changes and the image already here is out of date.
+fn is_current(image: &Image) -> bool {
+    match (image_id(&image.local), image.remote.as_deref().and_then(image_id)) {
+        (Some(local), Some(remote)) => local == remote,
+        _ => false,
+    }
 }
 
 /// Pulls the published image and names it as the stack expects. Fails
@@ -146,14 +160,19 @@ pub fn fetch_or_build(ctx: &Ctx, images: &[Image], mut build: Command) -> Result
     ctx.run(build)
 }
 
-/// Before a start: pulls any image that isn't here yet. One that can't be
-/// pulled is left for `docker compose up` to build.
+/// Before a start: pulls any published image that isn't here yet or that
+/// an app update has replaced. One that can't be pulled is left for
+/// `docker compose up` to build, or kept if it's already here.
 pub fn fetch_missing(ctx: &Ctx, images: &[Image]) -> Result<(), String> {
-    for image in images.iter().filter(|i| i.remote.is_some() && !exists(&i.local)) {
+    for image in images.iter().filter(|i| i.remote.is_some() && !is_current(i)) {
         ctx.check_cancelled()?;
         if pull(ctx, image).is_err() {
             ctx.check_cancelled()?;
-            ctx.line(format!("No prebuilt image to download; {} will be built on this computer.", image.local));
+            if exists(&image.local) {
+                ctx.line(format!("No newer prebuilt image to download; keeping {}.", image.local));
+            } else {
+                ctx.line(format!("No prebuilt image to download; {} will be built on this computer.", image.local));
+            }
         }
     }
     Ok(())
