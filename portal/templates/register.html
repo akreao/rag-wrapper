@@ -1,0 +1,20 @@
+{{define "content"}}<h1>Create an account</h1>
+<p>You'll use this username and password to log in to the game.</p>
+<form method="post" action="/register" class="card">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label>Username <input name="userid" value="{{index .Form "userid"}}" minlength="4" maxlength="23" pattern="[A-Za-z0-9_]+" autocomplete="username" required autofocus>
+    <small>4 to 23 letters, digits or _.</small></label>
+  <label>Password <input type="password" name="password" minlength="6" maxlength="23" autocomplete="new-password" required>
+    <small>6 to 23 characters, no spaces.</small></label>
+  <label>Password again <input type="password" name="password2" minlength="6" maxlength="23" autocomplete="new-password" required></label>
+  <label>Email <input type="email" name="email" value="{{index .Form "email"}}" maxlength="39" autocomplete="email" required></label>
+  <label>Birthdate <input type="date" name="birthdate" value="{{index .Form "birthdate"}}" required>
+    <small>The game asks for it when you delete a character.</small></label>
+  <fieldset>
+    <legend>Sex</legend>
+    <label class="choice"><input type="radio" name="sex" value="M"{{if eq (index .Form "sex") "M"}} checked{{end}}> Male</label>
+    <label class="choice"><input type="radio" name="sex" value="F"{{if eq (index .Form "sex") "F"}} checked{{end}}> Female</label>
+  </fieldset>
+  <button>Create account</button>
+</form>
+<p>Already have one? <a href="/login">Log in</a>.</p>{{end}}

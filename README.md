@@ -4,7 +4,7 @@ A Linux desktop app that runs a private rAthena server and its database, for use
 
 ## Running the server stack
 
-The server side runs in Docker: MariaDB plus rAthena's login, char, map and web servers, built from source for your client's packet version.
+The server side runs in Docker: MariaDB, rAthena's login, char, map and web servers built from source for your client's packet version, and the account portal.
 
 ```sh
 cp .env.example .env   # then change the passwords
@@ -20,6 +20,7 @@ The first build compiles rAthena and takes several minutes. On first start, `db-
 | 6121 | char |
 | 5121 | map |
 | 8888 | web (emblems and settings for newer clients) |
+| 8080 | account portal (`PORTAL_PORT`) |
 
 Settings in `.env`:
 - `PUBLIC_IP` is the address the client is sent for the char and map servers. Keep `127.0.0.1` when the client runs on this machine; use the machine's LAN IP for other computers.
@@ -27,3 +28,19 @@ Settings in `.env`:
 - `RATHENA_REPO` and `RATHENA_REF` choose the rAthena source to build.
 
 `docker compose down` stops everything; the database lives in the `db-data` volume and survives restarts. `docker compose down -v` deletes it.
+
+## Account portal
+
+Players create and manage their accounts at `http://<server's LAN IP>:8080`. The game client's own `_M`/`_F` sign-up is off, so this is the way in.
+
+- **Anyone on the LAN** can register (username, password, email, birthdate, sex), then log in to change their password, email and birthdate and see their characters. The game asks for the birthdate when deleting a character.
+- **Admins** (group 99, such as the first admin created on setup) also get an Admin page: search accounts, change an account's group (GM level), ban for a set time or until lifted, and set a new password for a player who forgot theirs. Changes apply at the player's next game login; a player already in game stays on until they log out.
+- Passwords are stored as `MD5(password)`, matching `use_MD5_passwords: yes`. Portal sessions live in memory, so restarting the portal logs everyone out of it (not out of the game).
+
+The portal is a single Go program in `portal/`, with its pages built in. To work on it without Docker, point it at a database and run it:
+
+```sh
+cd portal
+DB_HOST=127.0.0.1 DB_PASSWORD=... go run .   # listens on :8080 (PORTAL_ADDR)
+go test ./...
+```
