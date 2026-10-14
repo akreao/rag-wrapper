@@ -11,7 +11,7 @@ What it does:
 - **Address players connect to** defaults to *Detect automatically*: on every Start the app writes the machine's current LAN IP (the interface with the default route, skipping Docker's bridges) as `PUBLIC_IP`. Picking an address pins it instead (`PUBLIC_IP_AUTO=no` in `.env`).
 - If the stack gets a service named `portal` that publishes a port, a link to it appears.
 
-The server keeps running when the app is closed.
+The server runs only while the app is open: closing the window cancels any build or start in progress, runs `docker compose down` (keeping the database volume) and then exits.
 
 ## Where the stack lives
 

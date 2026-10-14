@@ -72,3 +72,10 @@ Setup writes `ADMIN_PASSWORD` to `.env` so `db-init` can create the admin. After
 
 - The admin changes their password in the web portal like any player.
 - If the database volume is deleted, the admin isn't recreated on its own: put a password back in `ADMIN_PASSWORD` before the next start.
+
+## Server runs only while the desktop app is open
+
+Closing the app's window stops the server: it cancels any build or start in progress, runs `docker compose down` (the database volume is kept) and then exits. The window shows the shutdown while it runs.
+
+- Players are disconnected when the app closes, so leave it open while people are playing.
+- Because the containers are removed, the server doesn't come back by itself after a reboot; it starts when someone opens the app and presses Start.

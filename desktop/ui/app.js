@@ -269,5 +269,14 @@ listen("log-line", ({ payload }) => {
   queueRender();
 });
 
+// Closing the window stops the server first; show its output meanwhile.
+listen("closing", async () => {
+  task = "stop";
+  updateButtons();
+  banner("Stopping the server before closing…");
+  activity.length = 0;
+  await showView("activity");
+});
+
 refreshOverview().then(refreshServices);
 setInterval(refreshServices, 3000);

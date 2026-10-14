@@ -4,7 +4,7 @@ mod stack;
 
 use std::path::PathBuf;
 use std::process::Child;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -19,6 +19,8 @@ struct App {
     logs: Mutex<Option<Child>>,
     /// Bumped on every log switch so the UI can drop lines from the old stream.
     logs_generation: AtomicU64,
+    /// Set once the window has asked to close and the stack is going down.
+    closing: AtomicBool,
 }
 
 impl App {
@@ -133,6 +135,9 @@ struct TaskEvent {
 /// Runs `start`, `stop` or `build`, streaming its output as `task-line` events.
 #[tauri::command]
 fn run_task(handle: AppHandle, app: State<App>, kind: String) -> Result<(), String> {
+    if app.closing.load(Ordering::SeqCst) {
+        return Err("The app is closing.".into());
+    }
     let mut slot = app.task.lock().unwrap();
     if let Some((running, _)) = slot.as_ref() {
         return Err(format!("Wait for the current {running} to finish."));
@@ -252,6 +257,7 @@ pub fn run() {
                 task: Arc::new(Mutex::new(None)),
                 logs: Mutex::new(None),
                 logs_generation: AtomicU64::new(0),
+                closing: AtomicBool::new(false),
             });
             Ok(())
         })
@@ -264,19 +270,52 @@ pub fn run() {
             cancel_task,
             follow_logs
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let handle = window.app_handle().clone();
+                let app = handle.state::<App>();
+                if !app.closing.swap(true, Ordering::SeqCst) {
+                    let _ = handle.emit("closing", ());
+                    let handle = handle.clone();
+                    std::thread::spawn(move || stop_and_exit(handle));
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building the app")
         .run(|handle, event| {
             if let tauri::RunEvent::Exit = event {
-                // The server keeps running without the app; only our own
-                // processes stop.
                 let app = handle.state::<App>();
-                if let Some(mut child) = app.logs.lock().unwrap().take() {
+                let follower = app.logs.lock().unwrap().take();
+                if let Some(mut child) = follower {
                     let _ = child.kill();
                 }
-                if let Some((_, child)) = app.task.lock().unwrap().as_ref() {
-                    stack::interrupt(child);
-                };
             }
         });
+}
+
+/// The server only runs while the app is open: closing the window cancels
+/// any build or start, takes the stack down (the database volume is kept)
+/// and then exits.
+fn stop_and_exit(handle: AppHandle) {
+    let app = handle.state::<App>();
+    if let Some((_, child)) = app.task.lock().unwrap().as_ref() {
+        stack::interrupt(child);
+    }
+    while app.task.lock().unwrap().is_some() {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    if app.env_path().exists() {
+        let mut cmd = stack::compose(&app.dir);
+        cmd.arg("down");
+        let lines = handle.clone();
+        if let Ok((mut child, done)) = stack::spawn_lines(cmd, move |line| {
+            let _ = lines.emit("task-line", line);
+        }) {
+            let _ = done.join();
+            let _ = child.wait();
+        }
+    }
+    handle.exit(0);
 }
