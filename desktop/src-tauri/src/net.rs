@@ -1,5 +1,5 @@
 //! Finds the addresses other PCs can reach this machine on: on the LAN,
-//! or over a private VPN such as Tailscale or ZeroTier.
+//! or over a private VPN such as Tailscale, ZeroTier, WireGuard or NetBird.
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -9,7 +9,7 @@ use serde::Serialize;
 pub struct Address {
     pub ip: String,
     pub interface: String,
-    /// The VPN the address belongs to ("Tailscale", "ZeroTier"), or `None`
+    /// The VPN the address belongs to ("Tailscale", "ZeroTier", ...), or `None`
     /// for an address on the LAN.
     pub vpn: Option<&'static str>,
 }
@@ -70,15 +70,23 @@ fn is_virtual(interface: &str) -> bool {
         .any(|p| interface.starts_with(p))
 }
 
-/// Tailscale's interface is `tailscale0` and its addresses are in the
-/// 100.64.0.0/10 range it uses (as does Headscale); ZeroTier's interfaces
-/// are named `zt` and a network id.
+/// Recognised by interface name: `tailscale0`, ZeroTier's `zt` plus a
+/// network id, WireGuard's usual `wg0` and up, NetBird's `wt0`. Any other
+/// interface with an address in 100.64.0.0/10, the range Tailscale (and
+/// Headscale) hand out, is taken for Tailscale too. NetBird uses that
+/// range as well, which is why names are checked first.
 fn vpn_name(interface: &str, ip: Ipv4Addr) -> Option<&'static str> {
     let [a, b, ..] = ip.octets();
-    if interface.starts_with("tailscale") || (a == 100 && (64..128).contains(&b)) {
+    if interface.starts_with("tailscale") {
         Some("Tailscale")
     } else if interface.starts_with("zt") {
         Some("ZeroTier")
+    } else if interface.starts_with("wg") {
+        Some("WireGuard")
+    } else if interface.starts_with("wt") {
+        Some("NetBird")
+    } else if a == 100 && (64..128).contains(&b) {
+        Some("Tailscale")
     } else {
         None
     }
@@ -94,6 +102,8 @@ mod tests {
         assert_eq!(vpn_name("tailscale0", ip("100.101.102.103")), Some("Tailscale"));
         assert_eq!(vpn_name("tun0", ip("100.64.0.1")), Some("Tailscale"));
         assert_eq!(vpn_name("ztabcdef12", ip("10.147.17.5")), Some("ZeroTier"));
+        assert_eq!(vpn_name("wg0", ip("10.8.0.1")), Some("WireGuard"));
+        assert_eq!(vpn_name("wt0", ip("100.70.1.2")), Some("NetBird"));
         assert_eq!(vpn_name("eth0", ip("192.168.1.20")), None);
         assert_eq!(vpn_name("wlan0", ip("100.128.0.1")), None);
     }
