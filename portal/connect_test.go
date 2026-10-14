@@ -6,12 +6,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestClientInfo(t *testing.T) {
-	c := connectInfo{Address: "192.168.1.20", PacketVer: "20220406", Name: "Prontera & Co"}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "char_conf.txt"), []byte("// server_name: Old\nserver_name: Prontera_LAN\n"), 0o644)
+	c := connectInfo{Address: "192.168.1.20", PacketVer: "20220406", Overrides: dir}
 	var got struct {
 		ServiceType string `xml:"servicetype"`
 		Connection  struct {
@@ -27,7 +31,7 @@ func TestClientInfo(t *testing.T) {
 	if err := dec.Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ServiceType != "korea" || got.Connection.Display != "Prontera & Co" || got.Connection.Address != "192.168.1.20" || got.Connection.Port != 6900 ||
+	if got.ServiceType != "korea" || got.Connection.Display != "Prontera_LAN" || got.Connection.Address != "192.168.1.20" || got.Connection.Port != 6900 ||
 		got.Connection.RegistrationWeb != "http://x/register?a=1&b=<2>" {
 		t.Fatalf("%+v", got)
 	}
@@ -74,14 +78,8 @@ func TestConnectRoutes(t *testing.T) {
 	}
 }
 
-func TestServerName(t *testing.T) {
-	for in, want := range map[string]string{
-		"":                      "LAN server",
-		"  My \t server ":       "My server",
-		strings.Repeat("a", 50): strings.Repeat("a", 40),
-	} {
-		if got := serverName(in); got != want {
-			t.Errorf("serverName(%q) = %q, want %q", in, got, want)
-		}
+func TestServerNameDefault(t *testing.T) {
+	if got := (connectInfo{Overrides: t.TempDir()}).ServerName(); got != "rAthena" {
+		t.Fatal(got)
 	}
 }

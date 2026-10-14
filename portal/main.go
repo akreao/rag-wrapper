@@ -54,7 +54,7 @@ func main() {
 	conn := connectInfo{
 		Address:   env("PUBLIC_IP", "127.0.0.1"),
 		PacketVer: env("PACKETVER", "20220406"),
-		Name:      serverName(os.Getenv("SERVER_NAME")),
+		Overrides: env("OVERRIDES_DIR", "/overrides"),
 	}
 
 	app, err := newApp(&store{db: db}, adminGroup, conn)

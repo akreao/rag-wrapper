@@ -5,6 +5,8 @@ import (
 	"encoding/xml"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -14,20 +16,30 @@ import (
 type connectInfo struct {
 	Address   string // PUBLIC_IP: where the client is sent for login, char and map
 	PacketVer string // PACKETVER: the client date the server was built for
-	Name      string // SERVER_NAME: shown in the client's server list
+	Overrides string // the stack's overrides/ folder, for the server name
 }
 
-// serverName tidies SERVER_NAME for the client's server list, which has
-// room for a short line of text.
-func serverName(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if s == "" {
-		return "LAN server"
+// The name rAthena gives the server when char_conf.txt doesn't set one.
+const defaultServerName = "rAthena"
+
+// ServerName is rAthena's server_name, which the desktop app's Settings
+// screen writes to overrides/char_conf.txt. It's read on every request so
+// a change shows without restarting the portal.
+func (c connectInfo) ServerName() string {
+	b, err := os.ReadFile(filepath.Join(c.Overrides, "char_conf.txt"))
+	if err != nil {
+		return defaultServerName
 	}
-	if r := []rune(s); len(r) > 40 {
-		s = string(r[:40])
+	name := defaultServerName
+	for _, line := range strings.Split(string(b), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && !strings.HasPrefix(key, "//") && strings.TrimSpace(key) == "server_name" {
+			if v := strings.TrimSpace(value); v != "" {
+				name = v
+			}
+		}
 	}
-	return s
+	return name
 }
 
 // Ports the client connects to. They are fixed in compose.yaml.
@@ -59,8 +71,8 @@ func (c connectInfo) MapPort() int   { return mapPort }
 
 // clientInfo builds a clientinfo.xml that sends the client to this server.
 // sclientinfo.xml is the same file under the name Sakray clients look for.
-// It declares euc-kr like the stock file. Everything in it is ASCII except
-// perhaps SERVER_NAME, which is written as UTF-8.
+// It declares euc-kr like the stock file; the content is ASCII, since the
+// Settings screen only allows ASCII server names.
 // registerURL is the portal's sign-up page, which some clients open from
 // the login screen.
 //
@@ -91,7 +103,7 @@ func (c connectInfo) clientInfo(registerURL string) []byte {
 		ServiceType: "korea",
 		ServerType:  "primary",
 		Connection: connection{
-			Display:         c.Name,
+			Display:         c.ServerName(),
 			Desc:            "Ragnarok Online",
 			Balloon:         "Ragnarok Online on " + c.Address,
 			Address:         c.Address,
