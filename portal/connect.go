@@ -16,6 +16,7 @@ import (
 type connectInfo struct {
 	Address   string // PUBLIC_IP: where the client is sent for login, char and map
 	PacketVer string // PACKETVER: the client date the server was built for
+	Renewal   bool   // PRERE=no: the server runs Renewal instead of Pre-Renewal
 	Overrides string // the stack's overrides/ folder, for the server name
 	Patcher   patcherFiles
 }
@@ -55,6 +56,15 @@ const (
 func (c connectInfo) Loopback() bool {
 	ip := net.ParseIP(c.Address)
 	return ip != nil && ip.IsLoopback()
+}
+
+// Mode names the server's game mode the way WARPGATE's LANG tab does, so
+// players pick the matching English translation.
+func (c connectInfo) Mode() string {
+	if c.Renewal {
+		return "Renewal"
+	}
+	return "Pre-Renewal"
 }
 
 // ClientDate shows PACKETVER as a date, e.g. 20250716 as 2025-07-16.

@@ -12,7 +12,7 @@ Both versions of the 2025-07-16 steps (the patcher, and patching by hand with WA
 
 - **Still not distributed by us.** WARPGATE installs [llchrisll's translation](https://github.com/llchrisll/ROenglishRE) from llchrisll's project; the portal only links to it and never hands it out.
 - **`DATA.INI` still comes from our patches.** Whatever the translation install leaves in `DATA.INI`, the patcher's patches rewrite it with `rag-wrapper.grf` above `data.grf` ([publish-client-patch.md](publish-client-patch.md)). WARPGATE's page says it won't overwrite `DATA.INI` or `clientinfo.xml` on updates, so the patched copy stays.
-- **Pre-Renewal is written into the page.** It matches the app's default mode; the portal doesn't know the build mode.
+- **The page follows the server's mode** (Steven, 2026-10-14). The portal gets `PRERE` like the rAthena build, shows the mode under "This server" and names it in the LANG step: Pre-Renewal (the default) or Renewal.
 - **Verified vs inferred (2026-10-14):** the LANG tab, the Renewal/Pre-Renewal choice, automatic translation updates and leaving `DATA.INI` alone come from WARPGATE's own site. The exact install button label isn't on the site, so the page doesn't name it. Nothing has been tried on Windows yet.
 
 ## Only `clientinfo.xml`

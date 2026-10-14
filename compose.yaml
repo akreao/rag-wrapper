@@ -107,6 +107,7 @@ services:
       # Shown on the "How to connect" page and written into clientinfo.xml.
       PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
       PACKETVER: ${PACKETVER:-20250716}
+      PRERE: ${PRERE:-yes}
     # The server name comes from the Settings screen's char_conf.txt.
     # patches/ holds the client patches the patcher downloads.
     volumes:
