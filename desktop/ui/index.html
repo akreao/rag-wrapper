@@ -60,6 +60,10 @@
       <label>Address players connect to
         <select id="setup-ip"></select>
       </label>
+      <label id="setup-ip-other" hidden>Address
+        <input id="setup-ip-typed" placeholder="such as 100.101.102.103" spellcheck="false">
+      </label>
+      <p id="setup-ip-note" class="hint" hidden></p>
       <p id="setup-error" class="error" hidden></p>
       <button class="primary" type="submit">Save</button>
     </form>
@@ -77,7 +81,16 @@
         <label>Address players connect to
           <select id="ip"></select>
         </label>
-        <p class="hint">A change takes effect on the next Start.</p>
+        <div id="ip-other" class="row" hidden>
+          <input id="ip-typed" placeholder="such as 100.101.102.103" spellcheck="false" aria-label="Address">
+          <button id="ip-use">Use</button>
+        </div>
+        <p id="ip-note" class="hint" hidden></p>
+        <p id="ip-confirm" class="notice" hidden>Restart the char and map servers on the new address? Players in game are disconnected.<br>
+          <button id="ip-yes">Change and restart</button><button id="ip-no">Cancel</button>
+        </p>
+        <p id="ip-error" class="error" hidden></p>
+        <p class="hint">Changing it while the server runs restarts the char and map servers.</p>
         <p id="portal" hidden><a href="#" id="portal-link">Open the account portal</a></p>
         <p class="hint">Admin account: <span id="admin-name"></span></p>
       </section>

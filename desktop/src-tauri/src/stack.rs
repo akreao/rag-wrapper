@@ -27,6 +27,9 @@ pub const MODS: &str = "mods";
 /// The services that read the overrides, restarted to apply them.
 pub const GAME_SERVERS: [&str; 3] = ["login", "char", "map"];
 
+/// The services that use `PUBLIC_IP`, restarted when it changes.
+pub const READDRESSED: [&str; 3] = ["char", "map", "portal"];
+
 /// The settings template, compiled in: Tauri's resource bundling skips dotfiles.
 pub const ENV_EXAMPLE: &str = include_str!("../../../.env.example");
 
