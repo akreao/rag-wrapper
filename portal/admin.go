@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -230,11 +231,25 @@ func (a *app) showAdminCharacter(req *request, c *Character, errMsg string) erro
 // adminMoveToSavePoint is for a character stuck somewhere it can't leave,
 // such as a map that crashes the client or a spot inside a wall.
 func (a *app) adminMoveToSavePoint(req *request) error {
+	return a.moveCharacter(req, a.store.moveToSavePoint, func(c *Character) string {
+		return c.Name + " will log in at " + c.SaveMap + " (" + strconv.Itoa(c.SaveX) + ", " + strconv.Itoa(c.SaveY) + ")."
+	})
+}
+
+// adminMoveToTown is for a character whose save point is itself the spot
+// it's stuck in.
+func (a *app) adminMoveToTown(req *request) error {
+	return a.moveCharacter(req, a.store.moveToTown, func(c *Character) string {
+		return c.Name + " will log in at " + townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + "), now also its save point."
+	})
+}
+
+func (a *app) moveCharacter(req *request, move func(context.Context, int) error, done func(*Character) string) error {
 	c, err := a.character(req)
 	if c == nil || err != nil {
 		return err
 	}
-	err = a.store.moveToSavePoint(req.r.Context(), c.ID)
+	err = move(req.r.Context(), c.ID)
 	if errors.Is(err, errCharacterOnline) {
 		c.Online = true
 		return a.showAdminCharacter(req, c, c.Name+" is in game. Ask the player to log out, or use @jumpto or @recall in game.")
@@ -242,7 +257,7 @@ func (a *app) adminMoveToSavePoint(req *request) error {
 	if err != nil {
 		return err
 	}
-	return a.redirect(req, adminCharacterURL(c), c.Name+" will log in at "+c.SaveMap+" ("+strconv.Itoa(c.SaveX)+", "+strconv.Itoa(c.SaveY)+").")
+	return a.redirect(req, adminCharacterURL(c), done(c))
 }
 
 func adminCharacterURL(c *Character) string { return "/admin/characters/" + strconv.Itoa(c.ID) }

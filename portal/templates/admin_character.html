@@ -9,7 +9,7 @@
   <dt>Save point</dt><dd>{{$c.SaveMap}} ({{$c.SaveX}}, {{$c.SaveY}})</dd>
 </dl>
 
-<section>
+<section class="grid">
   <form method="post" action="/admin/characters/{{$c.ID}}/save-point" class="card">
     <h2>Move to save point</h2>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -20,6 +20,19 @@
     {{else}}
     <p>For a character stuck somewhere it can't leave. Next time the player picks {{$c.Name}}, they start at {{$c.SaveMap}} ({{$c.SaveX}}, {{$c.SaveY}}).</p>
     <button>Move to save point</button>
+    {{end}}
+  </form>
+
+  <form method="post" action="/admin/characters/{{$c.ID}}/town" class="card">
+    <h2>Send to Prontera</h2>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{if $c.Online}}
+    <p>Only while the character is logged out.</p>
+    {{else if $c.InTown}}
+    <p>{{$c.Name}} is already in Prontera and saved there.</p>
+    {{else}}
+    <p>For when the save point itself is the problem. {{$c.Name}} starts at {{town}} next time, and that becomes its save point.</p>
+    <button>Send to Prontera</button>
     {{end}}
   </form>
 </section>

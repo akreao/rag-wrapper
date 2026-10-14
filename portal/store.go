@@ -59,6 +59,11 @@ type Character struct {
 	Deleting  bool
 }
 
+// InTown reports whether the character is in the fallback town and saved there.
+func (c Character) InTown() bool {
+	return c.AtSavePoint() && c.SaveMap == townMap && c.SaveX == townX && c.SaveY == townY
+}
+
 // AtSavePoint reports whether the character would log in at its save point.
 func (c Character) AtSavePoint() bool {
 	return c.LastMap == c.SaveMap && c.LastX == c.SaveX && c.LastY == c.SaveY
@@ -191,15 +196,33 @@ func (s *store) characterByID(ctx context.Context, id int) (*Character, error) {
 
 var errCharacterOnline = errors.New("character is online")
 
-// moveToSavePoint puts an offline character back at its save point, like
-// @jump to it in game. The char server reads the position from the
-// database when the character is next selected, so this is only safe while
-// it is offline; the online check is part of the update, so a player who
-// logs in at the same moment wins.
+// The town a character is sent to when its save point is the problem:
+// rAthena's own fallback (default_map in char_athena.conf).
+const (
+	townMap = "prontera"
+	townX   = 156
+	townY   = 191
+)
+
+// moveToSavePoint puts an offline character back at its save point.
 func (s *store) moveToSavePoint(ctx context.Context, id int) error {
+	return s.moveOffline(ctx, id, "`last_map` = `save_map`, `last_x` = `save_x`, `last_y` = `save_y`")
+}
+
+// moveToTown puts an offline character in Prontera and saves it there,
+// for a character whose save point is itself where it's stuck.
+func (s *store) moveToTown(ctx context.Context, id int) error {
+	return s.moveOffline(ctx, id, "`last_map` = ?, `last_x` = ?, `last_y` = ?, `save_map` = ?, `save_x` = ?, `save_y` = ?",
+		townMap, townX, townY, townMap, townX, townY)
+}
+
+// moveOffline changes where a character logs in. The char server reads the
+// position from the database when the character is next selected, so this
+// is only safe while it is offline; the online check is part of the
+// update, so a player who logs in at the same moment wins.
+func (s *store) moveOffline(ctx context.Context, id int, set string, args ...any) error {
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE `char` SET `last_map` = `save_map`, `last_x` = `save_x`, `last_y` = `save_y`, `last_instanceid` = 0 "+
-			"WHERE `char_id` = ? AND `online` = 0", id)
+		"UPDATE `char` SET "+set+", `last_instanceid` = 0 WHERE `char_id` = ? AND `online` = 0", append(args, id)...)
 	if err != nil {
 		return err
 	}

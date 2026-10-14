@@ -57,6 +57,7 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 		"groupName": groupName,
 		"groups":    func() any { return groups },
 		"date":      func(t time.Time) string { return t.Format("2006-01-02 15:04 MST") },
+		"town":      func() string { return townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + ")" },
 	}
 	pages := map[string]*template.Template{}
 	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "error"} {
@@ -102,6 +103,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /admin/accounts/{id}/password", a.admin(a.adminSetPassword))
 	mux.HandleFunc("GET /admin/characters/{id}", a.admin(a.adminCharacter))
 	mux.HandleFunc("POST /admin/characters/{id}/save-point", a.admin(a.adminMoveToSavePoint))
+	mux.HandleFunc("POST /admin/characters/{id}/town", a.admin(a.adminMoveToTown))
 	return securityHeaders(mux)
 }
 
