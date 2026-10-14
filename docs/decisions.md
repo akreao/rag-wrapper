@@ -71,3 +71,4 @@ Tauri, as proposed in the first plan and not changed since. It drives `docker co
 Questions asked about the finished portal (PR #2), one at a time.
 
 - **Forgotten passwords: an admin sets a new one.** There's no email on a LAN server, so the admin page for an account has a "Reset password" form. The admin tells the player the new password and the player changes it on their own account page. Email reset links are out.
+- **Bans don't kick players already in game.** The portal only writes the database, so a ban stops the next login. The ban form tells admins to use `@kick` in game for someone who's online. No rathena fork change for this.
