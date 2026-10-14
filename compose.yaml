@@ -5,9 +5,13 @@
 # so the image is built once (when missing, or with --build); the others
 # use it and never try to pull it from a registry.
 x-rathena: &rathena
-  image: rag-wrapper/rathena:${PACKETVER:-20220406}
+  image: rag-wrapper/rathena:${PACKETVER:-20250716}
   pull_policy: never
   restart: on-failure
+  # Config overrides from the desktop app's Settings screen or written by
+  # hand; entrypoint.sh imports them after rAthena's stock configs.
+  volumes:
+    - ./overrides:/rathena/conf/user:ro
   environment:
     DB_HOST: db
     DB_NAME: ragnarok
@@ -43,8 +47,8 @@ services:
       args:
         RATHENA_REPO: ${RATHENA_REPO:-https://github.com/akreao/rathena.git}
         RATHENA_COMMIT: ${RATHENA_COMMIT:-b6f89abe300d821412380a2004385532d0d4d9b6}
-        PACKETVER: ${PACKETVER:-20220406}
-        PRERE: ${PRERE:-no}
+        PACKETVER: ${PACKETVER:-20250716}
+        PRERE: ${PRERE:-yes}
     pull_policy: !reset null
     command: init
     restart: "no"

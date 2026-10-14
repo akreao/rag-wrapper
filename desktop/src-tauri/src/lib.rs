@@ -1,5 +1,6 @@
 mod envfile;
 mod net;
+mod settings;
 mod stack;
 
 use std::path::PathBuf;
@@ -9,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use envfile::EnvFile;
 
@@ -30,6 +32,10 @@ impl App {
 
     fn env(&self) -> Option<EnvFile> {
         EnvFile::load(&self.env_path()).ok()
+    }
+
+    fn overrides_dir(&self) -> PathBuf {
+        self.dir.join(stack::OVERRIDES)
     }
 }
 
@@ -66,7 +72,7 @@ fn overview(app: State<App>) -> Overview {
         public_ip_auto: get("PUBLIC_IP_AUTO") != "no",
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
-        prere: get("PRERE") == "yes",
+        prere: get("PRERE") != "no",
         task: app.task.lock().unwrap().as_ref().map(|(k, _)| k.clone()),
     }
 }
@@ -113,6 +119,30 @@ fn save_build_settings(app: State<App>, packetver: String, prere: bool) -> Resul
     Ok(changed)
 }
 
+#[tauri::command]
+fn game_settings(app: State<App>) -> settings::GameSettings {
+    settings::load(&app.overrides_dir())
+}
+
+/// Writes the game settings as rAthena overrides. Returns whether anything
+/// changed, in which case the game servers need a restart.
+#[tauri::command]
+fn save_game_settings(app: State<App>, settings: settings::GameSettings) -> Result<bool, String> {
+    settings::save(&app.overrides_dir(), &settings)
+}
+
+/// Opens the overrides folder in the file manager, for settings the
+/// Settings screen doesn't cover.
+#[tauri::command]
+fn open_overrides(handle: AppHandle, app: State<App>) -> Result<(), String> {
+    let dir = app.overrides_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    handle
+        .opener()
+        .open_path(dir.display().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// `None` follows the detected LAN address on every start; `Some` pins one.
 #[tauri::command]
 fn set_public_ip(app: State<App>, public_ip: Option<String>) -> Result<(), String> {
@@ -149,7 +179,7 @@ struct TaskEvent {
     ok: bool,
 }
 
-/// Runs `start`, `stop` or `build`, streaming its output as `task-line` events.
+/// Runs `start`, `restart`, `stop` or `build`, streaming its output as `task-line` events.
 #[tauri::command]
 fn run_task(handle: AppHandle, app: State<App>, kind: String) -> Result<(), String> {
     if app.closing.load(Ordering::SeqCst) {
@@ -162,13 +192,18 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String) -> Result<(), Stri
 
     let mut cmd = stack::compose(&app.dir);
     match kind.as_str() {
-        "start" => {
+        "start" | "restart" => {
             let mut env = app.env().ok_or("Finish setup first.")?;
             if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
                 apply_public_ip(&mut env, None);
                 env.save().map_err(|e| e.to_string())?;
             }
             cmd.args(["--progress", "plain", "up", "--detach"]);
+            if kind == "restart" {
+                // The game servers read their configs only when they start;
+                // the database and portal keep running.
+                cmd.args(["--no-deps", "--force-recreate"]).args(stack::GAME_SERVERS);
+            }
         }
         "build" => {
             cmd.args(["--progress", "plain", "build"]);
@@ -283,6 +318,9 @@ pub fn run() {
             setup,
             set_public_ip,
             save_build_settings,
+            game_settings,
+            save_game_settings,
+            open_overrides,
             services,
             run_task,
             cancel_task,

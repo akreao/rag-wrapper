@@ -31,6 +31,8 @@ Settings in `.env`:
 - `PACKETVER` must match your client's date. Changing it needs a rebuild (`docker compose build`).
 - `RATHENA_COMMIT` is the rAthena commit to build, from the `rag-wrapper` branch of `akreao/rathena`. Change it to pick up server changes, then rebuild. `RATHENA_REPO` points at a different fork.
 
+Gameplay settings (rates, server name, message of the day and anything else in rAthena's configs) go in [`overrides/`](overrides/README.md) as rAthena `conf/import`-style files; restart the game servers (`docker compose up -d --force-recreate login char map`) to apply them. The desktop app's Settings screen writes the common ones for you.
+
 `docker compose down` stops everything; the database lives in the `db-data` volume and survives restarts. `docker compose down -v` deletes it.
 
 ## Account portal

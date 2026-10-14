@@ -7,7 +7,9 @@ What it does:
 - **Start** runs `docker compose up --detach`, which builds the rAthena image first if it's missing. The build's output streams into the Activity pane with a step counter.
 - **Stop** runs `docker compose down`. The database volume is kept.
 - **Rebuild** runs `docker compose build`.
-- **Server build** sets the client date (`PACKETVER`) and Renewal or Pre-renewal (`PRERE`). Saving a change rebuilds the images and, if the server was running, starts it again on the new build.
+- **Settings** (the header button) has two parts:
+  - **Game settings**: base and job exp rates, drop rates for common and usable items, equipment, cards and MVP rewards, the exp lost on death, the server name shown in the client, the message of the day, and whether players get rAthena's "Super Player" helper commands (@autoloot, @go, @rates, @whodrops and the rest). Saving writes rAthena overrides into the stack's `overrides/` folder (see below); they apply when the game servers next start, and the screen offers **Restart game servers**, which recreates the login, char and map containers while the database and portal keep running. Values left at official rates are left out of the files, so rAthena's stock config applies. **Open override folder** opens it for everything else.
+  - **Server build**: the client date (`PACKETVER`, with 20250716, the default, and 20220406 as presets or any other date) and Pre-renewal (the default) or Renewal (`PRERE`). A change shows a warning, and saving it rebuilds the images and, if the server was running, starts it again on the new build.
 - **Services** shows each service's state and published ports, refreshed every 3 seconds. Clicking one streams its logs.
 - **Address players connect to** defaults to *Detect automatically*: on every Start the app writes the machine's current LAN IP (the interface with the default route, skipping Docker's bridges) as `PUBLIC_IP`. Picking an address pins it instead (`PUBLIC_IP_AUTO=no` in `.env`).
 - While the `portal` service runs, a link opens the account portal.
@@ -23,6 +25,10 @@ To point the app at another stack directory, such as this checkout while develop
 ```sh
 RAG_WRAPPER_STACK_DIR=$PWD/.. cargo run
 ```
+
+## Overrides
+
+`overrides/` in the stack directory is mounted into every rAthena container as `conf/user/`. On start, `entrypoint.sh` uses each file there that is named like one of rAthena's `conf/import/` files (`battle_conf.txt`, `char_conf.txt`, `map_conf.txt`, `groups.yml`, ...) in its place, before the stack's own values, so the database, addresses and server passwords can't be overridden by mistake. The Settings screen edits only its own lines in those files; see [`overrides/README.md`](../overrides/README.md).
 
 ## Building
 

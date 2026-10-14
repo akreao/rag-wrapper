@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "stop" or "build" while one runs
+let task = null; // "start", "restart", "stop" or "build" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -166,25 +166,130 @@ async function refreshOverview() {
   banner(overview.docker_error);
 
   $("setup").hidden = overview.configured;
-  $("dashboard").hidden = !overview.configured;
+  $("nav").hidden = !overview.configured;
+  showPage(overview.configured ? page : null);
   if (!overview.configured) {
     fillAddresses($("setup-ip"), null, true);
   } else {
     fillAddresses($("ip"), overview.public_ip, overview.public_ip_auto);
     $("connect-addr").textContent = `${overview.public_ip}:6900`;
     $("admin-name").textContent = overview.admin_user;
-    if (!buildFormDirty) {
-      $("packetver").value = overview.packetver;
-      $("mode").value = overview.prere ? "pre" : "re";
-    }
+    if (!buildFormDirty) fillBuildForm();
   }
   updateButtons();
 }
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save"]) $(id).disabled = !ready || !!task;
-  $("cancel").hidden = task !== "build" && task !== "start";
+  for (const id of ["start", "stop", "build", "build-save", "restart"]) $(id).disabled = !ready || !!task;
+  $("cancel").hidden = !["build", "start", "restart"].includes(task);
+}
+
+// ---- Pages: the dashboard and Settings ----
+
+let page = "dashboard";
+
+function showPage(next) {
+  if (next) page = next;
+  $("dashboard").hidden = next !== "dashboard";
+  $("settings").hidden = next !== "settings";
+  $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
+}
+
+$("nav").addEventListener("click", async () => {
+  if (page === "dashboard") {
+    $("game-saved").hidden = true;
+    $("game-error").hidden = true;
+    await loadGameSettings();
+    showPage("settings");
+  } else {
+    showPage("dashboard");
+  }
+});
+
+const serverRunning = () => lastServices.some((s) => ["login", "char", "map"].includes(s.service) && s.state === "running");
+
+// ---- Game settings: rAthena overrides, applied on restart ----
+
+const RATE_FIELDS = ["base_exp", "job_exp", "drop_common", "drop_equip", "drop_card", "drop_mvp", "death_penalty"];
+let gameLocked = false;
+
+async function loadGameSettings() {
+  const s = await invoke("game_settings");
+  for (const f of RATE_FIELDS) $(f).value = s[f];
+  $("server_name").value = s.server_name;
+  $("motd").value = s.motd;
+  $("player_commands").checked = s.player_commands;
+  gameLocked = s.player_commands_locked;
+  $("player_commands").disabled = gameLocked;
+  $("commands-locked").hidden = !gameLocked;
+}
+
+$("game-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const error = $("game-error");
+  error.hidden = true;
+  $("game-saved").hidden = true;
+  const settings = {
+    server_name: $("server_name").value,
+    motd: $("motd").value,
+    player_commands: $("player_commands").checked,
+    player_commands_locked: gameLocked,
+  };
+  for (const f of RATE_FIELDS) settings[f] = Number($(f).value);
+  let changed;
+  try {
+    changed = await invoke("save_game_settings", { settings });
+  } catch (err) {
+    error.textContent = err;
+    error.hidden = false;
+    return;
+  }
+  await loadGameSettings();
+  if (!changed) return;
+  $("game-saved").hidden = false;
+  $("restart").hidden = !serverRunning();
+});
+
+$("restart").addEventListener("click", async () => {
+  $("game-saved").hidden = true;
+  showPage("dashboard");
+  await runTask("restart");
+});
+
+$("open-overrides").addEventListener("click", async () => {
+  try {
+    await invoke("open_overrides");
+  } catch (err) {
+    $("game-error").textContent = `Couldn't open the folder: ${err}`;
+    $("game-error").hidden = false;
+  }
+});
+
+// ---- Server build: PACKETVER and renewal, saved with a rebuild ----
+
+const PRESETS = ["20250716", "20220406"];
+
+function chosenPacketver() {
+  const preset = $("packetver-preset").value;
+  return preset === "custom" ? $("packetver").value.trim() : preset;
+}
+
+function fillBuildForm() {
+  const custom = !PRESETS.includes(overview.packetver);
+  $("packetver-preset").value = custom ? "custom" : overview.packetver;
+  $("packetver").value = overview.packetver;
+  $("mode").value = overview.prere ? "pre" : "re";
+  updateBuildForm();
+}
+
+// The warning shows as soon as the form differs from the current build.
+function updateBuildForm() {
+  const custom = $("packetver-preset").value === "custom";
+  $("packetver-custom").hidden = !custom;
+  $("packetver").required = custom;
+  const changed = chosenPacketver() !== overview.packetver || ($("mode").value === "pre") !== overview.prere;
+  $("build-warning").hidden = !changed;
 }
 
 $("setup-form").addEventListener("submit", async (e) => {
@@ -224,8 +329,12 @@ $("ip").addEventListener("change", async () => {
 
 let buildFormDirty = false;
 let restartAfterBuild = false;
-$("packetver").addEventListener("input", () => (buildFormDirty = true));
-$("mode").addEventListener("change", () => (buildFormDirty = true));
+for (const [id, event] of [["packetver-preset", "change"], ["packetver", "input"], ["mode", "change"]]) {
+  $(id).addEventListener(event, () => {
+    buildFormDirty = true;
+    updateBuildForm();
+  });
+}
 
 $("build-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -234,7 +343,7 @@ $("build-form").addEventListener("submit", async (e) => {
   let changed;
   try {
     changed = await invoke("save_build_settings", {
-      packetver: $("packetver").value,
+      packetver: chosenPacketver(),
       prere: $("mode").value === "pre",
     });
   } catch (err) {
@@ -247,6 +356,7 @@ $("build-form").addEventListener("submit", async (e) => {
   if (!changed) return;
   // A running server is restarted on the new build once it's ready.
   restartAfterBuild = lastServices.some((s) => s.state === "running");
+  showPage("dashboard");
   await runTask("build");
 });
 
@@ -286,7 +396,7 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", stop: "Stop", build: "Build" }[payload.kind];
+    const verb = { start: "Start", restart: "Restart", stop: "Stop", build: "Build" }[payload.kind];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);
     if (view === "activity") render();
     await refreshOverview();
@@ -315,6 +425,7 @@ listen("closing", async () => {
   task = "stop";
   updateButtons();
   banner("Stopping the server before closing…");
+  showPage("dashboard");
   activity.length = 0;
   await showView("activity");
 });
