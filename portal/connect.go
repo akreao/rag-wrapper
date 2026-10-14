@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,20 @@ import (
 type connectInfo struct {
 	Address   string // PUBLIC_IP: where the client is sent for login, char and map
 	PacketVer string // PACKETVER: the client date the server was built for
+	Name      string // SERVER_NAME: shown in the client's server list
+}
+
+// serverName tidies SERVER_NAME for the client's server list, which has
+// room for a short line of text.
+func serverName(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if s == "" {
+		return "LAN server"
+	}
+	if r := []rune(s); len(r) > 40 {
+		s = string(r[:40])
+	}
+	return s
 }
 
 // Ports the client connects to. They are fixed in compose.yaml.
@@ -44,7 +59,8 @@ func (c connectInfo) MapPort() int   { return mapPort }
 
 // clientInfo builds a clientinfo.xml that sends the client to this server.
 // sclientinfo.xml is the same file under the name Sakray clients look for.
-// The content is ASCII, so the euc-kr declaration the stock file uses holds.
+// It declares euc-kr like the stock file. Everything in it is ASCII except
+// perhaps SERVER_NAME, which is written as UTF-8.
 // registerURL is the portal's sign-up page, which some clients open from
 // the login screen.
 //
@@ -75,7 +91,7 @@ func (c connectInfo) clientInfo(registerURL string) []byte {
 		ServiceType: "korea",
 		ServerType:  "primary",
 		Connection: connection{
-			Display:         "LAN server",
+			Display:         c.Name,
 			Desc:            "Ragnarok Online",
 			Balloon:         "Ragnarok Online on " + c.Address,
 			Address:         c.Address,

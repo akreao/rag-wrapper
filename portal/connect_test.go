@@ -11,10 +11,11 @@ import (
 )
 
 func TestClientInfo(t *testing.T) {
-	c := connectInfo{Address: "192.168.1.20", PacketVer: "20220406"}
+	c := connectInfo{Address: "192.168.1.20", PacketVer: "20220406", Name: "Prontera & Co"}
 	var got struct {
 		ServiceType string `xml:"servicetype"`
 		Connection  struct {
+			Display         string `xml:"display"`
 			Address         string `xml:"address"`
 			Port            int    `xml:"port"`
 			RegistrationWeb string `xml:"registrationweb"`
@@ -26,7 +27,7 @@ func TestClientInfo(t *testing.T) {
 	if err := dec.Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ServiceType != "korea" || got.Connection.Address != "192.168.1.20" || got.Connection.Port != 6900 ||
+	if got.ServiceType != "korea" || got.Connection.Display != "Prontera & Co" || got.Connection.Address != "192.168.1.20" || got.Connection.Port != 6900 ||
 		got.Connection.RegistrationWeb != "http://x/register?a=1&b=<2>" {
 		t.Fatalf("%+v", got)
 	}
@@ -69,6 +70,18 @@ func TestConnectRoutes(t *testing.T) {
 			!strings.Contains(body, "<address>10.0.0.5</address>") ||
 			!strings.Contains(body, "<registrationweb>http://10.0.0.5:8080/register</registrationweb>") {
 			t.Fatalf("GET %s: %d %v\n%s", name, rec.Code, rec.Header(), body)
+		}
+	}
+}
+
+func TestServerName(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                      "LAN server",
+		"  My \t server ":       "My server",
+		strings.Repeat("a", 50): strings.Repeat("a", 40),
+	} {
+		if got := serverName(in); got != want {
+			t.Errorf("serverName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
