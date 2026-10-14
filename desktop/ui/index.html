@@ -15,6 +15,7 @@
       <button id="nav-live" hidden>Dashboard</button>
       <button id="nav" hidden>Settings</button>
       <button id="nav-backups" hidden>Backups</button>
+      <button id="nav-patch" hidden>Client patch</button>
       <button id="start" class="primary">Start server</button>
       <button id="stop">Stop</button>
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
@@ -186,6 +187,39 @@
       <p id="backup-error" class="error" hidden></p>
       <ul id="backups"></ul>
       <p id="no-backups" class="hint" hidden>No backups yet.</p>
+    </section>
+  </main>
+
+  <main id="patch-page" hidden>
+    <section class="card">
+      <h2>Publish client patch</h2>
+      <p>Players' patchers download new patches from the account portal. Put the files players need in the client files folder, laid out like the game client's own folder:</p>
+      <ul class="hint">
+        <li><code>rag-wrapper.exe</code>: the patched client, which the patcher's Play button starts.</li>
+        <li><code>data/</code>: sprites, textures, maps and other GRF content, packed into <code>rag-wrapper.grf</code>. The patch also writes the client's <code>DATA.INI</code> so it reads that GRF first.</li>
+        <li>Anything else, such as <code>System/</code> files, is copied into the client folder as is.</li>
+      </ul>
+      <p class="hint">Only hand out the patched exe, your own custom content and your own translation additions: never the full client or llchrisll's translation, which players install themselves.</p>
+      <div class="row">
+        <button id="open-client-files">Open client files folder</button>
+        <button id="patch-refresh">Check again</button>
+      </div>
+      <p id="patch-folder" class="hint"></p>
+    </section>
+    <section class="card">
+      <h2>Next patch</h2>
+      <ul id="patch-problems" class="error-list" hidden></ul>
+      <p id="patch-summary" class="hint"></p>
+      <ul id="patch-changes" class="files"></ul>
+      <p id="patch-error" class="error" hidden></p>
+      <p id="patch-done" class="notice" hidden></p>
+      <button id="publish" class="primary" disabled>Publish client patch</button>
+      <p class="hint">Players get it the next time they open the patcher. Files removed from the folder are deleted from the players' clients too.</p>
+    </section>
+    <section class="card">
+      <h2>Published</h2>
+      <ul id="patch-history" class="files"></ul>
+      <p id="no-patches" class="hint">Nothing published yet. Until the first patch, the portal's How to connect page shows players how to patch the client by hand.</p>
     </section>
   </main>
 </body>
