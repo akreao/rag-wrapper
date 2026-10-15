@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -101,16 +103,22 @@ func (c connectInfo) LoginPort() int { return loginPort }
 func (c connectInfo) CharPort() int  { return charPort }
 func (c connectInfo) MapPort() int   { return mapPort }
 
+// admins is clientinfo.xml's list of account IDs under <yellow> and <aid>.
+type admins struct {
+	IDs []int `xml:"admin"`
+}
+
 // clientInfo builds a clientinfo.xml that sends the client to this server.
 // It declares euc-kr like the stock file; the content is ASCII, since the
 // Settings screen only allows ASCII server names.
 // registerURL is the portal's sign-up page, which some clients open from
-// the login screen.
+// the login screen. gms are the admin accounts: the client shows their
+// names in yellow (<yellow>) and gives them its GM features (<aid>).
 //
 // servicetype korea and langtype 1 are what rAthena's wiki template uses.
 // The client sends <version> at login, but rAthena no longer checks it
 // (only client_hash_check, which is off), so any number works.
-func (c connectInfo) clientInfo(registerURL string) []byte {
+func (c connectInfo) clientInfo(registerURL string, gms []int) []byte {
 	type connection struct {
 		Display         string   `xml:"display"`
 		Desc            string   `xml:"desc"`
@@ -121,6 +129,12 @@ func (c connectInfo) clientInfo(registerURL string) []byte {
 		LangType        int      `xml:"langtype"`
 		RegistrationWeb string   `xml:"registrationweb"`
 		Loading         []string `xml:"loading>image"`
+		Yellow          *admins  `xml:"yellow"`
+		AID             *admins  `xml:"aid"`
+	}
+	var gmList *admins // nil leaves out the empty <yellow> and <aid>
+	if len(gms) > 0 {
+		gmList = &admins{gms}
 	}
 	type clientinfo struct {
 		XMLName     xml.Name   `xml:"clientinfo"`
@@ -143,6 +157,8 @@ func (c connectInfo) clientInfo(registerURL string) []byte {
 			LangType:        1,
 			RegistrationWeb: registerURL,
 			Loading:         []string{"loading00.jpg", "loading01.jpg", "loading02.jpg", "loading03.jpg", "loading04.jpg"},
+			Yellow:          gmList,
+			AID:             gmList,
 		},
 	}
 	var buf bytes.Buffer
@@ -164,7 +180,23 @@ func (a *app) clientInfoFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="clientinfo.xml"`)
 	w.Header().Set("Cache-Control", "no-store")
-	w.Write(a.conn.clientInfo(a.conn.BaseURL(r) + "/register"))
+	w.Write(a.conn.clientInfo(a.conn.BaseURL(r)+"/register", a.gmAccounts(r.Context())))
+}
+
+// gmAccounts lists the admin accounts for clientinfo.xml. They're read on
+// every download, so a new admin is in the next file anyone downloads. If
+// the database can't be read the file goes out without them: players can
+// still connect, they just don't see the admins in yellow.
+func (a *app) gmAccounts(ctx context.Context) []int {
+	if a.store == nil {
+		return nil
+	}
+	ids, err := a.store.accountsInGroup(ctx, a.adminGroup)
+	if err != nil {
+		log.Printf("clientinfo.xml: listing admin accounts: %v", err)
+		return nil
+	}
+	return ids
 }
 
 // PatcherZip and PatcherExe name the patcher download and the program in it.

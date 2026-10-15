@@ -131,7 +131,7 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 		err = add(patcherName+".yml", patcherConfig(base, a.conn.ServerName()))
 	}
 	if err == nil {
-		err = add("data/clientinfo.xml", a.conn.clientInfo(base+"/register"))
+		err = add("data/clientinfo.xml", a.conn.clientInfo(base+"/register", a.gmAccounts(r.Context())))
 	}
 	for _, name := range []string{"LICENSE-MIT", "LICENSE-APACHE"} {
 		if b, rerr := os.ReadFile(filepath.Join(filepath.Dir(a.conn.Patcher.Exe), name)); rerr == nil && err == nil {

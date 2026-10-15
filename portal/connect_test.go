@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,9 +24,11 @@ func TestClientInfo(t *testing.T) {
 			Address         string `xml:"address"`
 			Port            int    `xml:"port"`
 			RegistrationWeb string `xml:"registrationweb"`
+			Yellow          []int  `xml:"yellow>admin"`
+			AID             []int  `xml:"aid>admin"`
 		} `xml:"connection"`
 	}
-	dec := xml.NewDecoder(bytes.NewReader(c.clientInfo("http://x/register?a=1&b=<2>")))
+	dec := xml.NewDecoder(bytes.NewReader(c.clientInfo("http://x/register?a=1&b=<2>", []int{2000000, 2000001})))
 	// The file declares euc-kr; its content is ASCII, so read it as is.
 	dec.CharsetReader = func(_ string, r io.Reader) (io.Reader, error) { return r, nil }
 	if err := dec.Decode(&got); err != nil {
@@ -34,6 +37,12 @@ func TestClientInfo(t *testing.T) {
 	if got.ServiceType != "korea" || got.Connection.Display != "Prontera_LAN" || got.Connection.Address != "192.168.1.20" || got.Connection.Port != 6900 ||
 		got.Connection.RegistrationWeb != "http://x/register?a=1&b=<2>" {
 		t.Fatalf("%+v", got)
+	}
+	if fmt.Sprint(got.Connection.Yellow, got.Connection.AID) != "[2000000 2000001] [2000000 2000001]" {
+		t.Fatalf("yellow %v, aid %v", got.Connection.Yellow, got.Connection.AID)
+	}
+	if b := string(c.clientInfo("http://x/register", nil)); strings.Contains(b, "<yellow") || strings.Contains(b, "<aid") {
+		t.Fatalf("empty GM lists are written:\n%s", b)
 	}
 	if c.ClientDate() != "2022-04-06" || c.Loopback() {
 		t.Fatal(c.ClientDate(), c.Loopback())
