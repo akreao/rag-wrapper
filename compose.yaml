@@ -50,7 +50,7 @@ services:
       context: docker/rathena
       args:
         RATHENA_REPO: ${RATHENA_REPO:-https://github.com/akreao/rathena.git}
-        RATHENA_COMMIT: ${RATHENA_COMMIT:-f9dc04701a09d7b758fcae51bc4e1533aae79a27}
+        RATHENA_COMMIT: ${RATHENA_COMMIT:-266a587f6a0901bbd9d6935f359c7ff0bf65b9aa}
         PACKETVER: ${PACKETVER:-20250716}
         PRERE: ${PRERE:-yes}
     pull_policy: !reset null
