@@ -12,7 +12,7 @@ RUN apt-get update \
 
 # RATHENA_COMMIT is a full commit SHA on the fork's rag-wrapper branch.
 ARG RATHENA_REPO=https://github.com/akreao/rathena.git
-ARG RATHENA_COMMIT=15a8dc848c1172e444e189ae4cd3de8ef5339a7c
+ARG RATHENA_COMMIT=f9dc04701a09d7b758fcae51bc4e1533aae79a27
 RUN git init -q /src/rathena \
  && git -C /src/rathena fetch -q --depth 1 "${RATHENA_REPO}" "${RATHENA_COMMIT}" \
  && git -C /src/rathena checkout -q FETCH_HEAD
