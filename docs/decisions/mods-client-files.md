@@ -10,3 +10,9 @@ Roadmap feature 13: mods carry client files, which go out through the patcher, w
 - **Clashes are listed, never blocking.** Where two layers set one entry differently, or both have a file that can't be merged with different contents, the later one is used and the Client patch screen lists it, as does the Mods screen under each mod named. Long lists show their first 100 lines.
 - **Only the client files folder carries `rag-wrapper.exe`.** A mod's copy blocks publishing until it's deleted, since there is one patched client and the patcher's Play button starts it.
 - **Checked on real files.** zackdreaver's ROenglishRE `OngoingQuestInfoList_True.lub` (2 MB, 8,455 quests) and `itemInfo_true_V5.lua` (12 MB, 17,202 items) merged with mod files and loaded in Lua 5.1, the client's version: every entry kept, the mods' entries added or replaced, CP949 names unchanged, the base file's functions kept. A mod replacing all 8,455 quests merged in 0.15 s.
+
+Questions asked about the finished work (PR #44), one at a time.
+
+- **Mods win over the client files folder.** A mod's file or table entry replaces the folder's, as mods load after `db/import` on the server, so the load order means the same on both screens. A fix of Steven's own to a mod's entry goes in a mod loaded last.
+- **The earlier file's functions are kept.** Only a mod's table entries are merged in; its `main` and other functions are dropped, since mods copy them from different client versions and the base file's match the patched client.
+- **Two mods with the same compiled lub only warn.** The later mod's copy is used whole and the clash is listed; publishing isn't blocked, as clashes never stop a server start either.
