@@ -35,7 +35,7 @@ struct App {
     client_files: PathBuf,
     /// Held while a client patch is being built, so two can't take the same number.
     publishing: Arc<Mutex<()>>,
-    /// The running start, stop, build, backup or restore, if any. Only one at a time.
+    /// The running start, stop, build, backup, restore or restore test, if any. Only one at a time.
     task: task::Slot,
     logs: Mutex<Option<Child>>,
     /// Bumped on every log switch so the UI can drop lines from the old stream.
@@ -376,6 +376,8 @@ enum Step {
     /// A backup if there's none from the last day; never fails the task.
     Daily,
     Restore(String),
+    /// Loads a backup into a throwaway database to check it would restore.
+    TestRestore(String),
     /// Moves `.env` to the update's commit.
     Pin(update::ServerUpdate),
     /// Pulls the prebuilt images, building any that aren't published with the command.
@@ -390,7 +392,7 @@ enum Step {
 
 /// Runs `start`, `restart`, `readdress` (after the address changed),
 /// `portal` (after the portal port changed), `stop`,
-/// `build`, `update`, `backup` or `restore` (of `file`), streaming its
+/// `build`, `update`, `backup`, or `restore` or `test-restore` (of `file`), streaming its
 /// output as `task-line` events.
 #[tauri::command]
 fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<String>) -> Result<(), String> {
@@ -457,12 +459,12 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             cmd.arg("down");
             vec![Step::Daily, Step::Compose(cmd)]
         }
-        "backup" | "restore" => {
+        "backup" | "restore" | "test-restore" => {
             app.env().ok_or("Finish setup first.")?;
-            if kind == "backup" {
-                vec![Step::Backup(backup::Reason::Manual)]
-            } else {
-                vec![Step::Restore(file.ok_or("Pick a backup to restore.")?)]
+            match kind.as_str() {
+                "backup" => vec![Step::Backup(backup::Reason::Manual)],
+                "restore" => vec![Step::Restore(file.ok_or("Pick a backup to restore.")?)],
+                _ => vec![Step::TestRestore(file.ok_or("Pick a backup to test.")?)],
             }
         }
         _ => return Err(format!("Unknown task {kind}")),
@@ -502,6 +504,7 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                     Ok(())
                 }
                 Step::Restore(file) => backup::restore(&ctx, &file),
+                Step::TestRestore(file) => backup::test_restore(&ctx, &file),
                 Step::Pin(update) => {
                     let mut env = EnvFile::load(&ctx.dir.join(".env")).map_err(|e| e.to_string())?;
                     update::pin(&mut env, &update);
@@ -822,7 +825,7 @@ pub fn run() {
 }
 
 /// The server only runs while the app is open: closing the window cancels
-/// any build or start (a backup or restore is left to finish), backs up
+/// any build, start or restore test (a backup or restore is left to finish), backs up
 /// the database if there's no backup from the last day, takes the stack
 /// down (the database volume is kept) and then exits.
 fn stop_and_exit(handle: AppHandle) {
