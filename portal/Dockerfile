@@ -9,9 +9,10 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portal .
 
 # Our own patcher (cmd/patcher), cross-compiled for Windows. go-winres adds
 # the manifest that gives it Windows' current look for its buttons and
-# progress bar, and the file details Windows shows.
+# progress bar, the desktop app's icon (a copy in cmd/patcher), and the file
+# details Windows shows.
 ARG GO_WINRES_VERSION=v0.3.3
-RUN go run github.com/tc-hib/go-winres@${GO_WINRES_VERSION} simply --arch amd64 --manifest gui \
+RUN go run github.com/tc-hib/go-winres@${GO_WINRES_VERSION} simply --arch amd64 --manifest gui --icon cmd/patcher/icon.png \
       --out cmd/patcher/rsrc --product-name "rag-wrapper patcher" --file-description "rag-wrapper client patcher" \
       --original-filename rag-wrapper-patcher.exe \
  && mkdir /patcher \
