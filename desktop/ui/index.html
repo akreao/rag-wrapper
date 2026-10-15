@@ -17,6 +17,7 @@
       <button id="nav-backups" hidden>Backups</button>
       <button id="nav-patch" hidden>Client patch</button>
       <button id="nav-mods" hidden>Mods</button>
+      <button id="nav-news" hidden>News</button>
       <button id="start" class="primary">Start server</button>
       <button id="stop">Stop</button>
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
@@ -304,6 +305,29 @@
       <p id="no-mods" class="hint" hidden>No mods yet. Open the mods folder and copy a mod's folder in.</p>
       <p class="hint">Switching a mod on or off, or changing the order, applies the next time the game servers start. A mod switched on loads last.</p>
     </section>
+  </main>
+
+  <main id="news-page" hidden>
+    <section class="card">
+      <h2>News</h2>
+      <p>Posts show on the account portal's News page, newest first, and the newest one shows in the patcher's window. They appear as soon as you save, without a restart.</p>
+      <p class="hint">Write the text in Markdown: a blank line between paragraphs, <code>**bold**</code>, <code>*italics*</code>, <code>- </code> for a list, <code>[text](https://...)</code> for a link and <code>###</code> for a subheading.</p>
+      <div class="row">
+        <button id="news-add" class="primary">New post</button>
+        <button id="news-save" disabled>Save</button>
+        <button id="news-reload">Reload</button>
+        <button id="news-open">Open the News page</button>
+      </div>
+      <p id="news-error" class="error" hidden></p>
+      <p id="news-saved" class="notice" hidden>Saved. Players see it the next time they open the News page or the patcher.</p>
+    </section>
+    <details id="news-intro-box" class="card">
+      <summary>Top of the News page</summary>
+      <p class="hint">Shown above the posts, such as the server's rules. Start it with a <code># </code> line to replace the page's "News" heading.</p>
+      <textarea id="news-intro" rows="6" spellcheck="true" aria-label="Top of the News page"></textarea>
+    </details>
+    <div id="news-posts"></div>
+    <p id="no-news" class="hint" hidden>No posts yet.</p>
   </main>
 </body>
 </html>
