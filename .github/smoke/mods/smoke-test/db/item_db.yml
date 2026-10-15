@@ -1,0 +1,13 @@
+# A custom item, so the smoke test can see the map server load a mod's
+# database file and the portal's item names include it.
+Header:
+  Type: ITEM_DB
+  Version: 3
+
+Body:
+  - Id: 64999
+    AegisName: Smoke_Test_Potion
+    Name: Smoke Test Potion
+    Type: Healing
+    Buy: 10
+    Weight: 10
