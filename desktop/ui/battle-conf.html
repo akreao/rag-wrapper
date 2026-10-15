@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Battle config - rag-wrapper</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="battle-conf.js" defer></script>
+</head>
+<body class="battle-conf">
+  <header>
+    <h1>Battle config</h1>
+    <select id="file" aria-label="Config file" disabled></select>
+    <input id="search" type="search" placeholder="Search every file" aria-label="Search every file" disabled>
+    <div class="actions">
+      <button id="save" class="primary" disabled>Save</button>
+    </div>
+  </header>
+
+  <div id="saved" class="update-bar" hidden>
+    <p><strong>Saved.</strong> Changes apply the next time the game servers start.</p>
+    <button id="restart" class="primary" hidden>Restart game servers</button>
+  </div>
+  <div id="closing" class="update-bar" hidden>
+    <p><strong>You have unsaved changes.</strong></p>
+    <button id="close-save" class="primary">Save and close</button>
+    <button id="close-discard">Close without saving</button>
+    <button id="close-cancel">Keep editing</button>
+  </div>
+  <div id="error" class="banner" hidden></div>
+
+  <main id="editor">
+    <p id="loading" class="muted">Reading the battle config from the server image…</p>
+    <p class="hint" id="about" hidden>These are rAthena's <code>conf/battle</code> files as the server ships them. Changes are saved in the overrides folder's <code>battle_conf.txt</code>, so the stock files stay as they are and a server update keeps your values.</p>
+    <pre id="intro" class="comment" hidden></pre>
+    <div id="groups"></div>
+    <p id="no-match" class="muted" hidden>No option matches.</p>
+  </main>
+</body>
+</html>

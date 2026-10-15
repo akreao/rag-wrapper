@@ -409,7 +409,7 @@ const serverRunning = () => lastServices.some((s) => ["login", "char", "map"].in
 
 // ---- Game settings: rAthena overrides, applied on restart ----
 
-const RATE_FIELDS = ["base_exp", "job_exp", "drop_common", "drop_equip", "drop_card", "drop_mvp", "death_penalty"];
+const RATE_FIELDS = ["drop_common", "drop_equip", "drop_card", "drop_mvp", "death_penalty"];
 let gameLocked = false;
 
 async function loadGameSettings() {
@@ -451,6 +451,23 @@ $("game-form").addEventListener("submit", async (e) => {
 
 $("restart").addEventListener("click", async () => {
   $("game-saved").hidden = true;
+  showPage("dashboard");
+  await runTask("restart");
+});
+
+$("open-battle-conf").addEventListener("click", async () => {
+  try {
+    await invoke("open_battle_conf");
+  } catch (err) {
+    $("game-error").textContent = `Couldn't open the battle config: ${err}`;
+    $("game-error").hidden = false;
+  }
+});
+
+// The battle config window's "Restart game servers", run here so it shows
+// in the activity log.
+listen("restart-game-servers", async () => {
+  if (task) return;
   showPage("dashboard");
   await runTask("restart");
 });
