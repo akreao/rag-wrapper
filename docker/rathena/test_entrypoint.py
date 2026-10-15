@@ -103,10 +103,13 @@ class EntrypointTest(unittest.TestCase):
         self.write("conf/user/char_conf.txt", "server_name: Mine\nchar_ip: 10.0.0.1\n")
         self.run_entrypoint()
 
-        # The overrides file is imported first, so the stack's lines after it win.
+        # The start points come before the overrides file, so it can change
+        # them; the stack's lines after it win.
         self.assertEqual(
             self.read("conf/import/char_conf.txt").splitlines(),
             [
+                "start_point: iz_int,18,26",
+                "start_point_pre: new_1-1,53,111",
                 "import: conf/user/char_conf.txt",
                 "pincode_enabled: no",
                 "userid: wrapper_inter",
