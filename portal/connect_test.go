@@ -90,6 +90,32 @@ func TestConnectRoutes(t *testing.T) {
 	}
 }
 
+func TestExternalSettings(t *testing.T) {
+	got := string(connectInfo{Address: "10.0.0.5"}.externalSettings())
+	if !strings.Contains(got, "\r\nAssistAddr = \"10.0.0.5:8888\"\r\n") || strings.Contains(got, "127.0.0.1") ||
+		len(got) != len(externalSettingsTemplate)-len("127.0.0.1")+len("10.0.0.5") {
+		t.Fatalf("ExternalSettings_kr.lub:\n%s", got)
+	}
+	// The rest of the translation's file stays, such as the emblem URLs.
+	if !strings.Contains(got, "Download = 'http://'..AssistAddr..'/emblem/download'") || !strings.Contains(got, "BaseLevel = 99,") {
+		t.Fatalf("ExternalSettings_kr.lub lost the translation's settings:\n%s", got)
+	}
+
+	rec := get(newTestRoutes(t), "/connect/ExternalSettings_kr.lub")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Disposition"), "ExternalSettings_kr.lub") ||
+		!strings.Contains(rec.Body.String(), `AssistAddr = "10.0.0.5:8888"`) {
+		t.Fatalf("GET ExternalSettings_kr.lub: %d %v", rec.Code, rec.Header())
+	}
+}
+
+func newTestRoutes(t *testing.T) http.Handler {
+	a, err := newApp(nil, 99, connectInfo{Address: "10.0.0.5", PacketVer: "20250716"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a.routes()
+}
+
 func TestServerNameDefault(t *testing.T) {
 	if got := (connectInfo{Overrides: t.TempDir()}).ServerName(); got != "rAthena" {
 		t.Fatal(got)

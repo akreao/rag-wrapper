@@ -93,6 +93,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", a.page(a.home))
 	mux.HandleFunc("GET /connect", a.page(a.connect))
 	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile)
+	mux.HandleFunc("GET /connect/ExternalSettings_kr.lub", a.externalSettingsFile)
 	mux.HandleFunc("GET /connect/"+patcherZip, a.patcherDownload)
 	mux.HandleFunc("GET /patcher/{$}", a.patcherPage)
 	mux.HandleFunc("GET /patcher/plist.txt", a.patcherList)
