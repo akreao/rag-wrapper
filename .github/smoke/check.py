@@ -2,7 +2,7 @@
 """Checks a running stack the way a player uses it: registers an account on
 the portal and opens its player pages, then logs in to the login server as
 the game client does and enters the char server. Also checks the
-smoke-test mod loaded.
+smoke-test mod and rAthena's custom NPCs loaded.
 
 Run by run.sh once the stack is up. Standard library only.
 """
@@ -65,6 +65,23 @@ def logs(service):
         ["docker", "compose", "logs", "--no-color", "--no-log-prefix", service],
         capture_output=True, text=True, check=True,
     ).stdout
+
+
+def problem_blocks(log):
+    """rAthena's errors and warnings, each with the lines that follow it
+    up to the next tagged line, except [Debug] lines, which name the
+    script a failing command ran in."""
+    blocks, block = [], None
+    for raw in log.splitlines():
+        line = re.sub(r"\x1b\[[0-9;]*m", "", raw.split("\r")[-1])
+        if line.startswith("[") and not (block and line.startswith("[Debug]")):
+            block = None
+            if line.startswith(("[Error]", "[Warning]")):
+                block = [line]
+                blocks.append(block)
+        elif block is not None:
+            block.append(line)
+    return ["\n".join(b) for b in blocks]
 
 
 def compose_state(service):
@@ -200,6 +217,19 @@ def main():
     if problems:
         fail("the map server reported problems in the mod:\n" + "\n".join(problems))
     print("smoke-test mod loaded")
+
+    step("rAthena's custom NPCs")
+    with open("overrides/custom_npcs.txt", encoding="utf-8") as f:
+        wanted = [line.strip() for line in f if line.strip()]
+    mode = "re" if os.environ.get("PRERE") == "no" else "pre-re"
+    expected = [line.split(": ")[-1] for line in wanted if ": " not in line or line.startswith(mode + ": ")]
+    loaded = next((line[len("Custom NPCs on:"):].split() for line in log.splitlines() if line.startswith("Custom NPCs on:")), None)
+    if loaded != expected:
+        fail(f"the map server loaded custom NPCs {loaded}, not {expected}")
+    problems = [block for block in problem_blocks(log) if "npc/custom/" in block]
+    if problems:
+        fail("the map server reported problems in rAthena's custom NPCs:\n" + "\n\n".join(problems))
+    print(f"{len(expected)} of the {len(wanted)} custom NPC scripts loaded in {mode}")
     print("Smoke test passed")
 
 

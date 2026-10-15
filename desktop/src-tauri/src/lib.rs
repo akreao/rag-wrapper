@@ -1,6 +1,7 @@
 mod backup;
 mod battleconf;
 mod clientpatch;
+mod customnpcs;
 mod envfile;
 mod host;
 mod images;
@@ -575,6 +576,10 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             if let Err(e) = mods::record_applied(&ctx.dir.join(stack::MODS)) {
                 ctx.line(format!("Couldn't record the loaded mods: {e}"));
             }
+            let renewal = EnvFile::load(&ctx.dir.join(".env")).ok().and_then(|e| e.get("PRERE")).as_deref() == Some("no");
+            if let Err(e) = customnpcs::record_applied(&ctx.dir, &ctx.dir.join(stack::OVERRIDES), renewal) {
+                ctx.line(format!("Couldn't record the loaded custom NPCs: {e}"));
+            }
         }
         ctx.slot.lock().unwrap().take();
         let _ = handle.emit(
@@ -723,12 +728,21 @@ fn open_client_files(app: State<App>) -> Result<(), String> {
     host::open(app.client_files.as_os_str())
 }
 
-/// The mod folders, which are on, and which changes wait for a restart.
-/// Reads the map server's log for errors, so it runs off the main thread.
+/// The Mods screen: the mod folders and rAthena's custom NPCs.
+#[derive(Serialize)]
+struct ModsPage {
+    #[serde(flatten)]
+    mods: mods::Status,
+    custom_npcs: customnpcs::Status,
+}
+
+/// The mod folders and rAthena's custom NPCs, which are on, and which
+/// changes wait for a restart. Reads the map server's log for errors, so it
+/// runs off the main thread.
 #[tauri::command]
-async fn mods(app: State<'_, App>) -> Result<mods::Status, String> {
+async fn mods(app: State<'_, App>) -> Result<ModsPage, String> {
     let (dir, mods, env, cache) = (app.dir.clone(), app.mods_dir(), app.env(), app.clash_check.clone());
-    let (client_files, renewal) = (app.client_files.clone(), app.renewal());
+    let (client_files, renewal, overrides) = (app.client_files.clone(), app.renewal(), app.overrides_dir());
     tauri::async_runtime::spawn_blocking(move || {
         let running = stack::status(&dir)
             .unwrap_or_default()
@@ -748,7 +762,10 @@ async fn mods(app: State<'_, App>) -> Result<mods::Status, String> {
                 client_clashes.entry(name).or_default().push(clash.text.clone());
             }
         }
-        mods::status(&mods, running, &log, checked.as_deref(), client_clashes)
+        ModsPage {
+            mods: mods::status(&mods, running, &log, checked.as_deref(), client_clashes),
+            custom_npcs: customnpcs::status(&dir, &overrides, renewal, running, &log),
+        }
     })
     .await
     .map_err(|e| e.to_string())
@@ -783,6 +800,13 @@ fn check_clashes(dir: &std::path::Path, mods: &std::path::Path, env: Option<&Env
 #[tauri::command]
 fn set_mod_enabled(app: State<App>, name: String, enabled: bool) -> Result<(), String> {
     mods::set_enabled(&app.mods_dir(), &name, enabled)
+}
+
+/// Switches one of rAthena's custom NPCs on or off, by its first script;
+/// it applies when the game servers restart.
+#[tauri::command]
+fn set_custom_npc(app: State<App>, id: String, enabled: bool) -> Result<(), String> {
+    customnpcs::set_enabled(&app.overrides_dir(), &id, enabled)
 }
 
 /// Moves an enabled mod one place earlier or later in the load order.
@@ -898,6 +922,7 @@ pub fn run() {
             open_client_files,
             mods,
             set_mod_enabled,
+            set_custom_npc,
             move_mod,
             open_mods,
             new_item_mod,

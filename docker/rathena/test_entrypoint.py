@@ -35,6 +35,9 @@ STOCK = {
     "db/import-tmpl/mob_db.yml": HEADER,
     "db/import-tmpl/mob_skill_db.txt": "// mob_skill_db template\n",
     "npc/custom/barters.yml": HEADER,
+    "npc/custom/healer.txt": "// healer\n",
+    "npc/custom/warper.txt": "// warper\n",
+    "npc/custom/official/GeffenMagicTournament.txt": "// re only\n",
     "npc/scripts_custom.conf": "// Place your scripts here!\n",
 }
 
@@ -309,6 +312,47 @@ class EntrypointTest(unittest.TestCase):
         self.assertEqual(self.read("db/import/item_db.yml"), STOCK["db/import-tmpl/item_db.yml"])
         self.assertEqual(self.read("db/import/mob_skill_db.txt"), STOCK["db/import-tmpl/mob_skill_db.txt"])
         self.assertEqual(self.read("npc/custom/barters.yml"), STOCK["npc/custom/barters.yml"])
+
+
+    # rAthena's custom NPCs
+
+    def test_custom_npcs_load_before_the_mods(self):
+        self.write(
+            "conf/user/custom_npcs.txt",
+            "# from the app\r\nnpc/custom/warper.txt\r\n  npc/custom/healer.txt # on\r\nnpc/custom/warper.txt\r\n\r\n",
+            newline="",
+        )
+        self.mod("a", "npc/x.txt", "")
+        self.write("mods/enabled.txt", "a\n")
+        result = self.run_entrypoint()
+        self.run_entrypoint()
+
+        self.assertIn("Custom NPCs on: npc/custom/warper.txt npc/custom/healer.txt\n", result.stdout)
+        self.assertEqual(self.read("npc/custom_npcs.conf").splitlines(), ["npc: npc/custom/warper.txt", "npc: npc/custom/healer.txt"])
+        imports = [line for line in self.read("npc/scripts_custom.conf").splitlines() if line.startswith("import:")]
+        self.assertEqual(imports, ["import: npc/custom_npcs.conf", "import: npc/mods.conf"])
+
+    def test_custom_npcs_for_one_mode(self):
+        self.write("conf/user/custom_npcs.txt", "re: npc/custom/official/GeffenMagicTournament.txt\npre-re: npc/custom/healer.txt\n")
+        self.assertIn("Custom NPCs on: npc/custom/healer.txt\n", self.run_entrypoint().stdout)
+        result = self.run_entrypoint(PRERE="no")
+        self.assertIn("Custom NPCs on: npc/custom/official/GeffenMagicTournament.txt\n", result.stdout)
+        self.assertEqual(self.read("npc/custom_npcs.conf"), "npc: npc/custom/official/GeffenMagicTournament.txt\n")
+
+    def test_custom_npcs_only_name_rathena_scripts(self):
+        self.write(
+            "conf/user/custom_npcs.txt",
+            "npc/custom/gone.txt\nnpc/../conf/x.txt\nmods/a/npc/x.txt\nnpc/custom/my file.txt\nboth: npc/custom/healer.txt\nnpc/custom/warper.txt\n",
+        )
+        result = self.run_entrypoint()
+        self.assertEqual(self.read("npc/custom_npcs.conf"), "npc: npc/custom/warper.txt\n")
+        for text in ("npc/custom/gone.txt skipped", "'npc/../conf/x.txt' skipped", "'mods/a/npc/x.txt' skipped", "'npc/custom/my file.txt' skipped", "'both: npc/custom/healer.txt' skipped"):
+            self.assertIn(f"[Warning]: conf/user/custom_npcs.txt: {text}", result.stderr)
+
+    def test_no_custom_npcs_file_loads_none(self):
+        result = self.run_entrypoint()
+        self.assertIn("Custom NPCs on: \n", result.stdout)
+        self.assertEqual(self.read("npc/custom_npcs.conf"), "")
 
 
 if __name__ == "__main__":

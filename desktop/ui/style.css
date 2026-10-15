@@ -106,6 +106,17 @@ main { flex: 1; min-height: 0; padding: 16px 20px; }
 #mods details { margin: 4px 0 0 22px; font-size: 12px; }
 #mods summary { color: var(--bad); cursor: pointer; }
 #mods pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+#custom-npcs h3 { font-size: 13px; margin: 14px 0 0; color: var(--muted); }
+#custom-npcs ul { list-style: none; margin: 0; padding: 0; }
+#custom-npcs li { padding: 6px 0; border-top: 1px solid var(--border); }
+#custom-npcs label.check { margin: 0; font-weight: 600; }
+#custom-npcs .what, #custom-npcs .warning, #custom-npcs .problem { font-size: 12px; margin: 2px 0 0 22px; }
+#custom-npcs .problem { color: var(--bad); }
+#custom-npcs .badge { font-size: 11px; font-weight: normal; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--busy) 25%, var(--card)); }
+#custom-npcs details { margin: 4px 0 0 22px; font-size: 12px; }
+#custom-npcs summary { color: var(--bad); cursor: pointer; }
+#custom-npcs pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+#custom-npcs-by-hand[hidden] { display: none; }
 #patch-clashes { margin: 8px 0; font-size: 12px; }
 #patch-clashes[hidden] { display: none; }
 #patch-clashes pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }

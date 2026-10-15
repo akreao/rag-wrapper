@@ -293,7 +293,7 @@
     </section>
     <section class="card">
       <p id="mods-rebuild" class="notice" hidden>
-        The running server was built before mods existed, so it ignores them. Rebuild the server to load mods, then restart it.
+        The running server was built before mods or rAthena's custom NPCs could be switched on here, so it ignores them. Rebuild the server to load them, then restart it.
         <button id="mods-rebuild-button" type="button">Rebuild</button>
       </p>
       <p id="mods-pending" class="notice" hidden>
@@ -304,6 +304,12 @@
       <ul id="mods"></ul>
       <p id="no-mods" class="hint" hidden>No mods yet. Open the mods folder and copy a mod's folder in.</p>
       <p class="hint">Switching a mod on or off, or changing the order, applies the next time the game servers start. A mod switched on loads last.</p>
+    </section>
+    <section class="card">
+      <h2>rAthena's custom NPCs</h2>
+      <p class="hint">NPCs that come with rAthena but are off on a standard server: warpers, healers, job changers, extra quests and events. They load before the mods. Switching one on or off applies the next time the game servers start.</p>
+      <div id="custom-npcs"></div>
+      <p id="custom-npcs-by-hand" class="hint" hidden></p>
     </section>
   </main>
 
