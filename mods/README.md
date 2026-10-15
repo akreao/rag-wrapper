@@ -29,7 +29,7 @@ mods/
   ```
 
   `unloadnpc` takes the original's unique name (after `#`, if it has one) and also unloads its `duplicate`s.
-- **`db/`**: YAML files named like rAthena's `db/import/` files (`item_db.yml`, `mob_db.yml`, `quest_db.yml`, ...), in the same format, `Header` included, plus `barters.yml` for barter shops (rAthena's `npc/barters.yml` format), which loads after `npc/custom/barters.yml`. They're loaded after rAthena's own entries and `db/import`, so an entry with an existing `Id` changes it and a new one adds to it. Files in `db/pre-re/` or `db/re/` are only loaded in that game mode.
+- **`db/`**: YAML files named like rAthena's `db/import/` files (`item_db.yml`, `mob_db.yml`, `quest_db.yml`, ...), in the same format, `Header` included, plus `barters.yml` for barter shops (rAthena's `npc/barters.yml` format), which loads after `npc/custom/barters.yml`. The few databases rAthena still reads as text (`mob_skill_db.txt`, `produce_db.txt`, `skill_nocast_db.txt`, ...) work too: a mod's rows are added to the end of the `db/import/` file, so errors in them name that file rather than the mod's. They're loaded after rAthena's own entries and `db/import`, so an entry with an existing `Id` changes it and a new one adds to it. Files in `db/pre-re/` or `db/re/` are only loaded in that game mode.
 - Nothing for the game client: sprites, item names in the client and other client files go out through the desktop app's Client patch screen.
 
 ## Turning mods on

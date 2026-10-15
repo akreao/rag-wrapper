@@ -153,7 +153,7 @@ apply_mods() {
 
 	# Start from rAthena's own import files, so a mod switched off since
 	# the last start leaves nothing behind.
-	for path in db/import-tmpl/*.yml; do
+	for path in db/import-tmpl/*.yml db/import-tmpl/*.txt; do
 		cp "${path}" "db/import/$(basename "${path}")"
 	done
 	# npc/custom/barters.yml has no template, so the first start keeps a copy.
@@ -185,6 +185,23 @@ apply_mods() {
 				continue
 			fi
 			printf '%s %s\n' "${file}" "${path}" >> "${imports}"
+		done
+		# The few databases rAthena still reads as text (mob_skill_db.txt,
+		# ...) have no imports, so a mod's rows are added to the end of the
+		# db/import/ file, after a comment naming the mod's file.
+		for path in "mods/${name}"/db/*.txt "mods/${name}/db/${mode}"/*.txt; do
+			if [ ! -f "${path}" ]; then
+				continue
+			fi
+			file=$(basename "${path}")
+			if [ ! -f "db/import-tmpl/${file}" ]; then
+				echo "[Warning]: ${path} skipped: it isn't named after one of rAthena's databases in db/import" >&2
+				continue
+			fi
+			{
+				printf '\n// %s\n' "${path}"
+				sed 's/\r$//' "${path}"
+			} >> "db/import/${file}"
 		done
 	done
 
