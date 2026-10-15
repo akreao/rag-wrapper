@@ -102,7 +102,20 @@ struct Overview {
     portal_restart_pending: bool,
     /// Images here that only a Rebuild brings up to date.
     rebuild: Option<images::Rebuild>,
+    /// The server started on another address than before, and players
+    /// haven't been told yet.
+    address_change: Option<AddressChange>,
     task: Option<String>,
+}
+
+/// The address players' files carry and the one the server now runs on,
+/// with the portal port only when that changed too.
+#[derive(Serialize, Debug, PartialEq)]
+struct AddressChange {
+    from: String,
+    to: String,
+    /// The How to connect page at the new address.
+    link: String,
 }
 
 #[tauri::command]
@@ -132,6 +145,7 @@ fn overview(app: State<App>) -> Overview {
             .as_ref()
             .filter(|_| docker_error.is_none() && !get("ADMIN_USER").is_empty())
             .and_then(|env| images::rebuild(&app.dir, env)),
+        address_change: env.as_ref().and_then(address_change),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -312,6 +326,14 @@ fn set_public_ip(app: State<App>, public_ip: Option<String>) -> Result<bool, Str
     apply_public_ip(&mut env, public_ip);
     env.save().map_err(|e| e.to_string())?;
     Ok(env.get("PUBLIC_IP") != before)
+}
+
+/// Hides the address change warning once players have been told.
+#[tauri::command]
+fn dismiss_address_change(app: State<App>) -> Result<(), String> {
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    env.set("ADDRESS_CHANGED_FROM", "");
+    env.save().map_err(|e| e.to_string())
 }
 
 /// The port players open the account portal on. Returns whether it
@@ -530,6 +552,11 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             _ => false,
         };
         if ok && started {
+            if let Ok(mut env) = EnvFile::load(&ctx.dir.join(".env")) {
+                if record_address(&mut env) {
+                    let _ = env.save();
+                }
+            }
             if let Err(e) = mods::record_applied(&ctx.dir.join(stack::MODS)) {
                 ctx.line(format!("Couldn't record the loaded mods: {e}"));
             }
@@ -558,6 +585,56 @@ fn up_command(app: &App) -> Result<std::process::Command, String> {
     let mut cmd = stack::compose(&app.dir);
     cmd.args(["--progress", "plain", "up", "--detach"]);
     Ok(cmd)
+}
+
+/// Where players reach the server: its address and the portal port, as
+/// `ip:port`. Their patcher zip carries both (`clientinfo.xml` and the web
+/// server settings the address, `rpatchur.yml` the portal's link).
+fn player_address(env: &EnvFile) -> Option<String> {
+    let ip = env.get("PUBLIC_IP").filter(|ip| !ip.is_empty())?;
+    let port = env.get("PORTAL_PORT").filter(|p| !p.is_empty()).unwrap_or_else(|| "8080".into());
+    Some(format!("{ip}:{port}"))
+}
+
+/// Notes where players reach the server it just started, in `LAST_ADDRESS`.
+/// When that moved, the one players' files still have is kept in
+/// `ADDRESS_CHANGED_FROM` until the warning is dismissed. Returns whether
+/// anything changed.
+fn record_address(env: &mut EnvFile) -> bool {
+    let Some(now) = player_address(env) else {
+        return false;
+    };
+    let last = env.get("LAST_ADDRESS").unwrap_or_default();
+    if last == now {
+        return false;
+    }
+    let from = env.get("ADDRESS_CHANGED_FROM").unwrap_or_default();
+    if from == now {
+        // Back where players' files point: nothing to tell them.
+        env.set("ADDRESS_CHANGED_FROM", "");
+    } else if from.is_empty() && !last.is_empty() {
+        // A start before the app kept the address (last is empty) can't
+        // tell whether it moved. A second move keeps the first address,
+        // the one players who weren't told still have.
+        env.set("ADDRESS_CHANGED_FROM", &last);
+    }
+    env.set("LAST_ADDRESS", &now);
+    true
+}
+
+/// The change to warn about, from the old address to the one the server
+/// last started on.
+fn address_change(env: &EnvFile) -> Option<AddressChange> {
+    let from = env.get("ADDRESS_CHANGED_FROM").filter(|a| !a.is_empty())?;
+    let to = env.get("LAST_ADDRESS").filter(|a| !a.is_empty())?;
+    let link = format!("http://{to}/connect");
+    let ip = |a: &str| a.rsplit_once(':').map_or(a.to_owned(), |(ip, _)| ip.to_owned());
+    let port = |a: &str| a.rsplit_once(':').map(|(_, p)| p.to_owned());
+    // Only the address moved: the port would just be noise.
+    if port(&from) == port(&to) {
+        return Some(AddressChange { from: ip(&from), to: ip(&to), link });
+    }
+    Some(AddressChange { from, to, link })
 }
 
 /// Once `db-init` has finished, the admin account exists and the password
@@ -776,6 +853,7 @@ pub fn run() {
             set_portal_port,
             save_build_settings,
             skip_server_update,
+            dismiss_address_change,
             game_settings,
             save_game_settings,
             open_overrides,
@@ -943,5 +1021,58 @@ mod tests {
         assert_eq!(env.get("PUBLIC_IP_AUTO").as_deref(), Some("yes"));
         let ip = env.get("PUBLIC_IP").unwrap();
         assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "{ip}");
+    }
+
+    #[test]
+    fn a_new_address_is_warned_about_until_dismissed() {
+        // The first start the app sees only notes the address.
+        let mut env = EnvFile::parse("PUBLIC_IP=192.168.0.5\n");
+        assert!(record_address(&mut env));
+        assert_eq!(env.get("LAST_ADDRESS").as_deref(), Some("192.168.0.5:8080"));
+        assert_eq!(address_change(&env), None);
+        assert!(!record_address(&mut env));
+
+        // A start on another address warns.
+        env.set("PUBLIC_IP", "192.168.0.7");
+        assert!(record_address(&mut env));
+        let change = AddressChange {
+            from: "192.168.0.5".into(),
+            to: "192.168.0.7".into(),
+            link: "http://192.168.0.7:8080/connect".into(),
+        };
+        assert_eq!(address_change(&env), Some(change));
+
+        // A second move keeps the address players were last given.
+        env.set("PUBLIC_IP", "192.168.0.9");
+        record_address(&mut env);
+        assert_eq!(address_change(&env).unwrap().from, "192.168.0.5");
+        assert_eq!(address_change(&env).unwrap().to, "192.168.0.9");
+
+        // Moving back to it needs no warning.
+        env.set("PUBLIC_IP", "192.168.0.5");
+        record_address(&mut env);
+        assert_eq!(address_change(&env), None);
+
+        // Dismissing hides it, and the next start on the same address keeps it hidden.
+        env.set("PUBLIC_IP", "10.8.0.1");
+        record_address(&mut env);
+        assert!(address_change(&env).is_some());
+        env.set("ADDRESS_CHANGED_FROM", "");
+        assert!(!record_address(&mut env));
+        assert_eq!(address_change(&env), None);
+    }
+
+    #[test]
+    fn a_new_portal_port_is_warned_about_with_the_port() {
+        let mut env = EnvFile::parse("PUBLIC_IP=192.168.0.5\nPORTAL_PORT=8080\n");
+        record_address(&mut env);
+        env.set("PORTAL_PORT", "8090");
+        assert!(record_address(&mut env));
+        let change = AddressChange {
+            from: "192.168.0.5:8080".into(),
+            to: "192.168.0.5:8090".into(),
+            link: "http://192.168.0.5:8090/connect".into(),
+        };
+        assert_eq!(address_change(&env), Some(change));
     }
 }
