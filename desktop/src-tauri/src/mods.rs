@@ -103,7 +103,7 @@ fn write_enabled(dir: &Path, names: &[String]) -> Result<(), String> {
 }
 
 /// The files a mod loads, as `entrypoint.sh` finds them: `.txt` files
-/// anywhere under `npc/`, and `.yml` files in `db/`, `db/pre-re/` and
+/// anywhere under `npc/`, and `.yml` and `.txt` files in `db/`, `db/pre-re/` and
 /// `db/re/` (only one of the last two loads, depending on the game mode).
 fn files(root: &Path) -> (Vec<String>, Vec<String>) {
     let mut scripts = Vec::new();
@@ -120,7 +120,7 @@ fn files(root: &Path) -> (Vec<String>, Vec<String>) {
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| n.ends_with(".yml"))
+            .filter(|n| n.ends_with(".yml") || n.ends_with(".txt"))
             .map(|n| format!("{sub}/{n}"))
             .collect();
         names.sort();
@@ -431,6 +431,7 @@ mod tests {
         write(&dir, "b-shop/npc/README.md", "x");
         write(&dir, "b-shop/db/item_db.yml", "x");
         write(&dir, "b-shop/db/pre-re/mob_db.yml", "x");
+        write(&dir, "b-shop/db/re/mob_skill_db.txt", "x");
         write(&dir, "a-empty/notes.txt", "x");
         write(&dir, "bad name/npc/x.txt", "x");
         write(&dir, ".hidden/npc/x.txt", "x");
@@ -441,7 +442,7 @@ mod tests {
         assert_eq!(names, ["a-empty", "b-shop", "bad name"]);
         assert!(s.mods[0].problem.as_deref().unwrap().starts_with("Nothing to load"));
         assert_eq!(s.mods[1].scripts, ["npc/sub/shop.txt"]);
-        assert_eq!(s.mods[1].databases, ["db/item_db.yml", "db/pre-re/mob_db.yml"]);
+        assert_eq!(s.mods[1].databases, ["db/item_db.yml", "db/pre-re/mob_db.yml", "db/re/mob_skill_db.txt"]);
         assert!(s.mods[1].problem.is_none());
         assert!(s.mods[2].problem.as_deref().unwrap().starts_with("Rename"));
         assert!(!s.restart_needed);
