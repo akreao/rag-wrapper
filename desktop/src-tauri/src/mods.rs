@@ -52,6 +52,8 @@ pub struct Mod {
     pub clashes: Vec<String>,
     /// The same for its client files, as the next client patch has them.
     pub client_clashes: Vec<String>,
+    /// Custom items missing their server or client half ([`crate::itemkit`]).
+    pub item_warnings: Vec<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -79,7 +81,7 @@ struct Fingerprint {
 
 /// The rule `entrypoint.sh` applies to folder names, which end up in
 /// config and YAML files.
-fn valid_name(name: &str) -> bool {
+pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with('.')
         && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
@@ -303,6 +305,7 @@ pub fn status(
                 errors: errors.remove(&name).unwrap_or_default(),
                 clashes: clashes.remove(&name).unwrap_or_default(),
                 client_clashes: client_clashes.remove(&name).unwrap_or_default(),
+                item_warnings: crate::itemkit::check(&root),
                 client_files,
                 name,
                 enabled,

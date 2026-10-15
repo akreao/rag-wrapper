@@ -234,7 +234,7 @@
         <li><code>data/</code>: sprites, textures, maps and other GRF content, packed into <code>rag-wrapper.grf</code>. The patch also writes the client's <code>DATA.INI</code> so it reads that GRF first.</li>
         <li>Anything else, such as <code>System/</code> files, is copied into the client folder as is.</li>
         <li><code>Pre-Renewal/</code> and <code>Renewal/</code>: files for one game mode only, such as translation additions, laid out the same way. Players get the server's current mode's files, which replace shared files of the same name. After a mode switch, publish a patch to swap them.</li>
-              <li>Mods that are on can add their own client files, from their <code>client/</code> folder, laid out the same way. They're added after this folder, in load order: a mod's file replaces one of the same name, except that the entries of Lua tables (<code>.lub</code>, <code>.lua</code> files such as <code>System/itemInfo.lua</code>) are merged.</li>
+              <li>Mods that are on can add their own client files, from their <code>client/</code> folder, laid out the same way. They're added after this folder, in load order: a mod's file replaces one of the same name, except that the entries of Lua tables (<code>.lub</code>, <code>.lua</code> files such as <code>SystemEN/itemInfo_C.lua</code>) are merged.</li>
       </ul>
       <p class="hint">Only hand out the patched exe, your own custom content and your own translation additions: never the full client or llchrisll's translation, which players install themselves.</p>
       <div class="row">
@@ -273,13 +273,21 @@
       <ul class="hint">
         <li><code>npc/</code>: NPC scripts (<code>.txt</code>), loaded after rAthena's own.</li>
         <li><code>db/</code>: database files named like rAthena's <code>db/import</code> files (<code>item_db.yml</code>, <code>mob_db.yml</code>, ...). Files in <code>db/pre-re/</code> or <code>db/re/</code> only load in that game mode.</li>
-        <li><code>client/</code>: files for the players' game client, such as sprites or <code>System/itemInfo.lua</code>, laid out like the client folder. They go out with the next client patch, published on the Client patch screen.</li>
+        <li><code>client/</code>: files for the players' game client, such as sprites or custom items' names in <code>SystemEN/itemInfo_C.lua</code>, laid out like the client folder. They go out with the next client patch, published on the Client patch screen.</li>
       </ul>
       <p class="hint">The mods that are on load from top to bottom, so when two change the same entry the lower one wins; the arrows change the order.</p>
       <div class="row">
         <button id="open-mods">Open mods folder</button>
         <button id="mods-refresh">Check again</button>
       </div>
+      <form id="new-item-mod">
+        <label for="new-item-mod-name">New item mod</label>
+        <div class="row">
+          <input id="new-item-mod-name" value="my-items" spellcheck="false" required>
+          <button type="submit">Create</button>
+        </div>
+      </form>
+      <p class="hint">Starts a mod from the custom item kit: a potion and a headgear with every file each needs, and a shop in Prontera that sells them. The folder opens so you can make them your own; see its <code>README.md</code>.</p>
       <p id="mods-folder" class="hint"></p>
     </section>
     <section class="card">

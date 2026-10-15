@@ -30,7 +30,7 @@ mods/
 
   `unloadnpc` takes the original's unique name (after `#`, if it has one) and also unloads its `duplicate`s.
 - **`db/`**: YAML files named like rAthena's `db/import/` files (`item_db.yml`, `mob_db.yml`, `quest_db.yml`, ...), in the same format, `Header` included, plus `barters.yml` for barter shops (rAthena's `npc/barters.yml` format), which loads after `npc/custom/barters.yml`. The few databases rAthena still reads as text (`mob_skill_db.txt`, `produce_db.txt`, `skill_nocast_db.txt`, ...) work too: a mod's rows are added to the end of the `db/import/` file, so errors in them name that file rather than the mod's. They're loaded after rAthena's own entries and `db/import`, so an entry with an existing `Id` changes it and a new one adds to it. Files in `db/pre-re/` or `db/re/` are only loaded in that game mode.
-- **`client/`**: files for the players' game client (sprites, `System/itemInfo.lua`, quest lists, ...), laid out like the game client's folder, with `Pre-Renewal/` and `Renewal/` folders for files of one game mode, as in the desktop app's client files folder. They don't load on restart: the desktop app's Client patch screen adds them to the next patch, after the client files folder and in load order. A mod can't carry `rag-wrapper.exe`; the patched client comes only from the client files folder.
+- **`client/`**: files for the players' game client (sprites, custom items' names in `SystemEN/itemInfo_C.lua`, quest lists, ...), laid out like the game client's folder, with `Pre-Renewal/` and `Renewal/` folders for files of one game mode, as in the desktop app's client files folder. They don't load on restart: the desktop app's Client patch screen adds them to the next patch, after the client files folder and in load order. A mod can't carry `rag-wrapper.exe`; the patched client comes only from the client files folder.
 
 ## Turning mods on
 
@@ -52,19 +52,30 @@ Two details, from how rAthena reads each database:
 
 ## When two mods have the same client file
 
-Lua tables are merged: when the client files folder or an earlier mod has the same `.lub` or `.lua` file (`System/OngoingQuestInfoList_True.lub`, `System/itemInfo.lua`, ...), each entry in a mod's tables (`[30000] = { ... }`) replaces the entry with the same key or is added to the end of the table, and a table the earlier file lacks is added at the end of the file. Everything outside the tables, such as the `main` function, comes from the earlier file, so a mod's file only needs its own entries:
+Lua tables are merged: when the client files folder or an earlier mod has the same `.lub` or `.lua` file (`SystemEN/itemInfo_C.lua`, `SystemEN/OngoingQuests_C.lub`, ...), each entry in a mod's tables (`[40000] = { ... }`) replaces the entry with the same key or is added to the end of the table, and a table the earlier file lacks is added at the end of the file. Everything outside the tables, such as a `main` function, comes from the earlier file, so a mod's file only needs its own entries:
 
 ```lua
-tbl = {
-	[30000] = {
-		identifiedDisplayName = "Eden Coin",
-		identifiedResourceName = "eden_coin",
+tbl_custom = {
+	[40000] = {
+		identifiedDisplayName = "Kit Coin",
+		identifiedResourceName = "kit_coin",
 		slotCount = 0
 	},
 }
 ```
 
 Where two set the same entry differently, the later one wins, and the Mods and Client patch screens list the clash. Any other file, or a compiled `.lub` (Lua bytecode, which can't be merged), is taken whole from the later mod, listed the same way.
+
+## Custom items
+
+A custom item has two halves, both in one mod, under the same `Id`:
+
+- **The server's**, in `db/item_db.yml`: what the item is and does. Custom items take an `Id` from **40000 to 49999**, which neither rAthena nor the client's own item list uses, and an `AegisName` of their own.
+- **The players' clients'**, in `client/SystemEN/itemInfo_C.lua`, in the `tbl_custom` table: its name, description and look. Players install llchrisll's English translation, whose `SystemEN/itemInfo.lua` loads this file and adds `tbl_custom`'s items to its own list, so the mod carries only its own items and every other item keeps its name. An `Id` the official list already has is skipped in `tbl_custom`; to rename or redescribe an official item, put it in `tbl_override` in the same file. Several mods' `itemInfo_C.lua` files are merged into one patch, as above. The patch also sets the translation's `CServerName` to the server name from the Settings screen, so players see custom items as "Kit Potion [MyServer]" rather than "[ExampleRO]" (each player's own `DisplayCustomServer` setting decides whether and where it shows), and changing the server name shows as a change on the Client patch screen.
+
+The Mods screen's **New item mod** button starts a mod with both halves of two items, a potion and a headgear, and a shop in Prontera that sells them; its `README.md` says what each file is and where a new look's sprites go. The items reuse the Red Potion's and the Ribbon's looks, written as byte escapes (`"\187\161..."`), since the client reads sprite names in the Korean code page (CP949): keep a Korean name in that form, or save the file as CP949.
+
+The Mods screen warns when one half is missing: an item in the custom range in `item_db.yml` with no `tbl_custom` entry (players would see an unknown item), a `tbl_custom` entry with no `item_db.yml` entry, and an itemInfo file other than `SystemEN/itemInfo_C.lua`, which would replace the players' whole item list or not be read at all.
 
 ## Problems
 
