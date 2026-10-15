@@ -1,0 +1,18 @@
+# Mods' client files
+
+Roadmap feature 13: mods carry client files, which go out through the patcher, with Lua tables merged where several layers have the same file. Asked for by Steven on 2026-10-15, after mods' database changes were merged ([mods-folder.md](mods-folder.md)).
+
+- **A mod's client files go in its `client/` folder**, laid out like the game client's folder, with `Pre-Renewal/` and `Renewal/` folders for files of one game mode, the same as the client files folder ([publish-client-patch.md](publish-client-patch.md)). Nothing else in a mod reaches the players.
+- **They go out with the next client patch, not on restart.** The Client patch screen builds each patch from the client files folder plus the enabled mods' client files, so switching a mod on or off, reordering mods or editing their client files shows as files to publish there. A mod with only client files never asks for a server restart.
+- **The client files folder comes first, then the mods in load order.** As on the server, where mods load after rAthena's own files and `db/import`, a mod's file is added to or replaces the folder's, and a later mod's wins over an earlier one's. Paths match without regard to case, as they do on Windows.
+- **Lua tables are merged by key.** In `.lub` and `.lua` files, each keyed entry of a table assigned at the top of a later file (`[501] = ...`, `["name"] = ...`, `name = ...`) replaces the earlier file's entry with the same key or is added to the end of its table; a table the earlier file lacks is added at the end. When a file assigns a table twice (kRO's quest lists start with `QuestInfoList = {}`), entries go into the last assignment, the one the client ends up with. Everything outside the tables, such as `main`, stays as the earlier file has it, so a mod's file only needs its own entries. Every `.lub`/`.lua`, wherever it is (`System/` or under `data/`), is merged the same way rather than from a list of known files, since the same rules fit all of them.
+- **Other files, and compiled lub, are taken whole from the later layer.** Lua bytecode can't be edited as text.
+- **Clashes are listed, never blocking.** Where two layers set one entry differently, or both have a file that can't be merged with different contents, the later one is used and the Client patch screen lists it, as does the Mods screen under each mod named. Long lists show their first 100 lines.
+- **Only the client files folder carries `rag-wrapper.exe`.** A mod's copy blocks publishing until it's deleted, since there is one patched client and the patcher's Play button starts it.
+- **Checked on real files.** zackdreaver's ROenglishRE `OngoingQuestInfoList_True.lub` (2 MB, 8,455 quests) and `itemInfo_true_V5.lua` (12 MB, 17,202 items) merged with mod files and loaded in Lua 5.1, the client's version: every entry kept, the mods' entries added or replaced, CP949 names unchanged, the base file's functions kept. A mod replacing all 8,455 quests merged in 0.15 s.
+
+Questions asked about the finished work (PR #44), one at a time.
+
+- **Mods win over the client files folder.** A mod's file or table entry replaces the folder's, as mods load after `db/import` on the server, so the load order means the same on both screens. A fix of Steven's own to a mod's entry goes in a mod loaded last.
+- **The earlier file's functions are kept.** Only a mod's table entries are merged in; its `main` and other functions are dropped, since mods copy them from different client versions and the base file's match the patched client.
+- **Two mods with the same compiled lub only warn.** The later mod's copy is used whole and the clash is listed; publishing isn't blocked, as clashes never stop a server start either.

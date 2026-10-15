@@ -1,6 +1,6 @@
 # Mods
 
-Server-side custom content: NPC scripts and rAthena database changes. The rAthena containers see this folder, read-only, as `mods/`, and on every start `entrypoint.sh` loads the mods named in `enabled.txt`. The desktop app's Mods screen lists the folders here and switches them on and off by editing that file.
+Custom content: NPC scripts and rAthena database changes for the server, and files for the players' game client. The rAthena containers see this folder, read-only, as `mods/`, and on every start `entrypoint.sh` loads the mods named in `enabled.txt`. The desktop app's Mods screen lists the folders here and switches them on and off by editing that file.
 
 ## A mod
 
@@ -30,7 +30,7 @@ mods/
 
   `unloadnpc` takes the original's unique name (after `#`, if it has one) and also unloads its `duplicate`s.
 - **`db/`**: YAML files named like rAthena's `db/import/` files (`item_db.yml`, `mob_db.yml`, `quest_db.yml`, ...), in the same format, `Header` included, plus `barters.yml` for barter shops (rAthena's `npc/barters.yml` format), which loads after `npc/custom/barters.yml`. The few databases rAthena still reads as text (`mob_skill_db.txt`, `produce_db.txt`, `skill_nocast_db.txt`, ...) work too: a mod's rows are added to the end of the `db/import/` file, so errors in them name that file rather than the mod's. They're loaded after rAthena's own entries and `db/import`, so an entry with an existing `Id` changes it and a new one adds to it. Files in `db/pre-re/` or `db/re/` are only loaded in that game mode.
-- Nothing for the game client: sprites, item names in the client and other client files go out through the desktop app's Client patch screen.
+- **`client/`**: files for the players' game client (sprites, `System/itemInfo.lua`, quest lists, ...), laid out like the game client's folder, with `Pre-Renewal/` and `Renewal/` folders for files of one game mode, as in the desktop app's client files folder. They don't load on restart: the desktop app's Client patch screen adds them to the next patch, after the client files folder and in load order. A mod can't carry `rag-wrapper.exe`; the patched client comes only from the client files folder.
 
 ## Turning mods on
 
@@ -49,6 +49,22 @@ Two details, from how rAthena reads each database:
 - A few lists are replaced whole, and each mod's counts as one value: `Probability` in `abra_db.yml`, `Random` and a slot's `Options` in `item_randomopt_group.yml`, and `Order` in `item_enchant.yml`.
 
 `Header: Clear: true` in a mod's file empties that database, rAthena's own entries and earlier mods' included, before the file loads; the log warns about it.
+
+## When two mods have the same client file
+
+Lua tables are merged: when the client files folder or an earlier mod has the same `.lub` or `.lua` file (`System/OngoingQuestInfoList_True.lub`, `System/itemInfo.lua`, ...), each entry in a mod's tables (`[30000] = { ... }`) replaces the entry with the same key or is added to the end of the table, and a table the earlier file lacks is added at the end of the file. Everything outside the tables, such as the `main` function, comes from the earlier file, so a mod's file only needs its own entries:
+
+```lua
+tbl = {
+	[30000] = {
+		identifiedDisplayName = "Eden Coin",
+		identifiedResourceName = "eden_coin",
+		slotCount = 0
+	},
+}
+```
+
+Where two set the same entry differently, the later one wins, and the Mods and Client patch screens list the clash. Any other file, or a compiled `.lub` (Lua bytecode, which can't be merged), is taken whole from the later mod, listed the same way.
 
 ## Problems
 

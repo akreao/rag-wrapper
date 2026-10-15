@@ -6,6 +6,7 @@ mod host;
 mod images;
 mod jobs;
 mod live;
+mod luamerge;
 mod menu;
 mod mods;
 mod net;
@@ -598,8 +599,8 @@ fn open_backups(app: State<App>) -> Result<(), String> {
 /// What the next client patch would carry, and the patches published so far.
 #[tauri::command]
 async fn client_patch(app: State<'_, App>) -> Result<clientpatch::Status, String> {
-    let (files, patches, renewal) = (app.client_files.clone(), app.patches_dir(), app.renewal());
-    tauri::async_runtime::spawn_blocking(move || clientpatch::status(&files, &patches, renewal))
+    let (files, mods, patches, renewal) = (app.client_files.clone(), app.mods_dir(), app.patches_dir(), app.renewal());
+    tauri::async_runtime::spawn_blocking(move || clientpatch::status(&files, &mods::client_mods(&mods), &patches, renewal))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -608,10 +609,11 @@ async fn client_patch(app: State<'_, App>) -> Result<clientpatch::Status, String
 /// portal serves it straight away; the server doesn't need to restart.
 #[tauri::command]
 async fn publish_client_patch(app: State<'_, App>) -> Result<clientpatch::Publish, String> {
-    let (files, patches, lock, renewal) = (app.client_files.clone(), app.patches_dir(), app.publishing.clone(), app.renewal());
+    let (files, mods, patches, lock, renewal) =
+        (app.client_files.clone(), app.mods_dir(), app.patches_dir(), app.publishing.clone(), app.renewal());
     tauri::async_runtime::spawn_blocking(move || {
         let _held = lock.try_lock().map_err(|_| "A patch is already being published.")?;
-        clientpatch::publish(&files, &patches, renewal)
+        clientpatch::publish(&files, &mods::client_mods(&mods), &patches, renewal)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -629,6 +631,7 @@ fn open_client_files(app: State<App>) -> Result<(), String> {
 #[tauri::command]
 async fn mods(app: State<'_, App>) -> Result<mods::Status, String> {
     let (dir, mods, env, cache) = (app.dir.clone(), app.mods_dir(), app.env(), app.clash_check.clone());
+    let (client_files, renewal) = (app.client_files.clone(), app.renewal());
     tauri::async_runtime::spawn_blocking(move || {
         let running = stack::status(&dir)
             .unwrap_or_default()
@@ -642,7 +645,13 @@ async fn mods(app: State<'_, App>) -> Result<mods::Status, String> {
             String::new()
         };
         let checked = check_clashes(&dir, &mods, env.as_ref(), &cache);
-        mods::status(&mods, running, &log, checked.as_deref())
+        let mut client_clashes: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for clash in clientpatch::clashes(&client_files, &mods::client_mods(&mods), renewal) {
+            for name in clash.mods {
+                client_clashes.entry(name).or_default().push(clash.text.clone());
+            }
+        }
+        mods::status(&mods, running, &log, checked.as_deref(), client_clashes)
     })
     .await
     .map_err(|e| e.to_string())

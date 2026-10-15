@@ -772,6 +772,10 @@ function fileItems(changes) {
 
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+// A mod that changes thousands of entries would make a page-long list.
+const firstLines = (lines, max = 100) =>
+  lines.slice(0, max).join("\n\n") + (lines.length > max ? `\n\n…and ${lines.length - max} more` : "");
+
 function summary(c) {
   const parts = [];
   if (c.added.length) parts.push(`${c.added.length} new`);
@@ -813,6 +817,11 @@ async function refreshPatch() {
         ? "Nothing has changed since the last patch."
         : "The client files folder is empty.");
   $("patch-changes").replaceChildren(...fileItems(c));
+  $("patch-mods").hidden = s.mods.length === 0;
+  $("patch-mods").textContent = `With the client files of these mods, in load order: ${s.mods.join(", ")}.`;
+  $("patch-clashes").hidden = s.clashes.length === 0;
+  $("patch-clashes").querySelector("summary").textContent = `${count(s.clashes.length, "thing", "things")} set differently by two of them`;
+  $("patch-clashes").querySelector("pre").textContent = firstLines(s.clashes);
   $("publish").disabled = publishing || total === 0 || s.problems.length > 0;
 
   $("no-patches").hidden = s.history.length > 0;
@@ -933,6 +942,7 @@ function modItem(m) {
   const parts = [];
   if (m.scripts.length) parts.push(count(m.scripts.length, "script", "scripts"));
   if (m.databases.length) parts.push(m.databases.join(", "));
+  if (m.client_files) parts.push(count(m.client_files, "client file", "client files"));
   if (parts.length) {
     const what = document.createElement("p");
     what.className = "what muted";
@@ -956,6 +966,19 @@ function modItem(m) {
     p.textContent = "These mods set the same values differently. Each line ends with the one the server uses; the arrows change the load order. Changes show here right away and load on the next restart.";
     const pre = document.createElement("pre");
     pre.textContent = m.clashes.join("\n\n");
+    details.append(summary, p, pre);
+    li.append(details);
+  }
+  if (m.client_clashes.length) {
+    const details = document.createElement("details");
+    details.dataset.key = `${m.name}/client-clashes`;
+    const summary = document.createElement("summary");
+    summary.textContent = `${count(m.client_clashes.length, "client file entry", "client file entries")} another mod also sets`;
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "Each line ends with the one the next client patch carries; the arrows change the load order.";
+    const pre = document.createElement("pre");
+    pre.textContent = firstLines(m.client_clashes);
     details.append(summary, p, pre);
     li.append(details);
   }
