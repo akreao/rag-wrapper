@@ -12,6 +12,7 @@ mod luamerge;
 mod menu;
 mod mods;
 mod net;
+mod news;
 mod settings;
 mod stack;
 mod task;
@@ -304,6 +305,19 @@ fn open_url(url: String) -> Result<(), String> {
         return Err(format!("Not a web address: {url}"));
     }
     host::open(url.as_ref())
+}
+
+/// The News screen's posts, from the overrides folder's `portal/news.md`.
+#[tauri::command]
+fn news(app: State<App>) -> news::News {
+    news::load(&app.overrides_dir())
+}
+
+/// Writes the News screen's posts. The portal reads the file on every
+/// request, so they show straight away. Returns the news as saved.
+#[tauri::command]
+fn save_news(app: State<App>, news: news::News) -> Result<news::News, String> {
+    news::save(&app.overrides_dir(), &news)
 }
 
 /// Opens the overrides folder in the file manager, for settings the
@@ -895,6 +909,8 @@ pub fn run() {
             battle_conf,
             save_battle_conf,
             open_battle_conf,
+            news,
+            save_news,
             services,
             live,
             run_task,

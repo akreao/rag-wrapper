@@ -3,6 +3,8 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // patcherSetup makes a patches folder with plist.txt and a fake patcher
@@ -27,9 +30,11 @@ func patcherSetup(t *testing.T, plist string) (http.Handler, string) {
 	os.WriteFile(filepath.Join(patches, "0002_draft.thor"), []byte("DRAFT"), 0o644)
 	os.WriteFile(filepath.Join(dir, "rpatchur.exe"), []byte("MZ"), 0o644)
 	os.WriteFile(filepath.Join(dir, "LICENSE-MIT"), []byte("MIT"), 0o644)
+	os.WriteFile(filepath.Join(dir, "rag-wrapper-patcher.exe"), []byte("MZ new"), 0o644)
+	os.WriteFile(filepath.Join(dir, "LICENSE-Go"), []byte("BSD"), 0o644)
 	a, err := newApp(nil, 99, connectInfo{
 		Address: "10.0.0.5", PacketVer: "20250716", Overrides: dir,
-		Patcher: patcherFiles{Dir: patches, Exe: filepath.Join(dir, "rpatchur.exe")},
+		Patcher: patcherFiles{Dir: patches, Exe: filepath.Join(dir, "rpatchur.exe"), NewExe: filepath.Join(dir, "rag-wrapper-patcher.exe")},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,8 +129,101 @@ func TestPatcherRoutes(t *testing.T) {
 
 	rec = get(h, "/connect")
 	if body := rec.Body.String(); !strings.Contains(body, "Download the patcher") || !strings.Contains(body, "<em>LANG</em>") ||
-		strings.Contains(body, "WARP0716") {
+		strings.Contains(body, "WARP0716") || !strings.Contains(body, `href="/connect/`+newPatcherZip+`"`) {
 		t.Fatalf("connect with a patch published:\n%s", body)
+	}
+}
+
+func unzip(t *testing.T, rec *httptest.ResponseRecorder) map[string]string {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatalf("%d %v", rec.Code, err)
+	}
+	files := map[string]string{}
+	for _, f := range zr.File {
+		r, _ := f.Open()
+		b, _ := io.ReadAll(r)
+		files[f.Name] = string(b)
+	}
+	return files
+}
+
+// Our own patcher (cmd/patcher): its download, the info it starts with,
+// and the exe it updates itself from.
+func TestNewPatcherRoutes(t *testing.T) {
+	h, dir := patcherSetup(t, "1 0001_client.thor\n")
+	os.MkdirAll(filepath.Join(dir, "portal"), 0o755)
+	os.WriteFile(filepath.Join(dir, "portal", "news.md"), []byte("# News\n\n## Maintenance tonight\n\nThe server is down at **8pm**, see [the forum](http://x).\n\n- one\n- two\n\n## Older\n\nold\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "char_conf.txt"), []byte("server_name: LAN RO\n"), 0o644)
+
+	files := unzip(t, get(h, "http://localhost:8080/connect/"+newPatcherZip))
+	if files[patcherName+".exe"] != "MZ new" || files["licenses/go-LICENSE.txt"] != "BSD" || files[patcherName+".yml"] != "" ||
+		!strings.Contains(files[newPatcherConfig], `"portal": "http://10.0.0.5:8080"`) ||
+		!strings.Contains(files["data/clientinfo.xml"], "<address>10.0.0.5</address>") ||
+		!strings.Contains(files[externalSettingsPath], `AssistAddr = "10.0.0.5:8888"`) {
+		t.Fatalf("zip files: %v", files)
+	}
+
+	rec := get(h, "http://10.0.0.5:8080/patcher/info.json")
+	var info struct {
+		ServerName string `json:"server_name"`
+		News       struct{ Title, Text string }
+		PlistURL   string `json:"plist_url"`
+		PatchURL   string `json:"patch_url"`
+		AccountURL string `json:"account_url"`
+		Patcher    struct{ URL, SHA256 string }
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("MZ new"))
+	if info.ServerName != "LAN RO" || info.News.Title != "Maintenance tonight" ||
+		info.News.Text != "The server is down at 8pm, see the forum.\n\n• one\n• two" ||
+		info.PlistURL != "http://10.0.0.5:8080/patcher/plist.txt" || info.PatchURL != "http://10.0.0.5:8080/patcher/data/" ||
+		info.AccountURL != "http://10.0.0.5:8080/account" ||
+		info.Patcher.URL != "http://10.0.0.5:8080/patcher/rag-wrapper-patcher.exe" || info.Patcher.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("info: %s", rec.Body)
+	}
+	if rec := get(h, "/patcher/rag-wrapper-patcher.exe"); rec.Code != http.StatusOK || rec.Body.String() != "MZ new" {
+		t.Fatalf("exe: %d", rec.Code)
+	}
+
+	// A new build is picked up.
+	os.WriteFile(filepath.Join(dir, "rag-wrapper-patcher.exe"), []byte("MZ newer build"), 0o644)
+	os.Chtimes(filepath.Join(dir, "rag-wrapper-patcher.exe"), time.Now().Add(time.Hour), time.Now().Add(time.Hour))
+	if !strings.Contains(get(h, "/patcher/info.json").Body.String(), func() string { s := sha256.Sum256([]byte("MZ newer build")); return hex.EncodeToString(s[:]) }()) {
+		t.Error("info.json kept the old checksum")
+	}
+}
+
+func TestNewPatcherMissing(t *testing.T) {
+	a, err := newApp(nil, 99, connectInfo{Address: "10.0.0.5", PacketVer: "20250716", Overrides: t.TempDir(),
+		Patcher: patcherFiles{Dir: t.TempDir(), Exe: "/nonexistent/rpatchur.exe", NewExe: "/nonexistent/new.exe"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.routes()
+	for _, url := range []string{"/connect/" + newPatcherZip, "/patcher/rag-wrapper-patcher.exe"} {
+		if rec := get(h, url); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: %d", url, rec.Code)
+		}
+	}
+	// No news and no patcher: the info still lists the patches.
+	body := get(h, "/patcher/info.json").Body.String()
+	if !strings.Contains(body, `"news":null`) || strings.Contains(body, "sha256") || !strings.Contains(body, "plist_url") {
+		t.Errorf("info: %s", body)
+	}
+}
+
+func TestNewsText(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "portal"), 0o755)
+	os.WriteFile(filepath.Join(dir, "portal", "news.md"), []byte("## Patch 2\n\n1. first\n2. second\n\n> quoted *text*\n\n```\ncode line\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nline one  \nline two\n"), 0o644)
+	title, text := connectInfo{Overrides: dir}.latestNewsText()
+	want := "1. first\n2. second\n\n> quoted text\n\n    code line\n\na | b\n1 | 2\n\nline one\nline two"
+	if title != "Patch 2" || text != want {
+		t.Errorf("title %q\ntext %q\nwant %q", title, text, want)
 	}
 }
 

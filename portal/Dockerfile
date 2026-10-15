@@ -1,5 +1,5 @@
 # The account web portal: one static Go binary with its pages built in,
-# plus the Windows client patcher it hands out to players.
+# plus the Windows client patchers it hands out to players.
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -7,7 +7,21 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portal .
 
-# rpatchur (github.com/L1nkZ/rpatchur, MIT/Apache-2.0) has no published
+# Our own patcher (cmd/patcher), cross-compiled for Windows. go-winres adds
+# the manifest that gives it Windows' current look for its buttons and
+# progress bar, the desktop app's icon (a copy in cmd/patcher), and the file
+# details Windows shows.
+ARG GO_WINRES_VERSION=v0.3.3
+RUN go run github.com/tc-hib/go-winres@${GO_WINRES_VERSION} simply --arch amd64 --manifest gui --icon cmd/patcher/icon.png \
+      --out cmd/patcher/rsrc --product-name "rag-wrapper patcher" --file-description "rag-wrapper client patcher" \
+      --original-filename rag-wrapper-patcher.exe \
+ && mkdir /patcher \
+ && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H windowsgui" \
+      -o /patcher/rag-wrapper-patcher.exe ./cmd/patcher \
+ && cp "$(go env GOROOT)/LICENSE" /patcher/LICENSE-Go
+
+# rpatchur (github.com/L1nkZ/rpatchur, MIT/Apache-2.0), the patcher ours
+# replaces, stays until ours is confirmed on players' PCs. It has no published
 # releases, so it's cross-compiled for Windows from a pinned commit. This
 # stage is cached, so it only rebuilds when the commit changes. Rust 1.68
 # is the newest that still builds its locked dependencies (ntapi 0.3.6
@@ -28,6 +42,7 @@ RUN cargo build --locked --release --target x86_64-pc-windows-gnu -p rpatchur \
 
 FROM scratch
 COPY --from=build /portal /portal
+COPY --from=build /patcher/ /patcher/
 COPY --from=patcher /out/ /patcher/
 USER 65534:65534
 EXPOSE 8080
