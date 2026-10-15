@@ -2,6 +2,7 @@
 # Gets the rAthena and portal images for .env.example's settings: the
 # published prebuilt image when there is one for exactly these files (named
 # the way images.yml and the app name them), otherwise a build here.
+# PRERE=no in the environment picks Renewal.
 set -euo pipefail
 
 REGISTRY=ghcr.io/akreao/rag-wrapper
@@ -10,7 +11,8 @@ dir_hash() { (cd "$1" && find . -type f -not -path '*/.*' -printf '%P\n' | LC_AL
 
 packetver=$(setting PACKETVER)
 commit=$(setting RATHENA_COMMIT)
-mode=$([ "$(setting PRERE)" = yes ] && echo prere || echo re)
+export PRERE=${PRERE:-$(setting PRERE)}
+mode=$([ "${PRERE}" = yes ] && echo prere || echo re)
 
 fetch() { # remote local build-service
 	if docker pull "$1"; then

@@ -67,6 +67,22 @@ jobs:
         if: failure()
         run: docker compose logs --no-color --timestamps
 
+  # The same in Renewal, which has its own image and characters database.
+  smoke-renewal:
+    name: Stack smoke test (Renewal)
+    runs-on: ubuntu-24.04
+    env:
+      PRERE: 'no'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Images
+        run: .github/smoke/images.sh
+      - name: Start the stack and log in
+        run: .github/smoke/run.sh
+      - name: Logs
+        if: failure()
+        run: docker compose logs --no-color --timestamps
+
   # Compiling rAthena (and the portal's Windows patcher) is slow, so these
   # only build when the image or what it builds changes. The job keeps its
   # old name, which main's branch settings require.
