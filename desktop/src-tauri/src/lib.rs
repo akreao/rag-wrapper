@@ -218,10 +218,21 @@ async fn battle_conf(app: State<'_, App>) -> Result<battleconf::BattleConf, Stri
     let (dir, overrides, env) = (app.dir.clone(), app.overrides_dir(), app.env());
     tauri::async_runtime::spawn_blocking(move || {
         let env = env.ok_or("Set up the server first.")?;
-        battleconf::load(&dir, &overrides, &env)
+        battleconf::load(&dir, &overrides, &env, &map_log(&dir))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The running map server's log, or nothing when it isn't running.
+fn map_log(dir: &std::path::Path) -> String {
+    let running = stack::status(dir).unwrap_or_default().iter().any(|s| s.service == "map" && s.state == "running");
+    if !running {
+        return String::new();
+    }
+    let mut logs = stack::compose(dir);
+    logs.args(["logs", "--no-log-prefix", "map"]);
+    stack::output(logs).unwrap_or_default()
 }
 
 /// Saves battle config values (option to value) as overrides. Returns

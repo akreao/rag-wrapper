@@ -275,6 +275,7 @@ body.battle-conf header h1 { margin-right: 4px; }
 #editor .setting .reset { padding: 2px 8px; font-size: 12px; }
 #editor .setting .reset[hidden] { visibility: hidden; display: block; }
 #editor .setting .note { grid-column: 1 / -1; margin: 0; }
+#editor .setting .note.error { font-size: 12px; }
 #editor .setting.changed { background: color-mix(in srgb, var(--accent) 10%, var(--card)); }
 #editor .setting.edited { background: color-mix(in srgb, var(--busy) 18%, var(--card)); }
 #editor .setting.changed label code, #editor .setting.edited label code { font-weight: 600; }

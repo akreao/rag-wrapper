@@ -65,20 +65,72 @@ pub struct Setting {
     pub kind: &'static str,
     /// Why the stack sets its own default, if it does.
     pub note: Option<&'static str>,
+    /// The map server turned the value down at its latest start.
+    pub rejected: Option<Rejected>,
 }
 
-/// The battle conf files of the server's image. Errors when the image
-/// isn't there yet or Docker can't copy out of it.
-pub fn load(dir: &Path, overrides: &Path, env: &EnvFile) -> Result<BattleConf, String> {
+/// A value out of the option's range, which rAthena replaces with its
+/// default and logs. The range is only known from that log line.
+#[derive(Serialize, Debug, PartialEq, Clone)]
+pub struct Rejected {
+    pub min: i64,
+    pub max: i64,
+    /// What the server used instead.
+    pub used: i64,
+}
+
+/// The battle conf files of the server's image, with the values the map
+/// server rejected according to `map_log`, its log since it last started
+/// (empty when it isn't running). Errors when the image isn't there yet
+/// or Docker can't copy out of it.
+pub fn load(dir: &Path, overrides: &Path, env: &EnvFile, map_log: &str) -> Result<BattleConf, String> {
     let stock = stock_dir(dir, env)?;
-    Ok(read(&stock, overrides))
+    let mut conf = read(&stock, overrides);
+    mark_rejected(&mut conf, map_log);
+    Ok(conf)
+}
+
+/// How rAthena's `battle_set_value` starts its warning about a value out
+/// of range: `Value for setting 'key': value is invalid (min:0 max:1)!
+/// Defaulting to 0...`
+const REJECTED: &str = "Value for setting '";
+/// A line `entrypoint.sh` writes on every map server start.
+const START_LINE: &str = "Mods enabled:";
+
+fn mark_rejected(conf: &mut BattleConf, log: &str) {
+    let log = log.rfind(START_LINE).map_or(log, |i| &log[i..]);
+    let mut rejected = BTreeMap::new();
+    for line in log.lines() {
+        if let Some((key, value, r)) = line.split_once(REJECTED).and_then(|(_, rest)| parse_rejected(rest)) {
+            rejected.insert(key, (value, r));
+        }
+    }
+    for setting in conf.files.iter_mut().flat_map(|f| &mut f.groups).flat_map(|g| &mut g.options) {
+        // Only while the option still has the value that was turned down.
+        if let Some((value, r)) = rejected.get(setting.key.as_str()) {
+            if *value == setting.value {
+                setting.rejected = Some(r.clone());
+            }
+        }
+    }
+}
+
+/// `key': value is invalid (min:0 max:1)! Defaulting to 0...`
+fn parse_rejected(rest: &str) -> Option<(&str, &str, Rejected)> {
+    let (key, rest) = rest.split_once("': ")?;
+    let (value, rest) = rest.split_once(" is invalid (min:")?;
+    let (min, rest) = rest.split_once(" max:")?;
+    let (max, rest) = rest.split_once(")! Defaulting to ")?;
+    let used = rest.trim_end().trim_end_matches('.');
+    let int = |s: &str| s.trim().parse::<i64>().ok();
+    Some((key, value, Rejected { min: int(min)?, max: int(max)?, used: int(used)? }))
 }
 
 /// Writes `changes` (key to value) to the overrides folder. A value equal
 /// to the default removes the override. Returns whether anything changed,
 /// in which case the game servers need a restart to pick it up.
 pub fn save(dir: &Path, overrides: &Path, env: &EnvFile, changes: &BTreeMap<String, String>) -> Result<bool, String> {
-    let conf = load(dir, overrides, env)?;
+    let conf = read(&stock_dir(dir, env)?, overrides);
     apply(&conf, overrides, changes)
 }
 
@@ -288,6 +340,7 @@ fn setting(key: &str, stock: &str, overridden: &ConfFile) -> Setting {
         default,
         kind,
         note: stack.map(|(.., why)| *why),
+        rejected: None,
     }
 }
 
@@ -381,6 +434,24 @@ mod tests {
         assert_eq!(fs::read_to_string(overrides.join(OVERRIDE)).unwrap(), "// mine\nitem_rate_card: 500\n");
         let conf = read(&stock, &overrides);
         assert!(!apply(&conf, &overrides, &changes(&[("base_exp_rate", "100")])).unwrap());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn marks_values_the_server_rejected() {
+        let dir = temp_dir("rejected");
+        let (stock, overrides) = (dir.join("stock"), dir.join("overrides"));
+        fs::create_dir_all(&overrides).unwrap();
+        fs::write(overrides.join(OVERRIDE), "base_exp_rate: 0\nmulti_level_up_base: 9999\n").unwrap();
+        let mut conf = read(&stock, &overrides);
+        let log = "[Warning]: Value for setting 'base_exp_rate': 5 is invalid (min:1 max:100)! Defaulting to 100...\n\
+            Mods enabled: \n\
+            \x1b[33m[Warning]\x1b[0m: Value for setting 'base_exp_rate': 0 is invalid (min:1 max:1000000000)! Defaulting to 100...\n\
+            [Warning]: Value for setting 'multi_level_up_base': 50 is invalid (min:0 max:10)! Defaulting to 0...\n";
+        mark_rejected(&mut conf, log);
+        assert_eq!(find(&conf, "base_exp_rate").rejected, Some(Rejected { min: 1, max: 1_000_000_000, used: 100 }));
+        // Changed since the server turned it down.
+        assert_eq!(find(&conf, "multi_level_up_base").rejected, None);
         fs::remove_dir_all(dir).unwrap();
     }
 

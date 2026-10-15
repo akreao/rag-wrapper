@@ -68,7 +68,8 @@ function renderFileNames() {
     const keys = file.groups.flatMap((g) => g.options);
     const changed = keys.filter((s) => s.changed).length;
     const pending = keys.some((s) => edits.has(s.key));
-    option.textContent = `${pending ? "• " : ""}${file.name}${changed ? ` (${changed} changed)` : ""}`;
+    const rejected = keys.some((s) => s.rejected);
+    option.textContent = `${pending ? "• " : ""}${rejected ? "⚠ " : ""}${file.name}${changed ? ` (${changed} changed)` : ""}`;
   }
   $("save").textContent = edits.size ? `Save ${edits.size} change${edits.size === 1 ? "" : "s"}` : "Save";
   $("save").disabled = edits.size === 0;
@@ -147,6 +148,10 @@ function renderSetting(s) {
   const defaultText = el("span", { class: "default muted" }, `Default: ${s.default}`);
   row.append(label, input, defaultText, reset);
   if (s.note) row.append(el("p", { class: "note hint" }, s.note));
+  if (s.rejected) {
+    const { min, max, used } = s.rejected;
+    row.append(el("p", { class: "note error" }, `The server turned ${s.value} down at its last start and uses ${used} instead. It must be from ${min} to ${max}.`));
+  }
 
   function mark() {
     const v = edits.has(s.key) ? edits.get(s.key) : s.value;
