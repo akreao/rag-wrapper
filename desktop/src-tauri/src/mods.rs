@@ -375,20 +375,10 @@ fn clashes_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
     found
 }
 
-/// rAthena's errors and warnings that name a file in a mod, by mod. Each
-/// starts at a line with its `[Error]` or `[Warning]` tag and runs until
-/// the next tagged line, which keeps a script error's code excerpt. A
-/// database error names its file in a second tagged line, which stays
-/// with the first.
+/// rAthena's errors and warnings that name a file in a mod, by mod.
 fn errors_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
     let mut found: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut block: Vec<String> = Vec::new();
-    let mut flush = |block: &mut Vec<String>| {
-        if block.is_empty() {
-            return;
-        }
-        let text = block.join("\n");
-        block.clear();
+    for text in log_problems(log) {
         let mut names: Vec<&str> = mod_names(&text).collect();
         names.dedup();
         for name in names {
@@ -398,12 +388,29 @@ fn errors_by_mod(log: &str) -> BTreeMap<String, Vec<String>> {
                 list.remove(0);
             }
         }
+    }
+    found
+}
+
+/// rAthena's errors and warnings in a log, except mod clashes. Each starts
+/// at a line with its `[Error]` or `[Warning]` tag and runs until the next
+/// tagged line, which keeps a script error's code excerpt. A database
+/// error names its file in a second tagged line, and a script command's
+/// failure its NPC and file in `[Debug]` lines, which stay with the first.
+pub fn log_problems(log: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut block: Vec<String> = Vec::new();
+    let mut flush = |block: &mut Vec<String>| {
+        if !block.is_empty() {
+            found.push(block.join("\n"));
+            block.clear();
+        }
     };
     for raw in log.lines() {
         // Progress messages are overwritten with \r; the last one stands.
         let line = clean(raw.rsplit('\r').next().unwrap_or_default());
         if line.starts_with('[') {
-            if !block.is_empty() && line.contains("Occurred in file") {
+            if !block.is_empty() && (line.contains("Occurred in file") || line.starts_with("[Debug]")) && block.len() < MAX_ERROR_LINES {
                 block.push(line);
                 continue;
             }

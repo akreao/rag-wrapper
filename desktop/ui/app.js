@@ -1086,6 +1086,88 @@ function modItem(m) {
   return li;
 }
 
+// rAthena's own custom NPCs, grouped as rAthena's scripts_custom.conf groups them.
+function customNpcItem(n) {
+  const li = document.createElement("li");
+  const label = document.createElement("label");
+  label.className = "check";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = n.enabled;
+  // One that can't load can still be switched off.
+  box.disabled = !!n.problem && !n.enabled;
+  box.addEventListener("change", async () => {
+    modsError(null);
+    box.disabled = true;
+    try {
+      await invoke("set_custom_npc", { id: n.id, enabled: box.checked });
+    } catch (err) {
+      modsError(String(err));
+    }
+    await refreshMods();
+  });
+  const name = document.createElement("span");
+  name.textContent = n.name;
+  label.append(box, name);
+  if (n.pending) {
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = n.enabled ? "loads on restart" : "unloads on restart";
+    label.append(badge);
+  }
+  li.append(label);
+  const what = document.createElement("p");
+  what.className = "what muted";
+  what.textContent = n.description;
+  what.title = n.files.join("\n");
+  li.append(what);
+  if (n.warning) {
+    const p = document.createElement("p");
+    p.className = "warning";
+    p.textContent = `⚠ ${n.warning}`;
+    li.append(p);
+  }
+  if (n.problem) {
+    const p = document.createElement("p");
+    p.className = "problem";
+    p.textContent = n.problem;
+    li.append(p);
+  }
+  if (n.errors.length) {
+    const details = document.createElement("details");
+    details.dataset.key = `${n.id}/errors`;
+    const summary = document.createElement("summary");
+    summary.textContent = `${count(n.errors.length, "error or warning", "errors or warnings")} in the map server's log`;
+    const pre = document.createElement("pre");
+    pre.textContent = n.errors.join("\n\n");
+    details.append(summary, pre);
+    li.append(details);
+  }
+  return li;
+}
+
+function renderCustomNpcs(c) {
+  const box = $("custom-npcs");
+  const open = new Set([...box.querySelectorAll("details[open]")].map((d) => d.dataset.key));
+  const groups = new Map();
+  for (const n of c.npcs) {
+    if (!groups.has(n.group)) groups.set(n.group, []);
+    groups.get(n.group).push(n);
+  }
+  const parts = [];
+  for (const [group, npcs] of groups) {
+    const h = document.createElement("h3");
+    h.textContent = group;
+    const ul = document.createElement("ul");
+    ul.append(...npcs.map(customNpcItem));
+    parts.push(h, ul);
+  }
+  box.replaceChildren(...parts);
+  for (const d of box.querySelectorAll("details")) d.open = open.has(d.dataset.key);
+  $("custom-npcs-by-hand").hidden = c.by_hand.length === 0;
+  $("custom-npcs-by-hand").textContent = `Also loads, added by hand to custom_npcs.txt in the override folder: ${c.by_hand.join(", ")}.`;
+}
+
 async function refreshMods() {
   let s;
   try {
@@ -1105,8 +1187,10 @@ async function refreshMods() {
     on[0].firstChild.disabled = true;
     on[on.length - 1].lastChild.disabled = true;
   }
-  $("mods-rebuild").hidden = !s.rebuild_needed;
-  $("mods-pending").hidden = !s.restart_needed || s.rebuild_needed;
+  renderCustomNpcs(s.custom_npcs);
+  const rebuild = s.rebuild_needed || s.custom_npcs.rebuild_needed;
+  $("mods-rebuild").hidden = !rebuild;
+  $("mods-pending").hidden = !(s.restart_needed || s.custom_npcs.restart_needed) || rebuild;
 }
 
 $("nav-mods").addEventListener("click", async () => {

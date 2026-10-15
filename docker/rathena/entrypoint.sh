@@ -123,6 +123,58 @@ CONF
 	} > conf/import/map_conf.txt
 }
 
+# rAthena ships custom NPCs (npc/custom/) that npc/scripts_custom.conf
+# lists switched off. conf/user/custom_npcs.txt, which the desktop app's
+# Mods screen writes, names the ones to load, one script per line. A line
+# starting "re: " or "pre-re: " loads only in that game mode, for scripts
+# that need the other mode's maps or items. They load before the mods.
+apply_custom_npcs() {
+	if ! grep -qx 'import: npc/custom_npcs.conf' npc/scripts_custom.conf; then
+		printf '\nimport: npc/custom_npcs.conf\n' >> npc/scripts_custom.conf
+	fi
+	: > npc/custom_npcs.conf
+	loaded=
+	if [ -f conf/user/custom_npcs.txt ]; then
+		loaded=$(sed -e 's/\r$//' -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' conf/user/custom_npcs.txt |
+			while IFS= read -r line; do
+				path=${line#*: }
+				case "${line}" in
+					'') continue ;;
+					"re: "*) [ "${PRERE:-yes}" = "yes" ] && continue ;;
+					"pre-re: "*) [ "${PRERE:-yes}" = "yes" ] || continue ;;
+					*": "*)
+						echo "[Warning]: conf/user/custom_npcs.txt: '${line}' skipped: only re: and pre-re: can come before a script" >&2
+						continue
+						;;
+				esac
+				case "${path}" in
+					npc/*.txt) ;;
+					*)
+						echo "[Warning]: conf/user/custom_npcs.txt: '${path}' skipped: only rAthena's npc/ scripts (.txt) can be named here" >&2
+						continue
+						;;
+				esac
+				case "${path}" in
+					*..* | *[!A-Za-z0-9._/-]*)
+						echo "[Warning]: conf/user/custom_npcs.txt: '${path}' skipped: only letters, digits, . _ - and / work in a script's path" >&2
+						continue
+						;;
+				esac
+				if [ ! -f "${path}" ]; then
+					echo "[Warning]: conf/user/custom_npcs.txt: ${path} skipped: this server's rAthena has no such script" >&2
+					continue
+				fi
+				echo "${path}"
+			done | awk '!seen[$0]++')
+	fi
+	for path in ${loaded}; do
+		echo "npc: ${path}" >> npc/custom_npcs.conf
+	done
+	# The desktop app looks for this line to tell an image that loads them
+	# from one built before.
+	echo "Custom NPCs on: $(echo ${loaded})"
+}
+
 # mods/ is the mods folder from the host, one folder per mod, and
 # mods/enabled.txt names the ones that are on, in load order, so where
 # two change the same database entry the later one wins. In each mod:
@@ -438,6 +490,7 @@ init_db() {
 }
 
 write_imports
+apply_custom_npcs
 apply_mods
 
 case "${1:-}" in
