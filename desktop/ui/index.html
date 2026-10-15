@@ -25,6 +25,15 @@
   </header>
 
   <div id="banner" class="banner" hidden></div>
+  <div id="address-bar" class="update-bar" hidden>
+    <p>
+      <strong>The server's address changed</strong> from <code id="address-from"></code> to <code id="address-to"></code>.
+      Players need to download the patcher again from the How to connect page: the one they have still points at the old address, so it can't log in or fetch patches.
+      <br><span class="muted" id="address-hint">To stop it moving, reserve this address for this computer in your router (often called a DHCP reservation or static lease).</span>
+    </p>
+    <button id="address-copy" class="primary">Copy the link</button>
+    <button id="address-dismiss" title="Hide this until the address changes again">Players know</button>
+  </div>
   <div id="update-bar" class="update-bar" hidden>
     <p>
       <strong>Server update available.</strong>
@@ -102,7 +111,7 @@
           <button id="ip-yes">Change and restart</button><button id="ip-no">Cancel</button>
         </p>
         <p id="ip-error" class="error" hidden></p>
-        <p class="hint">Changing it while the server runs restarts the char and map servers.</p>
+        <p class="hint">Changing it while the server runs restarts the char and map servers. Players then need to download the patcher again.</p>
         <label for="portal-port">Account portal port</label>
         <div class="row">
           <input id="portal-port" type="number" min="1024" max="65535">

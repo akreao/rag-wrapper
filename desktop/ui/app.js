@@ -293,6 +293,7 @@ async function refreshOverview() {
     $("admin-name").textContent = overview.admin_user;
     if (!buildFormDirty) fillBuildForm();
   }
+  renderAddressChange(overview.configured && overview.address_change);
   renderUpdate(overview.configured && overview.server_update);
   // One bar at a time, in the order they're dealt with: update, rebuild, restart.
   const rebuild = overview.configured && !overview.server_update && overview.rebuild;
@@ -320,6 +321,55 @@ function renderRebuild(rebuild) {
 $("rebuild-now").addEventListener("click", () => {
   showPage("dashboard");
   runTask("build");
+});
+
+// ---- Address change: players' files still point at the old address ----
+
+// Shown next to the other bars, since it's about players, not the server.
+function renderAddressChange(change) {
+  $("address-bar").hidden = !change;
+  if (!change) return;
+  $("address-from").textContent = change.from;
+  $("address-to").textContent = change.to;
+  // A pinned address moves only when picked by hand.
+  $("address-hint").hidden = !overview.public_ip_auto;
+}
+
+const connectLink = () => `http://${overview.address_change.to}:${overview.portal_port}/connect`;
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // Not allowed here; copy through a selected field instead.
+  }
+  const field = document.createElement("textarea");
+  field.value = text;
+  document.body.append(field);
+  field.select();
+  const copied = document.execCommand("copy");
+  field.remove();
+  if (!copied) throw new Error(`Couldn't copy. The link is ${text}`);
+}
+
+$("address-copy").addEventListener("click", async () => {
+  try {
+    await copyText(connectLink());
+    $("address-copy").textContent = "Copied";
+    setTimeout(() => ($("address-copy").textContent = "Copy the link"), 2000);
+  } catch (err) {
+    banner(String(err.message || err));
+  }
+});
+
+$("address-dismiss").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_address_change");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
 });
 
 // ---- Server update: the rAthena commit this app version comes with ----
