@@ -1,0 +1,3 @@
+{{define "content"}}{{with .Data}}{{if not .Titled}}<h1>News</h1>
+{{end}}{{if .Missing}}<p>No news yet.</p>
+{{else}}<article class="news">{{.Body}}</article>{{end}}{{end}}{{end}}

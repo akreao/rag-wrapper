@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Checks a running stack the way a player uses it: registers an account on
-the portal, then logs in to the login server as the game client does and
-enters the char server. Also checks the smoke-test mod loaded.
+the portal and opens its player pages, then logs in to the login server as
+the game client does and enters the char server. Also checks the
+smoke-test mod loaded.
 
 Run by run.sh once the stack is up. Standard library only.
 """
@@ -156,6 +157,12 @@ def main():
     step("portal")
     wait_for("the portal", lambda: urllib.request.urlopen(f"{PORTAL}/healthz", timeout=5).status == 200 or None)
     register(*PLAYER)
+    # The public player pages read the characters database of the server's
+    # mode, and rankings join it to the accounts database.
+    for path, title in (("/online", "Who's online"), ("/rankings?by=zeny&class=0", "Rankings"), ("/news", "News")):
+        page = urllib.request.urlopen(f"{PORTAL}{path}", timeout=10).read().decode()
+        if f"<h1>{title}</h1>" not in page.replace("&#39;", "'"):
+            fail(f"the portal's {path} page didn't load")
 
     step("login server")
     # The login server says "server closed" until the char server has connected.

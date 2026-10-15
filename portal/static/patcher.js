@@ -47,6 +47,13 @@
     $('detail').innerText = text || ' ';
   }
 
+  // The window has no room for the news under an error that wraps.
+  function hideNews() {
+    if ($('news')) {
+      $('news').style.display = 'none';
+    }
+  }
+
   function progress(done, total) {
     $('progress').style.width = (total > 0 ? Math.round(100 * done / total) : 100) + '%';
   }
@@ -78,6 +85,7 @@
     answered();
     status('Update failed: ' + msg, true);
     detail('Check that this PC can reach the server, then try again.');
+    hideNews();
     setPlay(false);
     $('retry').style.display = '';
   };
@@ -131,10 +139,12 @@
   $('exit').onclick = function () { invoke('exit'); };
   $('retry').onclick = checkForUpdates;
 
-  // Links open in the player's browser, not in the patcher's window.
+  // Links open in the player's browser, not in the patcher's window. That
+  // includes every link in the news, which the page can't mark itself.
   var links = document.getElementsByTagName('a');
+  var news = $('news');
   for (var i = 0; i < links.length; i++) {
-    if (links[i].getAttribute('data-open') === null) {
+    if (links[i].getAttribute('data-open') === null && !(news && news.contains(links[i]))) {
       continue;
     }
     links[i].onclick = function () {

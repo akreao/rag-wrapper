@@ -1,0 +1,25 @@
+{{define "content"}}{{with .Data}}<h1>Rankings</h1>
+<nav class="tabs">
+  <a href="{{.URL "level"}}"{{if eq .By "level"}} class="current"{{end}}>Level</a>
+  <a href="{{.URL "zeny"}}"{{if eq .By "zeny"}} class="current"{{end}}>Zeny</a>
+</nav>
+{{if .Classes}}<form method="get" action="/rankings" class="search">
+  {{if eq .By "zeny"}}<input type="hidden" name="by" value="zeny">{{end}}
+  <select name="class" aria-label="Class">
+    <option value="">Every class</option>
+    {{range .Classes}}<option value="{{.}}"{{if eq . $.Data.Class}} selected{{end}}>{{jobName .}}</option>{{end}}
+  </select>
+  <button>Show</button>
+</form>{{end}}
+{{with .Chars}}
+<table>
+  <thead><tr><th>#</th><th>Name</th><th>Class</th><th>Base</th><th>Job</th>{{if eq $.Data.By "zeny"}}<th>Zeny</th>{{end}}</tr></thead>
+  <tbody>
+  {{range $i, $c := .}}<tr><td>{{inc $i}}</td><td>{{$c.Name}}</td><td>{{$c.JobName}}</td><td>{{$c.BaseLevel}}</td><td>{{$c.JobLevel}}</td>{{if eq $.Data.By "zeny"}}<td>{{thousands $c.Zeny}}</td>{{end}}</tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No characters to rank yet.</p>
+{{end}}
+<p class="note">The top {{rankingLimit}} characters. Admins' characters aren't ranked.</p>
+{{end}}{{end}}

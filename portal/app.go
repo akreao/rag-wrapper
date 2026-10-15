@@ -56,13 +56,17 @@ func groupName(id int) string {
 
 func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 	funcs := template.FuncMap{
-		"groupName": groupName,
-		"groups":    func() any { return groups },
-		"date":      func(t time.Time) string { return t.Format("2006-01-02 15:04 MST") },
-		"town":      func() string { return townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + ")" },
+		"groupName":    groupName,
+		"groups":       func() any { return groups },
+		"date":         func(t time.Time) string { return t.Format("2006-01-02 15:04 MST") },
+		"town":         func() string { return townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + ")" },
+		"jobName":      jobName,
+		"inc":          func(i int) int { return i + 1 },
+		"thousands":    thousands,
+		"rankingLimit": func() int { return rankingLimit },
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "error"} {
+	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "online", "rankings", "news", "error"} {
 		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/items.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
@@ -92,6 +96,9 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /{$}", a.page(a.home))
 	mux.HandleFunc("GET /connect", a.page(a.connect))
+	mux.HandleFunc("GET /online", a.page(a.online))
+	mux.HandleFunc("GET /rankings", a.page(a.rankings))
+	mux.HandleFunc("GET /news", a.page(a.newsPage))
 	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile)
 	mux.HandleFunc("GET /connect/ExternalSettings_kr.lub", a.externalSettingsFile)
 	mux.HandleFunc("GET /connect/"+patcherZip, a.patcherDownload)
