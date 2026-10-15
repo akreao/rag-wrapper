@@ -409,12 +409,10 @@ const serverRunning = () => lastServices.some((s) => ["login", "char", "map"].in
 
 // ---- Game settings: rAthena overrides, applied on restart ----
 
-const RATE_FIELDS = ["drop_common", "drop_equip", "drop_card", "drop_mvp", "death_penalty"];
 let gameLocked = false;
 
 async function loadGameSettings() {
   const s = await invoke("game_settings");
-  for (const f of RATE_FIELDS) $(f).value = s[f];
   $("server_name").value = s.server_name;
   $("motd").value = s.motd;
   $("player_commands").checked = s.player_commands;
@@ -434,7 +432,6 @@ $("game-form").addEventListener("submit", async (e) => {
     player_commands: $("player_commands").checked,
     player_commands_locked: gameLocked,
   };
-  for (const f of RATE_FIELDS) settings[f] = Number($(f).value);
   let changed;
   try {
     changed = await invoke("save_game_settings", { settings });

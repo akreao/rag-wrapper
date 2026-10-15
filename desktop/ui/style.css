@@ -200,7 +200,6 @@ label.check { display: flex; gap: 8px; align-items: baseline; }
 label.check input { width: auto; margin: 0; }
 label[hidden] { display: none; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); column-gap: 16px; }
 .row { display: flex; gap: 8px; margin-bottom: 10px; }
 .row[hidden] { display: none; }
 .notice {
