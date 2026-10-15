@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "readdress", "portal", "stop", "build", "update", "backup" or "restore" while one runs
+let task = null; // "start", "restart", "readdress", "portal", "stop", "build", "update", "backup", "restore" or "test-restore" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -685,6 +685,17 @@ function size(bytes) {
 
 let confirming = null; // the backup whose restore is being confirmed
 
+function plural(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+// "Tested 2026-10-15: loads, 12 accounts, 40 characters"
+function testResult(t) {
+  if (t.problem) return `Restore test ${t.tested} failed: ${t.problem}`;
+  const c = t.counts;
+  return `Tested ${t.tested}: loads, ${plural(c.accounts, "account", "accounts")}, ${plural(c.characters, "character", "characters")}`;
+}
+
 async function refreshBackups() {
   if (!overview?.configured) return;
   const list = await invoke("backups");
@@ -692,11 +703,24 @@ async function refreshBackups() {
   $("backups").replaceChildren(
     ...list.map((b) => {
       const li = document.createElement("li");
-      li.innerHTML = `<span><span class="when"></span><br><span class="what muted"></span></span><button>Restore</button>`;
+      li.innerHTML =
+        `<span><span class="when"></span><br><span class="what muted"></span><span class="tested"></span></span>` +
+        `<span class="actions"><button class="test" title="Load it into a throwaway database to check it would restore. The live database isn't touched.">Test</button><button class="restore">Restore</button></span>`;
       li.querySelector(".when").textContent = b.created.slice(0, 16);
       li.querySelector(".what").textContent = `${REASONS[b.reason] || b.reason} · ${size(b.size)}`;
+      if (b.test) {
+        const tested = li.querySelector(".tested");
+        tested.before(document.createElement("br"));
+        tested.textContent = testResult(b.test);
+        tested.className = b.test.problem ? "tested error" : "tested muted";
+      }
       li.title = b.file;
-      li.querySelector("button").addEventListener("click", () => {
+      li.querySelector(".test").addEventListener("click", () => {
+        confirming = null;
+        showPage("dashboard");
+        runTask("test-restore", b.file);
+      });
+      li.querySelector(".restore").addEventListener("click", () => {
         confirming = confirming === b.file ? null : b.file;
         refreshBackups();
       });
@@ -1081,7 +1105,7 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore" }[
+    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);

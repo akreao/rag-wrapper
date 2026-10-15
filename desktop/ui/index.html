@@ -209,7 +209,7 @@
         <button id="backup-now">Back up now</button>
         <button id="open-backups">Open folder</button>
       </div>
-      <p class="hint">The database is also backed up before every rebuild or server update, before the server first loads a mod's database files, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones.</p>
+      <p class="hint">The database is also backed up before every rebuild or server update, before the server first loads a mod's database files, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones. Test loads a backup into a throwaway database to prove it would restore, without touching the live one.</p>
       <p id="backup-error" class="error" hidden></p>
       <ul id="backups"></ul>
       <p id="no-backups" class="hint" hidden>No backups yet.</p>

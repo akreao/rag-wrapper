@@ -1,17 +1,20 @@
 //! Database backups: gzipped `mariadb-dump`s of the `ragnarok` databases in
-//! the app's backups folder, the newest few kept, and loading one back.
+//! the app's backups folder, the newest few kept, loading one back, and
+//! test-loading one into a throwaway database to prove it would restore.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::stack;
+use crate::{host, stack};
 use crate::task::Ctx;
 
 /// How many backups of each kind are kept, made by hand and made
@@ -41,6 +44,30 @@ const LOAD: &str = r#"MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb --user=roo
 
 /// mariadb-dump's last line; a dump without it was cut short.
 const COMPLETE: &[u8] = b"-- Dump completed";
+
+/// How `mariadb-dump --databases` starts each database, followed by the
+/// name in backquotes.
+const CREATE_DATABASE: &[u8] = b"CREATE DATABASE /*!32312 IF NOT EXISTS*/ `";
+
+/// The databases a backup can hold: accounts, then each game mode's characters.
+const DATABASES: [&str; 3] = ["ragnarok", "ragnarok_prere", "ragnarok_re"];
+
+/// The throwaway MariaDB a restore test loads a backup into: the stack's
+/// image, no network, and no volume but the image's anonymous one, which
+/// goes when the container is removed.
+const TEST_CONTAINER: &str = "rag-wrapper-restore-test";
+
+/// Runs SQL given as `$1` as root, in the test container or the stack's database.
+const SQL: &str = r#"MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb --user=root --batch --skip-column-names -e "$1""#;
+
+/// Checks every table of the databases given as arguments. `--silent`
+/// leaves only the tables that aren't OK.
+const CHECK: &str =
+    r#"MYSQL_PWD="$MARIADB_ROOT_PASSWORD" exec mariadb-check --user=root --check --silent --databases "$@""#;
+
+/// The restore tests' results, by backup file, in the backups folder.
+/// A dotfile, so the folder shows only backups.
+const TESTS: &str = ".restore-tests.json";
 
 /// Why a backup was made. Part of its file name.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -77,6 +104,28 @@ pub struct Backup {
     /// manual, rebuild, update, before-restore, mods or daily; anything else a later version wrote.
     pub reason: String,
     pub size: u64,
+    /// The last restore test of this backup, if it had one.
+    pub test: Option<RestoreTest>,
+}
+
+/// What a restore test found.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct RestoreTest {
+    /// Local time, "YYYY-MM-DD HH:MM".
+    pub tested: String,
+    /// Why the backup didn't load or check out; `None` when it did.
+    pub problem: Option<String>,
+    /// What the loaded backup holds, when it loaded.
+    pub counts: Option<Counts>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Counts {
+    /// Players' accounts, not the servers' own (`sex = 'S'`).
+    pub accounts: u64,
+    pub characters: u64,
+    /// Rows of `inventory`.
+    pub items: u64,
 }
 
 /// `ragnarok-20261014-075800-manual.sql.gz`: sorts by time, oldest first.
@@ -110,6 +159,7 @@ pub fn list(dir: &Path) -> Vec<Backup> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
+    let mut tests = read_tests(dir);
     let mut backups: Vec<Backup> = entries
         .filter_map(|e| {
             let e = e.ok()?;
@@ -117,6 +167,7 @@ pub fn list(dir: &Path) -> Vec<Backup> {
             let (created, reason) = parse(&file)?;
             let size = e.metadata().ok().filter(|m| m.is_file())?.len();
             Some(Backup {
+                test: tests.remove(&file),
                 file,
                 created,
                 reason,
@@ -164,9 +215,6 @@ fn stop_db(ctx: &Ctx) {
     let _ = ctx.run(stop);
 }
 
-/// Dumps the database into a new backup, starting MariaDB for it if the
-/// server is stopped, then deletes the oldest beyond `KEEP`. Returns the
-/// file name, or `None` when there is no database yet.
 /// Backs up a running database when no backup of any kind was made in
 /// the last 24 hours. Used on stop and close, in place of a schedule.
 /// A failure is reported but doesn't stop the server from going down.
@@ -189,6 +237,9 @@ fn due(newest: Option<chrono::NaiveDateTime>, now: chrono::NaiveDateTime) -> boo
     newest.is_none_or(|t| now - t >= chrono::TimeDelta::hours(24))
 }
 
+/// Dumps the database into a new backup, starting MariaDB for it if the
+/// server is stopped, then deletes the oldest beyond `KEEP`. Returns the
+/// file name, or `None` when there is no database yet.
 pub fn create(ctx: &Ctx, reason: Reason, spare: Option<&str>) -> Result<Option<String>, String> {
     if !stack::volume_exists("db-data") {
         ctx.line("There's no database yet, so there's nothing to back up.");
@@ -312,23 +363,39 @@ impl Tail {
     }
 }
 
-/// Reads a backup through, checking it is a whole dump.
-fn check(path: &Path) -> Result<(), String> {
-    let mut gz = GzDecoder::new(BufReader::new(File::open(path).map_err(|e| e.to_string())?));
+/// Reads a backup through, checking it is a whole dump. Returns the
+/// databases it creates, which a backup from before each game mode had its
+/// own characters database doesn't name.
+fn check(path: &Path) -> Result<Vec<String>, String> {
+    let gz = GzDecoder::new(BufReader::new(File::open(path).map_err(|e| e.to_string())?));
+    let mut reader = BufReader::with_capacity(64 * 1024, gz);
+    let mut databases = Vec::new();
     let mut tail = Tail::default();
-    let mut buf = vec![0; 64 * 1024];
+    let mut line = Vec::new();
     loop {
-        let n = gz.read(&mut buf).map_err(|e| format!("the file is damaged ({e})."))?;
+        line.clear();
+        let n = io::BufRead::read_until(&mut reader, b'\n', &mut line)
+            .map_err(|e| format!("the file is damaged ({e})."))?;
         if n == 0 {
             break;
         }
-        tail.push(&buf[..n]);
+        tail.push(&line);
+        if let Some(name) = created_database(&line) {
+            databases.push(name);
+        }
     }
     if tail.complete() {
-        Ok(())
+        Ok(databases)
     } else {
         Err("the file doesn't hold a whole database dump.".into())
     }
+}
+
+/// The database a dump line creates, if it's a `CREATE DATABASE` line.
+fn created_database(line: &[u8]) -> Option<String> {
+    let rest = line.strip_prefix(CREATE_DATABASE)?;
+    let end = rest.iter().position(|&b| b == b'`')?;
+    String::from_utf8(rest[..end].to_vec()).ok()
 }
 
 /// Replaces the database with a backup: checks the file, stops everything
@@ -389,11 +456,23 @@ pub fn restore(ctx: &Ctx, file: &str) -> Result<(), String> {
 }
 
 fn load(ctx: &Ctx, path: &Path) -> Result<(), String> {
-    ctx.check_cancelled()?;
     let mut cmd = ctx.compose();
-    cmd.args(["exec", "-T", "db", "sh", "-c", LOAD]).stdin(Stdio::piped());
+    cmd.args(["exec", "-T", "db", "sh", "-c", LOAD]);
+    feed(ctx, cmd, path)
+}
+
+/// Feeds a backup to `mariadb` started by `cmd`, into emptied databases.
+fn feed(ctx: &Ctx, mut cmd: Command, path: &Path) -> Result<(), String> {
+    ctx.check_cancelled()?;
+    cmd.stdin(Stdio::piped());
+    let last = Arc::new(Mutex::new(String::new()));
     let lines = ctx.clone();
-    let (mut child, done) = stack::spawn_lines(cmd, move |line| lines.line(line)).map_err(|e| e.to_string())?;
+    let seen = last.clone();
+    let (mut child, done) = stack::spawn_lines(cmd, move |line| {
+        seen.lock().unwrap().clone_from(&line);
+        lines.line(line);
+    })
+    .map_err(|e| e.to_string())?;
     ctx.track(Some(child.id()));
     let mut stdin = child.stdin.take().unwrap();
     let fed = (|| -> io::Result<()> {
@@ -412,10 +491,216 @@ fn load(ctx: &Ctx, path: &Path) -> Result<(), String> {
     let _ = done.join();
     let status = child.wait().map_err(|e| e.to_string());
     ctx.track(None);
+    ctx.check_cancelled()?;
     if !status?.success() {
-        return Err("MariaDB stopped with an error.".into());
+        let last = last.lock().unwrap();
+        return Err(if last.is_empty() {
+            "MariaDB stopped with an error.".into()
+        } else {
+            format!("MariaDB stopped with an error: {last}")
+        });
     }
     fed.map_err(|e| e.to_string())
+}
+
+/// Loads a backup into a throwaway MariaDB container and checks it: every
+/// database it names is there, every table checks OK, and it has accounts
+/// and characters to count. The result is kept with the backup and shown
+/// in its row. The live database is never touched; its counts are read for
+/// comparison when it's running.
+pub fn test_restore(ctx: &Ctx, file: &str) -> Result<(), String> {
+    if parse(file).is_none() {
+        return Err(format!("{file} isn't a backup."));
+    }
+    let path = ctx.backups.join(file);
+    let chars = stack::chars_db(&ctx.dir);
+    ctx.line(format!("Checking {file}…"));
+    let result = match check(&path) {
+        Ok(named) => {
+            let image = db_image(ctx)?;
+            remove_test_container();
+            ctx.line(format!("Starting a throwaway database ({image}) to load it into…"));
+            let started = start_test_container(ctx, &image).and_then(|()| wait_ready(ctx));
+            let result = started.map(|()| {
+                ctx.line(format!("Loading {file}…"));
+                let mut cmd = host::command("docker");
+                cmd.args(["exec", "-i", TEST_CONTAINER, "sh", "-c", LOAD]);
+                feed(ctx, cmd, &path).and_then(|()| inspect(ctx, &named, chars))
+            });
+            remove_test_container();
+            // Docker failing to run the test isn't the backup's fault, and
+            // neither is a cancel: neither is recorded.
+            match result? {
+                Err(e) if ctx.check_cancelled().is_err() => return Err(e),
+                r => r,
+            }
+        }
+        Err(e) => Err(e),
+    };
+
+    let test = RestoreTest {
+        tested: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+        problem: result.as_ref().err().cloned(),
+        counts: result.as_ref().ok().copied(),
+    };
+    if let Err(e) = save_test(&ctx.backups, file, test) {
+        ctx.line(format!("Couldn't save the result: {e}"));
+    }
+    let counts = result.map_err(|e| format!("The restore test failed: {e}"))?;
+    ctx.line(format!("{file} loads, and every table checks OK. It holds {}.", describe(&counts)));
+    if db_running(&ctx.dir) {
+        match live_counts(ctx, chars) {
+            Ok(live) => ctx.line(format!("The live database holds {}.", describe(&live))),
+            Err(e) => ctx.line(format!("Couldn't count the live database: {e}")),
+        }
+    }
+    Ok(())
+}
+
+/// The stack's database image, so the test runs the MariaDB version the backup came from.
+fn db_image(ctx: &Ctx) -> Result<String, String> {
+    let mut config = ctx.compose();
+    config.args(["config", "--format", "json"]);
+    let config: serde_json::Value = serde_json::from_str(&stack::output(config)?).map_err(|e| e.to_string())?;
+    config["services"]["db"]["image"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "The stack has no database image.".into())
+}
+
+fn start_test_container(ctx: &Ctx, image: &str) -> Result<(), String> {
+    let mut run = host::command("docker");
+    // A fixed password is fine for a database nothing can reach.
+    run.args(["run", "--detach", "--quiet", "--name", TEST_CONTAINER, "--network", "none"])
+        .args(["--env", "MARIADB_ROOT_PASSWORD=restore-test", image]);
+    ctx.run(run).map_err(|e| format!("Couldn't start the throwaway database: {e}"))
+}
+
+/// Waits for the test container's MariaDB to take connections, the way
+/// the stack's health check does. `--connect` needs TCP, which the
+/// image's first-start set-up keeps off until it's done.
+fn wait_ready(ctx: &Ctx) -> Result<(), String> {
+    for _ in 0..180 {
+        ctx.check_cancelled()?;
+        let ready = host::command("docker")
+            .args(["exec", TEST_CONTAINER, "healthcheck.sh", "--connect", "--innodb_initialized"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if ready {
+            return Ok(());
+        }
+        let mut running = host::command("docker");
+        running.args(["inspect", "--format", "{{.State.Running}}", TEST_CONTAINER]);
+        if stack::output(running).is_ok_and(|r| r.trim() == "false") {
+            return Err("The throwaway database stopped while starting.".into());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    Err("The throwaway database didn't start in time.".into())
+}
+
+fn remove_test_container() {
+    let _ = host::command("docker")
+        .args(["rm", "--force", "--volumes", TEST_CONTAINER])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+fn in_test_container(script: &str, args: &[&str]) -> Result<String, String> {
+    let mut cmd = host::command("docker");
+    cmd.args(["exec", TEST_CONTAINER, "sh", "-c", script, "sh"]).args(args);
+    stack::output(cmd)
+}
+
+/// Checks the loaded backup and counts what it holds.
+fn inspect(ctx: &Ctx, named: &[String], chars: &str) -> Result<Counts, String> {
+    ctx.line("Checking the loaded tables…");
+    let present = in_test_container(SQL, &[&schemas_sql()])?;
+    let present: Vec<&str> = present.lines().map(str::trim).collect();
+    if let Some(missing) = named.iter().find(|db| !present.contains(&db.as_str())) {
+        return Err(format!("the {missing} database didn't load."));
+    }
+    let report = in_test_container(CHECK, &present)
+        .map_err(|e| format!("mariadb-check stopped with an error: {e}"))?;
+    // The table's name, then what's wrong with it.
+    let problem: Vec<&str> = report.split_whitespace().take(12).collect();
+    if !problem.is_empty() {
+        for line in report.lines() {
+            ctx.line(line);
+        }
+        return Err(format!("a table doesn't check OK: {}", problem.join(" ")));
+    }
+    // The server's mode's characters, else the other mode's, else from
+    // before each mode had its own database, when they were in `ragnarok`.
+    let chars = std::iter::once(chars)
+        .chain(DATABASES[1..].iter().copied())
+        .find(|db| present.contains(db))
+        .unwrap_or("ragnarok");
+    parse_counts(&in_test_container(SQL, &[&counts_sql(chars)])?)
+}
+
+fn live_counts(ctx: &Ctx, chars: &str) -> Result<Counts, String> {
+    let mut cmd = ctx.compose();
+    cmd.args(["exec", "-T", "db", "sh", "-c", SQL, "sh", &counts_sql(chars)]);
+    parse_counts(&stack::output(cmd)?)
+}
+
+fn schemas_sql() -> String {
+    let names: Vec<String> = DATABASES.iter().map(|db| format!("'{db}'")).collect();
+    format!(
+        "SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ({})",
+        names.join(", ")
+    )
+}
+
+/// `chars` is one of `DATABASES`.
+fn counts_sql(chars: &str) -> String {
+    format!(
+        "SELECT (SELECT COUNT(*) FROM ragnarok.login WHERE sex <> 'S'), \
+         (SELECT COUNT(*) FROM `{chars}`.`char`), (SELECT COUNT(*) FROM `{chars}`.inventory)"
+    )
+}
+
+fn parse_counts(out: &str) -> Result<Counts, String> {
+    let numbers: Vec<u64> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
+    match numbers[..] {
+        [accounts, characters, items] => Ok(Counts {
+            accounts,
+            characters,
+            items,
+        }),
+        _ => Err(format!("couldn't count the accounts and characters ({}).", out.trim())),
+    }
+}
+
+fn describe(c: &Counts) -> String {
+    let n = |n: u64, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    format!(
+        "{}, {} and {}",
+        n(c.accounts, "account", "accounts"),
+        n(c.characters, "character", "characters"),
+        n(c.items, "inventory item", "inventory items")
+    )
+}
+
+fn read_tests(dir: &Path) -> BTreeMap<String, RestoreTest> {
+    fs::read(dir.join(TESTS))
+        .ok()
+        .and_then(|t| serde_json::from_slice(&t).ok())
+        .unwrap_or_default()
+}
+
+/// Keeps `test` as `file`'s result, dropping the results of backups that are gone.
+fn save_test(dir: &Path, file: &str, test: RestoreTest) -> io::Result<()> {
+    let mut tests = read_tests(dir);
+    tests.insert(file.to_owned(), test);
+    tests.retain(|f, _| dir.join(f).exists());
+    let partial = dir.join(format!("{TESTS}.partial"));
+    fs::write(&partial, serde_json::to_vec_pretty(&tests)?)?;
+    fs::rename(partial, dir.join(TESTS))
 }
 
 fn human_size(bytes: u64) -> String {
@@ -485,6 +770,65 @@ mod tests {
         assert!(due(None, now));
         assert!(!due(Some(at("2026-10-14 12:00:01")), now));
         assert!(due(Some(at("2026-10-14 12:00:00")), now));
+    }
+
+    #[test]
+    fn finds_the_databases_a_dump_creates() {
+        let dir = std::env::temp_dir().join(format!("rag-wrapper-check-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("b.sql.gz");
+        let write = |text: &[u8]| {
+            let mut gz = GzEncoder::new(File::create(&path).unwrap(), Compression::default());
+            gz.write_all(text).unwrap();
+            gz.finish().unwrap();
+        };
+        write(
+            b"CREATE DATABASE /*!32312 IF NOT EXISTS*/ `ragnarok` /*!40100 DEFAULT CHARACTER SET utf8mb4 */;\n\
+              USE `ragnarok`;\nINSERT INTO login VALUES (1,'CREATE DATABASE /*!32312 IF NOT EXISTS*/ `x`');\n\
+              CREATE DATABASE /*!32312 IF NOT EXISTS*/ `ragnarok_prere` /*!40100 DEFAULT CHARACTER SET utf8mb4 */;\n\
+              -- Dump completed on 2026-10-15 12:07:58\n",
+        );
+        assert_eq!(check(&path), Ok(vec!["ragnarok".to_owned(), "ragnarok_prere".to_owned()]));
+        write(b"USE `ragnarok`;\nINSERT INTO login VALUES (1);\n");
+        assert!(check(&path).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reads_counts() {
+        let counts = Counts {
+            accounts: 12,
+            characters: 1,
+            items: 900,
+        };
+        assert_eq!(parse_counts("12\t1\t900\n"), Ok(counts));
+        assert!(parse_counts("ERROR 1146 (42S02): Table 'ragnarok_re.char' doesn't exist").is_err());
+        assert_eq!(describe(&counts), "12 accounts, 1 character and 900 inventory items");
+    }
+
+    #[test]
+    fn keeps_test_results_of_backups_still_here() {
+        let dir = std::env::temp_dir().join(format!("rag-wrapper-tests-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let kept = file_name("20261015-120000", Reason::Manual);
+        let gone = file_name("20261014-120000", Reason::Daily);
+        fs::write(dir.join(&kept), b"x").unwrap();
+        fs::write(dir.join(&gone), b"x").unwrap();
+        let test = |problem: Option<&str>| RestoreTest {
+            tested: "2026-10-15 12:30".into(),
+            problem: problem.map(str::to_owned),
+            counts: None,
+        };
+        save_test(&dir, &gone, test(Some("the file is damaged."))).unwrap();
+        fs::remove_file(dir.join(&gone)).unwrap();
+        save_test(&dir, &kept, test(None)).unwrap();
+
+        assert_eq!(read_tests(&dir).into_keys().collect::<Vec<_>>(), std::slice::from_ref(&kept));
+        let listed = list(&dir);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].test, Some(test(None)));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
