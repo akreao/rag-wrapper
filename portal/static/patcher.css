@@ -15,3 +15,12 @@ button.plain { background: #34353b; font-weight: 400; }
 button[disabled] { background: #34353b; color: #6b6b70; cursor: default; }
 .links { position: absolute; bottom: 14px; font-size: 13px; }
 .links a { color: #7ea2ff; margin-right: 16px; }
+/* The newest post from the news page, between the progress and the buttons. */
+#news { height: 72px; overflow-y: auto; margin: 10px 0 0; padding: 6px 10px; background: #212226;
+  border: 1px solid #34353b; border-radius: 6px; font-size: 13px; }
+#news h2 { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+#news h3, #news h4 { font-size: 13px; margin: 0 0 4px; }
+#news p, #news ul, #news ol { margin: 0 0 6px; }
+#news ul, #news ol { padding-left: 20px; }
+#news a { color: #7ea2ff; }
+#news img { display: none; }

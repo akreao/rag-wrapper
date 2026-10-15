@@ -11,6 +11,7 @@
 <p id="status">Checking for updates...</p>
 <div class="bar"><div id="progress"></div></div>
 <p id="detail" class="muted">&nbsp;</p>
+{{if .News}}<div id="news">{{.News}}</div>{{end}}
 <p class="buttons">
   <button id="play" disabled>Play</button>
   <button id="retry" class="plain" style="display: none">Try again</button>
@@ -20,6 +21,7 @@
 <p class="links">
   <a href="{{.Account}}" data-open>Your account</a>
   <a href="{{.Connect}}" data-open>How to connect</a>
+  <a href="{{.NewsURL}}" data-open>News</a>
 </p>
 <script src="/static/patcher.js"></script>
 </body>

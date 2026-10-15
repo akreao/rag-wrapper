@@ -196,6 +196,8 @@ func (a *app) patcherPage(w http.ResponseWriter, r *http.Request) {
 		"ServerName": a.conn.ServerName(),
 		"Account":    base + "/account",
 		"Connect":    base + "/connect",
+		"NewsURL":    base + "/news",
+		"News":       a.conn.news().Latest,
 	})
 	if err != nil {
 		log.Printf("render patcher: %v", err)
