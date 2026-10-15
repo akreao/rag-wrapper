@@ -745,6 +745,12 @@ async function refreshBackups() {
           confirming = null;
           refreshBackups();
         });
+        if (b.test?.problem) {
+          const failed = document.createElement("span");
+          failed.className = "error";
+          failed.textContent = ` This backup failed its restore test on ${b.test.tested}: ${b.test.problem}`;
+          p.append(failed);
+        }
         p.append(document.createElement("br"), yes, no);
         li.append(p);
       }
