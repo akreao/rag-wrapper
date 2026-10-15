@@ -267,6 +267,24 @@ func (s *store) searchAccounts(ctx context.Context, q string, limit, offset int)
 	return accounts, rows.Err()
 }
 
+// accountsInGroup lists the IDs of player accounts in a group, lowest first.
+func (s *store) accountsInGroup(ctx context.Context, group int) ([]int, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT `account_id` FROM `login` WHERE `group_id` = ? AND `sex` <> 'S' ORDER BY `account_id`", group)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *store) setGroup(ctx context.Context, id, group int) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE `login` SET `group_id` = ? WHERE `account_id` = ? AND `sex` <> 'S'", group, id)
 	return err
