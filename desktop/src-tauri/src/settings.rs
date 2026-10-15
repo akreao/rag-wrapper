@@ -2,24 +2,18 @@
 //! the stack's `overrides/` folder. Compose mounts that folder into each
 //! rAthena container as `conf/user/`, and `entrypoint.sh` imports whatever
 //! it finds there after the stock configs. The app only edits the keys it
-//! shows, so lines added to the same files by hand are kept.
+//! shows, so lines added to the same files by hand are kept. Rates and
+//! every other `conf/battle` option are in the battle config editor
+//! (`battleconf.rs`).
 
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// What the Settings screen shows. Rates are multipliers (1 = official),
-/// the death penalty is the percentage of a level's exp lost.
+/// What the Settings screen shows.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct GameSettings {
-    pub base_exp: f64,
-    pub job_exp: f64,
-    pub drop_common: f64,
-    pub drop_equip: f64,
-    pub drop_card: f64,
-    pub drop_mvp: f64,
-    pub death_penalty: f64,
     pub server_name: String,
     pub motd: String,
     pub player_commands: bool,
@@ -28,34 +22,12 @@ pub struct GameSettings {
     pub player_commands_locked: bool,
 }
 
-const BATTLE: &str = "battle_conf.txt";
 const CHAR: &str = "char_conf.txt";
 const MAP: &str = "map_conf.txt";
 const MOTD: &str = "motd.txt";
 const GROUPS: &str = "groups.yml";
 
-/// Each rate and the battle config keys it sets, all in rAthena's units
-/// where 100 is 1x. Drop rates cover normal, boss and MVP monsters alike.
-const RATES: &[(&str, &[&str])] = &[
-    ("base_exp", &["base_exp_rate"]),
-    ("job_exp", &["job_exp_rate"]),
-    (
-        "drop_common",
-        &[
-            "item_rate_common", "item_rate_common_boss", "item_rate_common_mvp",
-            "item_rate_heal", "item_rate_heal_boss", "item_rate_heal_mvp",
-            "item_rate_use", "item_rate_use_boss", "item_rate_use_mvp",
-        ],
-    ),
-    ("drop_equip", &["item_rate_equip", "item_rate_equip_boss", "item_rate_equip_mvp"]),
-    ("drop_card", &["item_rate_card", "item_rate_card_boss", "item_rate_card_mvp"]),
-    ("drop_mvp", &["item_rate_mvp"]),
-    // Each 100 is 1% of the level's exp, so the same scale works.
-    ("death_penalty", &["death_penalty_base", "death_penalty_job"]),
-];
-
 const DEFAULT_SERVER_NAME: &str = "rAthena";
-const MAX_RATE: f64 = 1000.0;
 const MAX_MOTD_LINES: usize = 20;
 const MAX_MOTD_LINE: usize = 200;
 
@@ -72,58 +44,16 @@ const PLAYER_COMMANDS: &[&str] = &[
     "autoloottype", "autotrade", "request", "go", "breakguild", "channel", "langtype",
 ];
 
-impl GameSettings {
-    fn rate(&self, name: &str) -> f64 {
-        match name {
-            "base_exp" => self.base_exp,
-            "job_exp" => self.job_exp,
-            "drop_common" => self.drop_common,
-            "drop_equip" => self.drop_equip,
-            "drop_card" => self.drop_card,
-            "drop_mvp" => self.drop_mvp,
-            "death_penalty" => self.death_penalty,
-            _ => unreachable!("unknown rate {name}"),
-        }
-    }
-
-    fn rate_mut(&mut self, name: &str) -> &mut f64 {
-        match name {
-            "base_exp" => &mut self.base_exp,
-            "job_exp" => &mut self.job_exp,
-            "drop_common" => &mut self.drop_common,
-            "drop_equip" => &mut self.drop_equip,
-            "drop_card" => &mut self.drop_card,
-            "drop_mvp" => &mut self.drop_mvp,
-            "death_penalty" => &mut self.death_penalty,
-            _ => unreachable!("unknown rate {name}"),
-        }
-    }
-}
-
 pub fn load(dir: &Path) -> GameSettings {
-    let battle = ConfFile::load(&dir.join(BATTLE));
     let char = ConfFile::load(&dir.join(CHAR));
     let groups = fs::read_to_string(dir.join(GROUPS)).ok();
 
-    let mut s = GameSettings {
-        base_exp: 1.0,
-        job_exp: 1.0,
-        drop_common: 1.0,
-        drop_equip: 1.0,
-        drop_card: 1.0,
-        drop_mvp: 1.0,
-        death_penalty: 1.0,
+    GameSettings {
         server_name: char.get("server_name").unwrap_or_else(|| DEFAULT_SERVER_NAME.into()),
         motd: fs::read_to_string(dir.join(MOTD)).unwrap_or_default().trim_end().to_owned(),
         player_commands: groups.is_some(),
         player_commands_locked: groups.as_deref().is_some_and(|g| !g.starts_with(GROUPS_MARKER)),
-    };
-    for (name, keys) in RATES {
-        if let Some(v) = battle.get(keys[0]).and_then(|v| v.parse::<f64>().ok()) {
-            *s.rate_mut(name) = v / 100.0;
-        }
     }
-    s
 }
 
 /// Writes the override files. Returns whether anything changed, in which
@@ -132,17 +62,6 @@ pub fn save(dir: &Path, new: &GameSettings) -> Result<bool, String> {
     validate(new)?;
     let old = load(dir);
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-
-    let mut battle = ConfFile::load(&dir.join(BATTLE));
-    for (name, keys) in RATES {
-        // Official rates are left out, so the stock config applies.
-        let value = to_units(new.rate(name));
-        let value = (value != 100).then(|| value.to_string());
-        for key in *keys {
-            battle.set(key, value.as_deref());
-        }
-    }
-    battle.save().map_err(|e| e.to_string())?;
 
     let mut char = ConfFile::load(&dir.join(CHAR));
     let name = new.server_name.trim();
@@ -173,29 +92,7 @@ pub fn save(dir: &Path, new: &GameSettings) -> Result<bool, String> {
     Ok(saved != old)
 }
 
-/// A multiplier in rAthena's percent units, where 100 is 1x.
-fn to_units(x: f64) -> i64 {
-    (x * 100.0).round() as i64
-}
-
 fn validate(s: &GameSettings) -> Result<(), String> {
-    for (name, label) in [
-        ("base_exp", "Base exp"),
-        ("job_exp", "Job exp"),
-        ("drop_common", "Common item drops"),
-        ("drop_equip", "Equipment drops"),
-        ("drop_card", "Card drops"),
-        ("drop_mvp", "MVP rewards"),
-    ] {
-        let x = s.rate(name);
-        if !x.is_finite() || !(0.01..=MAX_RATE).contains(&x) {
-            return Err(format!("{label} must be a rate from 0.01 to {MAX_RATE}."));
-        }
-    }
-    if !s.death_penalty.is_finite() || !(0.0..=100.0).contains(&s.death_penalty) {
-        return Err("Exp lost on death must be a percentage from 0 to 100.".into());
-    }
-
     // rAthena keeps 19 characters, and the client stores guild emblems in
     // a folder named after the server, so Windows filename rules apply.
     let name = s.server_name.trim();
@@ -250,13 +147,13 @@ fn remove(path: &Path) -> Result<(), String> {
 /// An rAthena `key: value` config file, edited line by line so comments
 /// and keys the app doesn't manage stay as they are. A missing file reads
 /// as empty, and a file left with nothing in it is deleted.
-struct ConfFile {
+pub(crate) struct ConfFile {
     path: std::path::PathBuf,
     lines: Vec<String>,
 }
 
 impl ConfFile {
-    fn load(path: &Path) -> Self {
+    pub(crate) fn load(path: &Path) -> Self {
         let text = fs::read_to_string(path).unwrap_or_default();
         Self {
             path: path.to_owned(),
@@ -273,14 +170,14 @@ impl ConfFile {
     }
 
     /// rAthena reads every line, so the last one with the key wins.
-    fn get(&self, key: &str) -> Option<String> {
+    pub(crate) fn get(&self, key: &str) -> Option<String> {
         self.lines.iter().rev().find_map(|line| {
             (Self::key_of(line)? == key).then(|| line.split_once(':').unwrap().1.trim().to_owned())
         })
     }
 
     /// Sets the key, or removes every line for it when `value` is `None`.
-    fn set(&mut self, key: &str, value: Option<&str>) {
+    pub(crate) fn set(&mut self, key: &str, value: Option<&str>) {
         let mut placed = false;
         self.lines.retain_mut(|line| {
             if Self::key_of(line) != Some(key) {
@@ -300,7 +197,7 @@ impl ConfFile {
         }
     }
 
-    fn save(&self) -> std::io::Result<()> {
+    pub(crate) fn save(&self) -> std::io::Result<()> {
         if self.lines.iter().all(|l| l.trim().is_empty()) {
             return match fs::remove_file(&self.path) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
@@ -328,7 +225,6 @@ mod tests {
     fn defaults_write_nothing() {
         let dir = temp_dir("defaults");
         let s = load(&dir);
-        assert_eq!(s.base_exp, 1.0);
         assert_eq!(s.server_name, "rAthena");
         assert!(!s.player_commands);
         assert!(!save(&dir, &s).unwrap());
@@ -339,24 +235,15 @@ mod tests {
     #[test]
     fn round_trip_keeps_hand_edits() {
         let dir = temp_dir("roundtrip");
-        fs::write(dir.join(BATTLE), "// mine\nbase_exp_rate: 300\nmulti_level_up: yes\n").unwrap();
+        fs::write(dir.join(CHAR), "// mine\nlogin_port: 6900\n").unwrap();
 
         let mut s = load(&dir);
-        assert_eq!(s.base_exp, 3.0);
-        s.base_exp = 5.0;
-        s.drop_card = 2.5;
-        s.death_penalty = 0.0;
         s.server_name = "MyServer".into();
         s.motd = "Welcome!\n\nHave fun".into();
         s.player_commands = true;
         assert!(save(&dir, &s).unwrap());
 
-        let battle = fs::read_to_string(dir.join(BATTLE)).unwrap();
-        assert!(battle.starts_with("// mine\nbase_exp_rate: 500\nmulti_level_up: yes\n"));
-        assert!(battle.contains("item_rate_card_boss: 250\n"));
-        assert!(battle.contains("death_penalty_job: 0\n"));
-        assert!(!battle.contains("job_exp_rate"));
-        assert_eq!(fs::read_to_string(dir.join(CHAR)).unwrap(), "server_name: MyServer\n");
+        assert_eq!(fs::read_to_string(dir.join(CHAR)).unwrap(), "// mine\nlogin_port: 6900\nserver_name: MyServer\n");
         assert_eq!(fs::read_to_string(dir.join(MAP)).unwrap(), "motd_txt: conf/user/motd.txt\n");
         assert!(fs::read_to_string(dir.join(GROUPS)).unwrap().contains("      autoloot: true\n"));
 
@@ -365,17 +252,26 @@ mod tests {
         assert!(!save(&dir, &again).unwrap());
 
         // Back to official: the app's lines go, the hand-written ones stay.
-        again.base_exp = 1.0;
-        again.drop_card = 1.0;
-        again.death_penalty = 1.0;
         again.server_name = "rAthena".into();
         again.motd = String::new();
         again.player_commands = false;
         assert!(save(&dir, &again).unwrap());
-        assert_eq!(fs::read_to_string(dir.join(BATTLE)).unwrap(), "// mine\nmulti_level_up: yes\n");
-        for f in [CHAR, MAP, MOTD, GROUPS] {
+        assert_eq!(fs::read_to_string(dir.join(CHAR)).unwrap(), "// mine\nlogin_port: 6900\n");
+        for f in [MAP, MOTD, GROUPS] {
             assert!(!dir.join(f).exists(), "{f} should be gone");
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn battle_conf_is_left_to_the_editor() {
+        let dir = temp_dir("battle");
+        let battle = "base_exp_rate: 300\nitem_rate_card: 200\ndeath_penalty_base: 0\n";
+        fs::write(dir.join("battle_conf.txt"), battle).unwrap();
+        let mut s = load(&dir);
+        s.motd = "Hi".into();
+        assert!(save(&dir, &s).unwrap());
+        assert_eq!(fs::read_to_string(dir.join("battle_conf.txt")).unwrap(), battle);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -400,9 +296,6 @@ mod tests {
             f(&mut s);
             save(&dir, &s).is_err()
         };
-        assert!(bad(|s| s.base_exp = 0.0));
-        assert!(bad(|s| s.drop_mvp = 5000.0));
-        assert!(bad(|s| s.death_penalty = -1.0));
         assert!(bad(|s| s.server_name = "My Server".into()));
         assert!(bad(|s| s.server_name = "a/b".into()));
         assert!(bad(|s| s.server_name = "x".repeat(20)));

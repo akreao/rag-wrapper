@@ -1,0 +1,11 @@
+# Battle config editor
+
+The desktop app's battle config editor (roadmap feature 12): a window of its own for every option in rAthena's `conf/battle/*.conf` files, which replaces the exp rate fields on the Settings screen.
+
+- **Edits go in `overrides/battle_conf.txt`, never in rAthena's own files.** rAthena reads that file after every battle conf file, so it wins, and a server update or rebuild can't undo a change. Only options changed from their default get a line, and setting one back to its default removes the line.
+- **The options and comments come from the server's image.** The editor copies `conf/battle/` out of the rAthena image the first time it opens after a build or pull, so what it lists always matches the rAthena commit that runs. Before the first build there's nothing to show, and it says to start the server once.
+- **Every battle option lives only in the editor, rates included** (Steven's call). The Settings screen's exp rate, drop rate and exp-lost-on-death fields are gone, so Settings keeps the server name, message of the day and player commands, and `battle_conf.txt` has one writer. A drop rate is now set per key (normal, boss and MVP monsters separately) rather than with one multiplier. Values Settings wrote before stay in the file and show in the editor as changed.
+- **Values are checked the way rAthena reads them**: yes/no (or on/off, true/false) or a whole number, hex allowed, for every option, and one character, not `/`, `%` or `$`, for the two command symbols, which must differ. rAthena's own minimum and maximum for each option aren't in the image, so an out-of-range number is caught by the map server, which logs a warning and uses the default.
+- **The editor shows the values the server turned down** (Steven's call). It reads the running map server's log since its last start for rAthena's "Value for setting ... is invalid" warnings and marks each such option with its allowed range and the value used instead, for as long as the option still has the rejected value.
+- **`charcommand_symbol` defaults to `*`**, the stack's value (see `server-settings.md`), not rAthena's `#`.
+- **Values show as rAthena stores them** (Steven's call). Rates are percentages, 100 for official and 200 for double, matching the comments above each option and rAthena's docs, rather than the multipliers the Settings screen used to show.

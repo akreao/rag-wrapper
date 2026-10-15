@@ -117,7 +117,7 @@ pub fn exists(name: &str) -> bool {
     image_id(name).is_some()
 }
 
-fn image_id(name: &str) -> Option<String> {
+pub fn image_id(name: &str) -> Option<String> {
     let mut cmd = host::command("docker");
     cmd.args(["image", "inspect", "--format", "{{.Id}}", name]);
     stack::output(cmd).ok().map(|id| id.trim().to_owned())

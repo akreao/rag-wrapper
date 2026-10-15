@@ -127,30 +127,6 @@
   <main id="settings" hidden>
     <form id="game-form" class="card">
       <h2>Game settings</h2>
-      <div class="grid">
-        <label>Base exp rate
-          <input id="base_exp" class="rate" type="number" min="0.01" max="1000" step="any" required>
-        </label>
-        <label>Job exp rate
-          <input id="job_exp" class="rate" type="number" min="0.01" max="1000" step="any" required>
-        </label>
-        <label>Common and usable item drops
-          <input id="drop_common" class="rate" type="number" min="0.01" max="1000" step="any" required>
-        </label>
-        <label>Equipment drops
-          <input id="drop_equip" class="rate" type="number" min="0.01" max="1000" step="any" required>
-        </label>
-        <label>Card drops
-          <input id="drop_card" class="rate" type="number" min="0.01" max="1000" step="any" required>
-        </label>
-        <label>MVP rewards
-          <input id="drop_mvp" class="rate" type="number" min="0.01" max="1000" step="any" required>
-        </label>
-      </div>
-      <p class="hint">Rates are multipliers: 1 is official, 2 is double. Drop rates apply to every monster, bosses and MVPs included.</p>
-      <label>Exp lost on death (% of the level)
-        <input id="death_penalty" type="number" min="0" max="100" step="any" required>
-      </label>
       <label>Server name
         <input id="server_name" required maxlength="19">
       </label>
@@ -171,9 +147,10 @@
       </p>
       <div class="row">
         <button id="game-save" class="primary" type="submit">Save</button>
+        <button id="open-battle-conf" type="button">Battle config…</button>
         <button id="open-overrides" type="button">Open override folder</button>
       </div>
-      <p class="hint">For anything not on this screen, edit rAthena's config files in the override folder.</p>
+      <p class="hint">Exp and drop rates, the exp lost on death and every other option in rAthena's <code>conf/battle</code> files are in <strong>Battle config</strong>. For other config files, edit them in the override folder.</p>
     </form>
 
     <form id="build-form" class="card">

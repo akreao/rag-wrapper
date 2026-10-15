@@ -1,4 +1,5 @@
 mod backup;
+mod battleconf;
 mod clientpatch;
 mod envfile;
 mod host;
@@ -208,6 +209,65 @@ fn game_settings(app: State<App>) -> settings::GameSettings {
 fn save_game_settings(app: State<App>, settings: settings::GameSettings) -> Result<bool, String> {
     settings::save(&app.overrides_dir(), &settings)
 }
+
+/// The battle config editor's files: `conf/battle/*.conf` from the
+/// server's image with the overrides folder's values. The first read after
+/// a build copies them out of the image, so it runs off the main thread.
+#[tauri::command]
+async fn battle_conf(app: State<'_, App>) -> Result<battleconf::BattleConf, String> {
+    let (dir, overrides, env) = (app.dir.clone(), app.overrides_dir(), app.env());
+    tauri::async_runtime::spawn_blocking(move || {
+        let env = env.ok_or("Set up the server first.")?;
+        battleconf::load(&dir, &overrides, &env, &map_log(&dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The running map server's log, or nothing when it isn't running.
+fn map_log(dir: &std::path::Path) -> String {
+    let running = stack::status(dir).unwrap_or_default().iter().any(|s| s.service == "map" && s.state == "running");
+    if !running {
+        return String::new();
+    }
+    let mut logs = stack::compose(dir);
+    logs.args(["logs", "--no-log-prefix", "map"]);
+    stack::output(logs).unwrap_or_default()
+}
+
+/// Saves battle config values (option to value) as overrides. Returns
+/// whether anything changed, in which case the game servers need a restart.
+#[tauri::command]
+async fn save_battle_conf(app: State<'_, App>, changes: std::collections::BTreeMap<String, String>) -> Result<bool, String> {
+    let (dir, overrides, env) = (app.dir.clone(), app.overrides_dir(), app.env());
+    tauri::async_runtime::spawn_blocking(move || {
+        let env = env.ok_or("Set up the server first.")?;
+        battleconf::save(&dir, &overrides, &env, &changes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Opens the battle config editor in its own window, or brings it to the
+/// front. Async, because building a window from a sync command can
+/// deadlock on Linux.
+#[tauri::command]
+async fn open_battle_conf(handle: AppHandle) -> Result<(), String> {
+    if let Some(window) = handle.get_webview_window(BATTLE_CONF_WINDOW) {
+        let _ = window.unminimize();
+        return window.set_focus().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(&handle, BATTLE_CONF_WINDOW, tauri::WebviewUrl::App("battle-conf.html".into()))
+        .title("Battle config - rag-wrapper")
+        .inner_size(960.0, 760.0)
+        .min_inner_size(640.0, 480.0)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// The battle config editor's window label (see `capabilities/default.json`).
+const BATTLE_CONF_WINDOW: &str = "battle-conf";
 
 /// Opens a web page (the account portal, an update's changes) in the browser.
 #[tauri::command]
@@ -696,6 +756,9 @@ pub fn run() {
             game_settings,
             save_game_settings,
             open_overrides,
+            battle_conf,
+            save_battle_conf,
+            open_battle_conf,
             services,
             live,
             run_task,
@@ -712,7 +775,9 @@ pub fn run() {
             follow_logs
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            // Only the main window's close stops the server; the battle
+            // config editor just closes.
+            if let (tauri::WindowEvent::CloseRequested { api, .. }, "main") = (event, window.label()) {
                 api.prevent_close();
                 let handle = window.app_handle().clone();
                 let app = handle.state::<App>();

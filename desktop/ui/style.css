@@ -200,7 +200,6 @@ label.check { display: flex; gap: 8px; align-items: baseline; }
 label.check input { width: auto; margin: 0; }
 label[hidden] { display: none; }
 
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); column-gap: 16px; }
 .row { display: flex; gap: 8px; margin-bottom: 10px; }
 .row[hidden] { display: none; }
 .notice {
@@ -245,3 +244,38 @@ label[hidden] { display: none; }
 .files .more { font-size: 12px; }
 .error-list { margin: 0 0 10px; padding-left: 18px; font-size: 12px; color: var(--bad); }
 .error-list[hidden], #patch-error[hidden] { display: none; }
+
+/* Battle config editor window */
+body.battle-conf header select { width: auto; margin: 0; min-width: 200px; }
+body.battle-conf header input[type="search"] { width: 220px; margin: 0; }
+body.battle-conf header h1 { margin-right: 4px; }
+#editor { overflow: auto; }
+#editor[hidden], #error[hidden] { display: none; }
+#editor .group { max-width: 860px; padding: 10px 0; border-top: 1px solid var(--border); }
+#editor .group.heading .comment { font-weight: 600; color: var(--text); }
+#editor .comment, #intro {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+  font: 12px/1.45 ui-monospace, monospace;
+  color: var(--muted);
+}
+#intro { max-width: 860px; margin-bottom: 12px; }
+#editor .file-heading { margin: 18px 0 2px; }
+#editor .setting {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 140px minmax(90px, auto) 70px;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+#editor .setting label { margin: 0; overflow-wrap: anywhere; }
+#editor .setting input, #editor .setting select { margin: 0; font: 13px ui-monospace, monospace; }
+#editor .setting .default { font-size: 12px; white-space: nowrap; }
+#editor .setting .reset { padding: 2px 8px; font-size: 12px; }
+#editor .setting .reset[hidden] { visibility: hidden; display: block; }
+#editor .setting .note { grid-column: 1 / -1; margin: 0; }
+#editor .setting .note.error { font-size: 12px; }
+#editor .setting.changed { background: color-mix(in srgb, var(--accent) 10%, var(--card)); }
+#editor .setting.edited { background: color-mix(in srgb, var(--busy) 18%, var(--card)); }
+#editor .setting.changed label code, #editor .setting.edited label code { font-weight: 600; }
