@@ -1,8 +1,9 @@
 #!/bin/sh
-# Usage: entrypoint.sh init|login|char|map|web
+# Usage: entrypoint.sh init|login|char|map|web|config
 #
 # Writes rAthena's conf/import overrides from the environment, then either
 # prepares the database (init) or runs one server in the foreground.
+# config writes the files and stops, which the tests use.
 set -eu
 
 : "${DB_HOST:=db}"
@@ -40,7 +41,8 @@ case "${INTER_USER}${INTER_PASSWORD}${ADMIN_USER}${ADMIN_PASSWORD}" in
 		;;
 esac
 
-cd /rathena
+# RATHENA_DIR lets the tests run this on a copy outside the image.
+cd "${RATHENA_DIR:-/rathena}"
 
 # conf/user is the overrides folder from the host: the desktop app's
 # Settings screen writes there, and so can people by hand. Each file in it
@@ -444,8 +446,9 @@ case "${1:-}" in
 	char)  exec ./char-server ;;
 	map)   exec ./map-server ;;
 	web)   exec ./web-server ;;
+	config) ;;
 	*)
-		echo "usage: $0 init|login|char|map|web" >&2
+		echo "usage: $0 init|login|char|map|web|config" >&2
 		exit 64
 		;;
 esac

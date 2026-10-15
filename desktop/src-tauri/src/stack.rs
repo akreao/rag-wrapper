@@ -410,6 +410,67 @@ pub fn stack_dir_override() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    fn write(path: &Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn install_replaces_the_stack_files_and_keeps_the_user_s() {
+        let root = std::env::temp_dir().join(format!("stack-install-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (bundled, dest) = (root.join("bundled"), root.join("stack"));
+        write(&bundled.join("compose.yaml"), "new compose");
+        write(&bundled.join("docker/rathena/entrypoint.sh"), "new entrypoint");
+        write(&bundled.join("portal/main.go"), "new portal");
+        write(&bundled.join("overrides/README.md"), "new readme");
+
+        write(&dest.join("compose.yaml"), "old compose");
+        write(&dest.join("docker/rathena/removed.sh"), "from an older version");
+        write(&dest.join("portal/removed.go"), "from an older version");
+        write(&dest.join(".env"), "DB_PASSWORD=mine");
+        write(&dest.join("overrides/char_conf.txt"), "server_name: Mine");
+        write(&dest.join("mods/enabled.txt"), "warper");
+        write(&dest.join("patches/2026-10-15-1.thor"), "patch");
+
+        install(&bundled, &dest).unwrap();
+
+        let read = |rel: &str| fs::read_to_string(dest.join(rel)).unwrap();
+        assert_eq!(read("compose.yaml"), "new compose");
+        assert_eq!(read("docker/rathena/entrypoint.sh"), "new entrypoint");
+        assert_eq!(read("overrides/README.md"), "new readme");
+        assert_eq!(read(".env.example"), ENV_EXAMPLE);
+        // The build folders are replaced whole, so their prebuilt image names match.
+        assert!(!dest.join("docker/rathena/removed.sh").exists());
+        assert!(!dest.join("portal/removed.go").exists());
+        // What the user made survives an app update.
+        assert_eq!(read(".env"), "DB_PASSWORD=mine");
+        assert_eq!(read("overrides/char_conf.txt"), "server_name: Mine");
+        assert_eq!(read("mods/enabled.txt"), "warper");
+        assert_eq!(read("patches/2026-10-15-1.thor"), "patch");
+
+        // A first install makes the folders the containers mount.
+        let fresh = root.join("fresh");
+        install(&bundled, &fresh).unwrap();
+        for dir in [OVERRIDES, PATCHES, MODS] {
+            assert!(fresh.join(dir).is_dir(), "{dir}");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn chars_db_follows_the_game_mode() {
+        let dir = std::env::temp_dir().join(format!("stack-chars-db-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(chars_db(&dir), "ragnarok_prere");
+        fs::write(dir.join(".env"), "PRERE=yes\n").unwrap();
+        assert_eq!(chars_db(&dir), "ragnarok_prere");
+        fs::write(dir.join(".env"), "PRERE=no\n").unwrap();
+        assert_eq!(chars_db(&dir), "ragnarok_re");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn parses_both_ps_formats() {
         let lines = r#"{"Service":"db","State":"running","Health":"healthy","ExitCode":0,"Publishers":[]}

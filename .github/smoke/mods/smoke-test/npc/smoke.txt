@@ -1,0 +1,7 @@
+// Logs a line the smoke test looks for, with the name of the mod's item,
+// once the map server has loaded the mod's scripts and item database.
+-	script	SmokeTest	-1,{
+OnInit:
+	debugmes "Smoke test mod loaded: " + getitemname(64999);
+	end;
+}

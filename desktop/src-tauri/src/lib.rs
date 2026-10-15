@@ -145,16 +145,27 @@ fn setup(app: State<App>, admin_user: String, admin_password: String, public_ip:
         net::check_address(ip)?;
     }
 
-    let path = app.env_path();
+    write_setup(&app.env_path(), || stack::volume_exists("db-data"), &admin_user, &admin_password, public_ip)
+}
+
+/// `setup`'s changes to the `.env` at `path`, made from `.env.example` when
+/// there's none. `db_exists` says whether the database volume is there.
+fn write_setup(
+    path: &std::path::Path,
+    db_exists: impl FnOnce() -> bool,
+    admin_user: &str,
+    admin_password: &str,
+    public_ip: Option<String>,
+) -> Result<(), String> {
     let fresh = !path.exists();
     if fresh {
-        std::fs::write(&path, stack::ENV_EXAMPLE).map_err(|e| e.to_string())?;
+        std::fs::write(path, stack::ENV_EXAMPLE).map_err(|e| e.to_string())?;
     }
-    let mut env = EnvFile::load(&path).map_err(|e| e.to_string())?;
+    let mut env = EnvFile::load(path).map_err(|e| e.to_string())?;
 
     // Replace the example's placeholder passwords, unless a database made
     // with them already exists and would stop accepting new ones.
-    if fresh && !stack::volume_exists("db-data") {
+    if fresh && !db_exists() {
         for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
             env.set(key, &envfile::random_password(20).map_err(|e| e.to_string())?);
         }
@@ -165,8 +176,8 @@ fn setup(app: State<App>, admin_user: String, admin_password: String, public_ip:
             update::skip(&mut env, &update);
         }
     }
-    env.set("ADMIN_USER", &admin_user);
-    env.set("ADMIN_PASSWORD", &admin_password);
+    env.set("ADMIN_USER", admin_user);
+    env.set("ADMIN_PASSWORD", admin_password);
     apply_public_ip(&mut env, public_ip);
     env.save().map_err(|e| e.to_string())
 }
@@ -828,4 +839,97 @@ fn stop_and_exit(handle: AppHandle) {
         }
     }
     handle.exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("lib-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn keys(text: &str) -> Vec<&str> {
+        text.lines()
+            .filter(|l| !l.starts_with('#'))
+            .filter_map(|l| l.split_once('=').map(|(k, _)| k))
+            .collect()
+    }
+
+    #[test]
+    fn first_setup_writes_env_from_the_example() {
+        let dir = temp_dir("setup");
+        let path = dir.join(".env");
+        write_setup(&path, || false, "admin", "secret_1", Some("10.8.0.1".into())).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let env = EnvFile::parse(&text);
+        let example = EnvFile::parse(stack::ENV_EXAMPLE);
+        // The example's settings and comments are kept, in their order.
+        assert!(text.starts_with(stack::ENV_EXAMPLE.lines().next().unwrap()));
+        assert_eq!(keys(&text)[..keys(stack::ENV_EXAMPLE).len()], keys(stack::ENV_EXAMPLE)[..]);
+
+        let mut passwords = Vec::new();
+        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
+            let value = env.get(key).unwrap();
+            assert_ne!(Some(&value), example.get(key).as_ref(), "{key} keeps the placeholder");
+            // entrypoint.sh refuses anything else in INTER_PASSWORD.
+            envfile::check_account_field(key, &value).unwrap();
+            passwords.push(value);
+        }
+        passwords.sort();
+        passwords.dedup();
+        assert_eq!(passwords.len(), 3);
+
+        assert_eq!(env.get("ADMIN_USER").as_deref(), Some("admin"));
+        assert_eq!(env.get("ADMIN_PASSWORD").as_deref(), Some("secret_1"));
+        assert_eq!(env.get("PUBLIC_IP").as_deref(), Some("10.8.0.1"));
+        assert_eq!(env.get("PUBLIC_IP_AUTO").as_deref(), Some("no"));
+        // A new install builds the bundled commit, so no update is offered.
+        assert_eq!(env.get("RATHENA_COMMIT"), example.get("RATHENA_COMMIT"));
+        assert!(update::pending(&env).is_none());
+
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn setup_keeps_the_passwords_an_existing_database_uses() {
+        let dir = temp_dir("setup-db");
+        let path = dir.join(".env");
+        write_setup(&path, || true, "admin", "secret_1", None).unwrap();
+        let env = EnvFile::load(&path).unwrap();
+        let example = EnvFile::parse(stack::ENV_EXAMPLE);
+        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
+            assert_eq!(env.get(key), example.get(key));
+        }
+
+        // Running setup again only changes the admin account and address.
+        let mut edited = EnvFile::load(&path).unwrap();
+        edited.set("DB_PASSWORD", "kept");
+        edited.save().unwrap();
+        write_setup(&path, || panic!("not asked again"), "admin2", "secret_2", Some("192.168.0.5".into())).unwrap();
+        let env = EnvFile::load(&path).unwrap();
+        assert_eq!(env.get("DB_PASSWORD").as_deref(), Some("kept"));
+        assert_eq!(env.get("ADMIN_USER").as_deref(), Some("admin2"));
+        assert_eq!(env.get("PUBLIC_IP").as_deref(), Some("192.168.0.5"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn public_ip_follows_the_lan_unless_pinned() {
+        let mut env = EnvFile::parse("PUBLIC_IP=127.0.0.1\n");
+        apply_public_ip(&mut env, Some(" 10.8.0.1 ".into()));
+        assert_eq!(env.get("PUBLIC_IP").as_deref(), Some("10.8.0.1"));
+        assert_eq!(env.get("PUBLIC_IP_AUTO").as_deref(), Some("no"));
+
+        apply_public_ip(&mut env, None);
+        assert_eq!(env.get("PUBLIC_IP_AUTO").as_deref(), Some("yes"));
+        let ip = env.get("PUBLIC_IP").unwrap();
+        assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "{ip}");
+    }
 }
