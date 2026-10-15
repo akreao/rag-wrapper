@@ -1,6 +1,6 @@
 # Client patches
 
-The account portal serves this folder to the players' client patcher ([rpatchur](https://github.com/L1nkZ/rpatchur)), which they download from the portal's "How to connect" page. The portal mounts it read-only; the desktop app's "Publish client patch" button writes it (see `desktop/README.md`).
+The account portal serves this folder to the players' client patcher ([rpatchur](https://github.com/L1nkZ/rpatchur), or our own replacement for it in `portal/cmd/patcher`, which reads these files the same way), which they download from the portal's "How to connect" page. The portal mounts it read-only; the desktop app's "Publish client patch" button writes it (see `desktop/README.md`).
 
 - `plist.txt` lists the published patches in the order they apply, one per line: a number, a space and the file name, e.g. `1 0001_client.thor`. That's the format THOR patchers read. Numbers only go up; never renumber or reuse one, because each player's patcher remembers the last number it applied.
 - Each patch is a THOR archive (`.thor`, built with rpatchur's `mkpatch`) in this folder. Names may use letters, digits, `.`, `_` and `-`. A `.thor` file that isn't in `plist.txt` isn't served, so write the file first and add its line last.

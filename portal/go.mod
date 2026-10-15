@@ -7,4 +7,7 @@ require (
 	github.com/yuin/goldmark v1.7.13
 )
 
-require filippo.io/edwards25519 v1.1.0 // indirect
+require (
+	filippo.io/edwards25519 v1.1.0 // indirect
+	golang.org/x/sys v0.37.0 // indirect
+)

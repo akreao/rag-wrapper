@@ -29,6 +29,8 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l . | tee /dev/stderr)"
       - run: go vet ./...
+      - name: go vet (Windows patcher)
+        run: GOOS=windows go vet ./cmd/patcher
       - run: go test ./...
 
   stack:
@@ -105,6 +107,8 @@ jobs:
               - '.github/workflows/ci.yml'
             portal:
               - 'portal/Dockerfile'
+              - 'portal/cmd/**'
+              - 'portal/go.mod'
               - '.github/workflows/ci.yml'
 
   rathena:
@@ -119,7 +123,8 @@ jobs:
           cp .env.example .env
           docker compose build db-init
 
-  # Builds the portal image, which cross-compiles the rpatchur patcher.
+  # Builds the portal image, which cross-compiles both Windows patchers
+  # (ours from portal/cmd/patcher, and rpatchur).
   portal-image:
     name: Portal image
     needs: rathena-changes
@@ -135,6 +140,8 @@ jobs:
           docker cp portal:/patcher ./patcher
           ls -l patcher
           file patcher/rpatchur.exe | tee /dev/stderr | grep -q 'PE32+ executable (GUI) x86-64'
+          file patcher/rag-wrapper-patcher.exe | tee /dev/stderr | grep -q 'PE32+ executable (GUI) x86-64'
+          test -s patcher/LICENSE-Go
 
   # Compile checks only; packaged builds come with tagged releases.
   desktop:
