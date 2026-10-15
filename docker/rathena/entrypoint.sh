@@ -65,6 +65,11 @@ write_imports() {
 		fi
 	done
 
+	# Commands on other players start with * rather than rAthena's #, which
+	# the 20250716 client keeps for itself. Set before the overrides
+	# folder's file, so a server can still choose its own symbol there.
+	{ echo "charcommand_symbol: *"; user_import battle_conf.txt; } > conf/import/battle_conf.txt
+
 	{
 		user_import inter_conf.txt
 		for db in login_server ipban_db char_server map_server web_server log_db; do

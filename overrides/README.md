@@ -7,5 +7,6 @@ The desktop app's Settings screen writes the settings it shows here: rates and t
 - `.txt` files use rAthena's `key: value` format, the same as `conf/battle/*.conf` and the other stock files. A key here wins over the stock value.
 - `.yml` files replace the import file whole, in rAthena's YAML DB format.
 - The stack's own settings (database, addresses, server passwords, MD5 passwords, no `_M`/`_F` sign-up, no PIN codes) always win over this folder.
+- The stack starts commands on other players with `*` (`charcommand_symbol: *`), because the 20250716 client keeps `#` for itself. Set `charcommand_symbol` in `battle_conf.txt` to use another symbol.
 - Changes apply when the game servers restart. Deleting a file goes back to rAthena's defaults.
 - The account portal also reads `server_name` from `char_conf.txt` (mounted read-only), so the name in the `clientinfo.xml` it offers matches the game.
