@@ -132,9 +132,9 @@ pub struct Status {
 
 /// What would be published, and what has been. `mods` are the enabled
 /// mods' names and client folders, in load order.
-pub fn status(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, renewal: bool) -> Result<Status, String> {
+pub fn status(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, renewal: bool, server_name: &str) -> Result<Status, String> {
     let manifest = Manifest::load(patches)?;
-    let (files, layout) = scan(client_files, mods, renewal)?;
+    let (files, layout) = scan(client_files, mods, renewal, server_name)?;
     let mode = mode_name(renewal);
     Ok(Status {
         folder: client_files.display().to_string(),
@@ -161,9 +161,9 @@ pub fn clashes(client_files: &Path, mods: &[(String, PathBuf)], renewal: bool) -
 /// two THOR files, one for `rag-wrapper.grf` and one for the client folder.
 /// Each `.thor` is written before its line is added to `plist.txt`, which is
 /// what makes the portal serve it.
-pub fn publish(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, renewal: bool) -> Result<Publish, String> {
+pub fn publish(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, renewal: bool, server_name: &str) -> Result<Publish, String> {
     let mut manifest = Manifest::load(patches)?;
-    let (files, layout) = scan(client_files, mods, renewal)?;
+    let (files, layout) = scan(client_files, mods, renewal, server_name)?;
     if !layout.problems.is_empty() {
         return Err(format!("Fix these files first:\n{}", layout.problems.join("\n")));
     }
@@ -325,13 +325,51 @@ struct Layout {
 }
 
 /// The layout, and each file's checksum.
-fn scan(root: &Path, mods: &[(String, PathBuf)], renewal: bool) -> Result<(BTreeMap<String, FileState>, Layout), String> {
-    let layout = layout(root, mods, renewal)?;
+fn scan(root: &Path, mods: &[(String, PathBuf)], renewal: bool, server_name: &str) -> Result<(BTreeMap<String, FileState>, Layout), String> {
+    let mut layout = layout(root, mods, renewal)?;
+    name_custom_items(&mut layout, server_name)?;
     let mut files = BTreeMap::new();
     for (path, source) in &layout.sources {
         files.insert(path.clone(), source.state().map_err(|e| format!("{path}: {e}"))?);
     }
     Ok((files, layout))
+}
+
+/// The English translation's file for the server's own items, which it
+/// loads after its display settings.
+const ITEM_INFO_C: &str = "systemen/iteminfo_c.lua";
+
+/// Sets the translation's name for the server's custom items to the server's
+/// name, so players see it after them ("Kit Potion [MyServer]") rather than
+/// the translation's "ExampleRO". Each player's own display settings still
+/// decide whether and where it shows.
+fn name_custom_items(layout: &mut Layout, server_name: &str) -> Result<(), String> {
+    let Some((path, source)) = layout.sources.iter_mut().find(|(p, _)| p.to_lowercase() == ITEM_INFO_C) else {
+        return Ok(());
+    };
+    let content = source.read().map_err(|e| format!("{path}: {e}"))?;
+    let mut text = custom_server_line(server_name);
+    text.extend_from_slice(&content);
+    *source = Source::Merged(text);
+    Ok(())
+}
+
+/// `CServerName = "..."` as a line of Lua. Non-ASCII names are written as
+/// byte escapes in the client's code page (CP949), whose second bytes can
+/// look like a backslash.
+fn custom_server_line(server_name: &str) -> Vec<u8> {
+    let name: String = server_name.trim().chars().filter(|c| !c.is_control()).collect();
+    let (bytes, _, _) = encoding_rs::EUC_KR.encode(&name);
+    let mut line = b"CServerName = \"".to_vec();
+    for &b in bytes.iter() {
+        match b {
+            b'"' | b'\\' => line.extend_from_slice(&[b'\\', b]),
+            0x80.. => line.extend_from_slice(format!("\\{b}").as_bytes()),
+            _ => line.push(b),
+        }
+    }
+    line.extend_from_slice(b"\" -- the server's name, from the desktop app's Settings\n");
+    line
 }
 
 /// The label a layer's files go by in clashes.
@@ -587,7 +625,7 @@ mod tests {
             read::archive(&fs::read(self.patches().join(name)).unwrap())
         }
         fn publish(&self) -> Result<Publish, String> {
-            publish(&self.files(), &[], &self.patches(), false)
+            publish(&self.files(), &[], &self.patches(), false, "rAthena")
         }
     }
 
@@ -660,7 +698,7 @@ mod tests {
         assert_eq!(p.changes.removed, ["System/b.lub", "data/a.txt"]);
         assert_eq!(d.thor("0003_data.thor").files[&b"data\\a.txt"[..]], None);
         assert_eq!(d.thor("0004_client.thor").files[&b"System\\b.lub"[..]], None);
-        let s = status(&d.files(), &[], &d.patches(), false).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), false, "rAthena").unwrap();
         assert!(s.changes.is_empty());
         assert_eq!(s.history.len(), 2);
         assert_eq!(s.history[0].patches, ["0003_data.thor", "0004_client.thor"]);
@@ -686,7 +724,7 @@ mod tests {
         d.put(".hidden", b"");
         d.put("data/Thumbs.db", b"");
         d.put("data/ok.txt", b"");
-        let s = status(&d.files(), &[], &d.patches(), false).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), false, "rAthena").unwrap();
         assert_eq!(s.problems.len(), 5, "{:?}", s.problems);
         assert!(s.problems.iter().any(|p| p.starts_with(&format!("{EXE} is missing"))));
         assert_eq!(s.changes.added, ["data/ok.txt"]);
@@ -709,17 +747,17 @@ mod tests {
         assert!(a.files.contains_key(&b"System\\shared.lub"[..]));
         assert!(!a.files.keys().any(|k| k.starts_with(b"Pre-Renewal") || k.starts_with(b"renewal")));
 
-        let s = status(&d.files(), &[], &d.patches(), true).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), true, "rAthena").unwrap();
         assert_eq!((s.mode, s.switched_from.as_deref()), ("Renewal", Some("Pre-Renewal")));
         assert_eq!(s.changes.changed, ["System/tr.lub"]);
         assert_eq!(s.changes.added, ["data/re.txt"]);
-        let p = publish(&d.files(), &[], &d.patches(), true).unwrap();
+        let p = publish(&d.files(), &[], &d.patches(), true, "rAthena").unwrap();
         assert_eq!(p.patches, ["0002_data.thor", "0003_client.thor"]);
         assert_eq!(d.thor("0003_client.thor").files[&b"System\\tr.lub"[..]].as_deref(), Some(&b"re tr"[..]));
-        assert_eq!(status(&d.files(), &[], &d.patches(), true).unwrap().switched_from, None);
+        assert_eq!(status(&d.files(), &[], &d.patches(), true, "rAthena").unwrap().switched_from, None);
 
         // Switching back takes the Renewal-only file away again.
-        let s = status(&d.files(), &[], &d.patches(), false).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), false, "rAthena").unwrap();
         assert_eq!(s.changes.removed, ["data/re.txt"]);
         assert_eq!(s.changes.changed, ["System/tr.lub"]);
     }
@@ -746,7 +784,7 @@ mod tests {
         put("b/client/rag-wrapper.exe", b"MZ b");
         let layers = vec![("a".to_owned(), mods.join("a/client")), ("b".to_owned(), mods.join("b/client")), ("c".to_owned(), mods.join("c/client"))];
 
-        let s = status(&d.files(), &layers, &d.patches(), false).unwrap();
+        let s = status(&d.files(), &layers, &d.patches(), false, "rAthena").unwrap();
         assert_eq!(s.mods, ["a", "b"]);
         assert_eq!(s.problems, ["mods/b/client/rag-wrapper.exe: only the client files folder carries the patched client. Delete this one."]);
         assert_eq!(
@@ -763,7 +801,7 @@ mod tests {
         assert_eq!(found[2].mods, ["a", "b"]);
 
         fs::remove_file(mods.join("b/client/rag-wrapper.exe")).unwrap();
-        publish(&d.files(), &layers, &d.patches(), false).unwrap();
+        publish(&d.files(), &layers, &d.patches(), false, "rAthena").unwrap();
         assert!(d.thor("0001_data.thor").files.contains_key(&b"data\\sprite\\a.spr"[..]));
         let client = d.thor("0002_client.thor");
         let info = String::from_utf8(client.files[&b"System\\itemInfo.lua"[..]].clone().unwrap()).unwrap();
@@ -773,10 +811,29 @@ mod tests {
         assert!(!client.files.contains_key(&b"System\\re.lub"[..]), "another mode's file");
 
         // Switching a mod off takes its files away with the next patch.
-        let s = status(&d.files(), &layers[1..], &d.patches(), false).unwrap();
+        let s = status(&d.files(), &layers[1..], &d.patches(), false, "rAthena").unwrap();
         assert_eq!(s.changes.removed, ["data/sprite/a.spr"]);
         assert_eq!(s.changes.changed, ["System/itemInfo.lua"]);
-        assert!(status(&d.files(), &[], &d.patches(), false).unwrap().clashes.is_empty());
+        assert!(status(&d.files(), &[], &d.patches(), false, "rAthena").unwrap().clashes.is_empty());
+    }
+
+    #[test]
+    fn custom_items_carry_the_server_s_name() {
+        let d = Dirs::new("cservername");
+        d.put(EXE, b"exe");
+        d.put("SystemEN/itemInfo_C.lua", b"tbl_custom = {\n}\n");
+        d.put("System/other.lua", b"x = {}\n");
+        let s = status(&d.files(), &[], &d.patches(), false, "rAthena").unwrap();
+        assert_eq!(s.changes.added.len(), 3);
+        publish(&d.files(), &[], &d.patches(), false, " My \"RO\" ").unwrap();
+        let client = d.thor("0001_client.thor");
+        let info = client.files[&b"SystemEN\\itemInfo_C.lua"[..]].clone().unwrap();
+        assert_eq!(info, b"CServerName = \"My \\\"RO\\\"\" -- the server's name, from the desktop app's Settings\ntbl_custom = {\n}\n");
+        assert_eq!(client.files[&b"System\\other.lua"[..]].clone().unwrap(), b"x = {}\n");
+        // A new name is a change to publish.
+        let s = status(&d.files(), &[], &d.patches(), false, "Other").unwrap();
+        assert_eq!(s.changes.changed, ["SystemEN/itemInfo_C.lua"]);
+        assert_eq!(custom_server_line("이")[..23], *b"CServerName = \"\\192\\204");
     }
 
     #[test]

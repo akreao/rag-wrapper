@@ -601,7 +601,8 @@ fn open_backups(app: State<App>) -> Result<(), String> {
 #[tauri::command]
 async fn client_patch(app: State<'_, App>) -> Result<clientpatch::Status, String> {
     let (files, mods, patches, renewal) = (app.client_files.clone(), app.mods_dir(), app.patches_dir(), app.renewal());
-    tauri::async_runtime::spawn_blocking(move || clientpatch::status(&files, &mods::client_mods(&mods), &patches, renewal))
+    let name = settings::load(&app.overrides_dir()).server_name;
+    tauri::async_runtime::spawn_blocking(move || clientpatch::status(&files, &mods::client_mods(&mods), &patches, renewal, &name))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -612,9 +613,10 @@ async fn client_patch(app: State<'_, App>) -> Result<clientpatch::Status, String
 async fn publish_client_patch(app: State<'_, App>) -> Result<clientpatch::Publish, String> {
     let (files, mods, patches, lock, renewal) =
         (app.client_files.clone(), app.mods_dir(), app.patches_dir(), app.publishing.clone(), app.renewal());
+    let name = settings::load(&app.overrides_dir()).server_name;
     tauri::async_runtime::spawn_blocking(move || {
         let _held = lock.try_lock().map_err(|_| "A patch is already being published.")?;
-        clientpatch::publish(&files, &mods::client_mods(&mods), &patches, renewal)
+        clientpatch::publish(&files, &mods::client_mods(&mods), &patches, renewal, &name)
     })
     .await
     .map_err(|e| e.to_string())?
