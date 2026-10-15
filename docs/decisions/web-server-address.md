@@ -1,0 +1,10 @@
+# Web server address for the client
+
+How players' clients find rAthena's web server, which saves hotkeys and UI settings and serves guild emblems. The stack has always run it (`web` in `compose.yaml`, port 8888); this covers pointing clients at it.
+
+- **The address lives in a client file, not in `clientinfo.xml`.** The 2025-07-16 client reads it from `AssistAddr` in `data\luafiles514\lua files\service_korea\ExternalSettings_kr.lub`. llchrisll's English translation installs that file with `127.0.0.1:8888`, so every player except the one playing on the server PC looked for the web server on their own PC (found by Steven, 2026-10-15).
+- **The portal writes the file** (Steven, 2026-10-15). The patcher zip puts it at that path and the connect page offers it next to `clientinfo.xml`, with `AssistAddr` set to `PUBLIC_IP:8888`, the same address `clientinfo.xml` sends the client to. Like `clientinfo.xml`, it's written for each download, so after the server's address changes players download it again with the other connection file.
+- **Everything else in the file is llchrisll's.** The portal embeds the translation's copy (`portal/clientfiles/ExternalSettings_kr.lub`, last updated 20240426) and changes only the `AssistAddr` line. Its header says the file can be distributed and modified freely, unlike the rest of the translation, which stays a link. If llchrisll changes the file, update the embedded copy.
+- **It's a loose file in `data\`.** The client exe is patched with `DataFolderFirst`, so our copy wins over any GRF, and the client reads it as plain Lua.
+- **Not shipped as a patch.** A patch would re-apply the file on Play, but when the server's address changes the patcher can't reach the portal either, so it wouldn't help where it's needed. A WARPGATE translation reinstall can put `127.0.0.1` back; the connect page says to download the file again after one.
+- **Untested on a player's PC so far.** Saving hotkeys and loading emblems from another PC on the LAN still needs checking with the real client.

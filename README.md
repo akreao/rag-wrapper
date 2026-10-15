@@ -32,7 +32,7 @@ The first build compiles rAthena and takes several minutes. The desktop app down
 | 6900 | login (point your client's `clientinfo.xml` here) |
 | 6121 | char |
 | 5121 | map |
-| 8888 | web (emblems and settings for newer clients) |
+| 8888 | web (emblems and settings for newer clients; the portal's `ExternalSettings_kr.lub` points clients here) |
 | 8080 | account portal (`PORTAL_PORT`) |
 
 Settings in `.env`:

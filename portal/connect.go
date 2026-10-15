@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/xml"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -202,3 +206,36 @@ func (a *app) gmAccounts(ctx context.Context) []int {
 // PatcherZip and PatcherExe name the patcher download and the program in it.
 func (c connectInfo) PatcherZip() string { return patcherZip }
 func (c connectInfo) PatcherExe() string { return patcherName + ".exe" }
+
+// The client's web server settings file and where it goes in the client
+// folder. Clients since 2020 save hotkeys and UI settings to rAthena's web
+// server and load guild emblems from it, at the address in AssistAddr.
+const (
+	externalSettingsPath = "data/luafiles514/lua files/service_korea/ExternalSettings_kr.lub"
+	webPort              = 8888
+)
+
+// externalSettingsTemplate is llchrisll's ExternalSettings_kr.lub from the
+// English translation (free to distribute and modify, says its header),
+// which sends the client to 127.0.0.1. The client reads it as plain Lua.
+//
+//go:embed clientfiles/ExternalSettings_kr.lub
+var externalSettingsTemplate []byte
+
+var assistAddrLine = regexp.MustCompile(`(?m)^AssistAddr = "[^"]*"`)
+
+// externalSettings is ExternalSettings_kr.lub pointing at this server's web
+// server, at the same address clientinfo.xml sends the client to. The rest
+// of the translation's file is kept as it is.
+func (c connectInfo) externalSettings() []byte {
+	addr := fmt.Sprintf(`AssistAddr = "%s"`, net.JoinHostPort(c.Address, strconv.Itoa(webPort)))
+	return assistAddrLine.ReplaceAllLiteral(externalSettingsTemplate, []byte(addr))
+}
+
+// externalSettingsFile serves ExternalSettings_kr.lub as a download.
+func (a *app) externalSettingsFile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="ExternalSettings_kr.lub"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(a.conn.externalSettings())
+}

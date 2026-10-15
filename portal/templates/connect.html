@@ -20,13 +20,14 @@
     <li><strong>Make an account.</strong> {{if $.Account}}You're logged in as {{$.Account.UserID}}, so this is done.{{else}}<a href="/register">Create one here</a>; the game uses the same username and password.{{end}}</li>
     <li><strong>Install the Korean client.</strong> Get it with <a href="https://warp.legacygamers.net/" rel="noopener noreferrer">WARPGATE</a>: create a gate (a folder for the client) and let it download the client. You don't need WARPGATE's RAGEXE or WARP tabs; the patcher below brings the client exe this server uses.</li>
     <li><strong>Install the English translation.</strong> In WARPGATE, open the <em>LANG</em> tab, choose <em>{{.Mode}}</em> and install it. That's <a href="https://github.com/llchrisll/ROenglishRE" rel="noopener noreferrer">llchrisll's English translation</a>, and WARPGATE keeps it up to date. If the server switches between Pre-Renewal and Renewal, the mode above changes too; install the matching translation from the same tab. The client exe from the patcher already reads it.</li>
-    <li><strong>Download the patcher</strong> and extract everything in it into the client folder, the one with <code>data.grf</code> in it. It holds the patcher, its settings, and the connection file for the <code>data</code> folder; let it replace any copies already there.
+    <li><strong>Download the patcher</strong> and extract everything in it into the client folder, the one with <code>data.grf</code> in it. It holds the patcher, its settings, and the connection files for the <code>data</code> folder; let it replace any copies already there, including the translation's <code>ExternalSettings_kr.lub</code>, which points the client's saved hotkeys and guild emblems at this server.
       <p class="downloads"><a class="button" href="/connect/{{.PatcherZip}}" download>Download the patcher</a></p>
       <small>If Windows says it protected your PC when you start the patcher, click <em>More info</em>, then <em>Run anyway</em>. It warns about any program that isn't signed by a known company.</small></li>
     <li><strong>Start <code>{{.PatcherExe}}</code></strong> in the client folder. It downloads this server's client and its custom files, then says it's ready; click <em>Play</em> and log in with your account. Start the game from the patcher every time, so you always have the server's newest files. If it can't connect, check that this PC can reach <code>{{.Address}}</code> and that the server's firewall lets the ports above through.</li>
   </ol>
-  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the patcher again, or just the connection file for the <code>data</code> folder:
-    <a href="/connect/clientinfo.xml" download>clientinfo.xml</a>.</p>
+  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the patcher again, or just the connection files: put
+    <a href="/connect/clientinfo.xml" download>clientinfo.xml</a> in the <code>data</code> folder and
+    <a href="/connect/ExternalSettings_kr.lub" download>ExternalSettings_kr.lub</a> in <code>data\luafiles514\lua files\service_korea</code>. Reinstalling the translation in WARPGATE also resets <code>ExternalSettings_kr.lub</code>, so download it again after that.</p>
 </section>
 {{else}}<section>
   <h2>Steps</h2>
@@ -41,8 +42,12 @@
         <a class="button" href="/connect/clientinfo.xml" download>clientinfo.xml</a>
       </p>
       <small>If the patcher asked you for a custom file name, rename it to that.</small></li>
+    {{if eq .PacketVer "20250716"}}<li><strong>Download the web server settings</strong> and put the file in <code>data\luafiles514\lua files\service_korea</code>, replacing the translation's copy. It points the client's saved hotkeys and guild emblems at this server instead of your own PC. Reinstalling the translation resets it, so download it again after that.
+      <p class="downloads">
+        <a class="button" href="/connect/ExternalSettings_kr.lub" download>ExternalSettings_kr.lub</a>
+      </p></li>{{end}}
     <li><strong>Start the patched client and log in</strong> with your account. If it can't connect, check that this PC can reach <code>{{.Address}}</code> and that the server's firewall lets the ports above through.</li>
   </ol>
-  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the file again.</p>
+  <p class="note">If the server's address changes, for example after its PC gets a new address from the router, download the {{if eq .PacketVer "20250716"}}files{{else}}file{{end}} again.</p>
 </section>
 {{end}}{{end}}{{end}}

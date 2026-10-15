@@ -106,8 +106,8 @@ func patcherConfig(base, serverName string) []byte {
 }
 
 // patcherDownload serves a zip to extract into the client folder: the
-// patcher, its config, rpatchur's licences, and the connection file in
-// data/, so one download sets up a client.
+// patcher, its config, rpatchur's licences, and the connection and web
+// server files in data/, so one download sets up a client.
 func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 	if !a.conn.Patcher.Available() {
 		http.Error(w, "The patcher isn't in this portal's image. Rebuild the portal with docker compose build portal.", http.StatusNotFound)
@@ -132,6 +132,9 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		err = add("data/clientinfo.xml", a.conn.clientInfo(base+"/register", a.gmAccounts(r.Context())))
+	}
+	if err == nil {
+		err = add(externalSettingsPath, a.conn.externalSettings())
 	}
 	for _, name := range []string{"LICENSE-MIT", "LICENSE-APACHE"} {
 		if b, rerr := os.ReadFile(filepath.Join(filepath.Dir(a.conn.Patcher.Exe), name)); rerr == nil && err == nil {
