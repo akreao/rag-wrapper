@@ -4,22 +4,31 @@ import (
 	"archive/zip"
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"html/template"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
-// The client patcher is rpatchur (github.com/L1nkZ/rpatchur), built for
-// Windows into the portal image. Players download it with a config that
-// points at this portal, and it fetches the published patches from here:
-// the patched client exe first, then custom GRF content and translations.
+// Players download a client patcher with a config that points at this
+// portal, and it fetches the published patches from here: the patched
+// client exe first, then custom GRF content and translations. There are
+// two, both built for Windows into the portal image: rpatchur
+// (github.com/L1nkZ/rpatchur), and our own (cmd/patcher), which replaces
+// it once it's been confirmed on players' PCs. Until then rpatchur stays
+// the main download and ours is offered beside it for testing.
 //
 // Patches are THOR archives in the stack's patches/ folder, listed in that
 // folder's plist.txt in the order they apply. The portal only serves them;
@@ -30,6 +39,11 @@ import (
 const (
 	patcherName = "rag-wrapper-patcher"
 	patcherZip  = patcherName + ".zip"
+	// Our own patcher's download. The exe inside has the same name as
+	// rpatchur's, so trying it replaces rpatchur in the client folder.
+	newPatcherZip = patcherName + "-new.zip"
+	// Our patcher's config; see config in cmd/patcher/patch.go.
+	newPatcherConfig = patcherName + ".json"
 )
 
 // The patched client exe the first patch installs, which the patcher's
@@ -42,8 +56,9 @@ const (
 )
 
 type patcherFiles struct {
-	Dir string // the stack's patches/ folder: plist.txt and the .thor files
-	Exe string // rpatchur.exe, built into the image; its licence files sit beside it
+	Dir    string // the stack's patches/ folder: plist.txt and the .thor files
+	Exe    string // rpatchur.exe, built into the image; its licence files sit beside it
+	NewExe string // our own patcher, built into the image; Go's licence sits beside it as LICENSE-Go
 }
 
 // patchName is what a patch file in plist.txt may be called. It keeps
@@ -76,6 +91,12 @@ func (p patcherFiles) Patches() []string {
 // Available is true when the image has the patcher to hand out.
 func (p patcherFiles) Available() bool {
 	st, err := os.Stat(p.Exe)
+	return err == nil && st.Mode().IsRegular()
+}
+
+// NewAvailable is true when the image has our own patcher.
+func (p patcherFiles) NewAvailable() bool {
+	st, err := os.Stat(p.NewExe)
 	return err == nil && st.Mode().IsRegular()
 }
 
@@ -114,6 +135,35 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base := a.conn.BaseURL(r)
+	licences := map[string]string{}
+	for _, name := range []string{"LICENSE-MIT", "LICENSE-APACHE"} {
+		licences[filepath.Join(filepath.Dir(a.conn.Patcher.Exe), name)] = "licenses/rpatchur-" + name + ".txt"
+	}
+	a.servePatcherZip(w, r, patcherZip, a.conn.Patcher.Exe, map[string][]byte{
+		patcherName + ".yml": patcherConfig(base, a.conn.ServerName()),
+	}, licences)
+}
+
+// newPatcherDownload is the same for our own patcher, whose config only
+// says where the portal is: it asks the portal for the rest.
+func (a *app) newPatcherDownload(w http.ResponseWriter, r *http.Request) {
+	if !a.conn.Patcher.NewAvailable() {
+		http.Error(w, "The new patcher isn't in this portal's image. Rebuild the portal with docker compose build portal.", http.StatusNotFound)
+		return
+	}
+	cfg, _ := json.MarshalIndent(map[string]string{"portal": a.conn.BaseURL(r)}, "", "  ")
+	a.servePatcherZip(w, r, newPatcherZip, a.conn.Patcher.NewExe, map[string][]byte{
+		newPatcherConfig: append(cfg, '\n'),
+	}, map[string]string{
+		filepath.Join(filepath.Dir(a.conn.Patcher.NewExe), "LICENSE-Go"): "licenses/go-LICENSE.txt",
+	})
+}
+
+// servePatcherZip builds a patcher download: the exe as
+// rag-wrapper-patcher.exe, extra files, the connection files, and licence
+// files (image path to name in the zip) that exist.
+func (a *app) servePatcherZip(w http.ResponseWriter, r *http.Request, zipName, exePath string, extra map[string][]byte, licences map[string]string) {
+	base := a.conn.BaseURL(r)
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	add := func(name string, data []byte) error {
@@ -123,12 +173,14 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		return err
 	}
-	exe, err := os.ReadFile(a.conn.Patcher.Exe)
+	exe, err := os.ReadFile(exePath)
 	if err == nil {
 		err = add(patcherName+".exe", exe)
 	}
-	if err == nil {
-		err = add(patcherName+".yml", patcherConfig(base, a.conn.ServerName()))
+	for _, name := range slices.Sorted(maps.Keys(extra)) {
+		if err == nil {
+			err = add(name, extra[name])
+		}
 	}
 	if err == nil {
 		err = add("data/clientinfo.xml", a.conn.clientInfo(base+"/register", a.gmAccounts(r.Context())))
@@ -136,9 +188,9 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = add(externalSettingsPath, a.conn.externalSettings())
 	}
-	for _, name := range []string{"LICENSE-MIT", "LICENSE-APACHE"} {
-		if b, rerr := os.ReadFile(filepath.Join(filepath.Dir(a.conn.Patcher.Exe), name)); rerr == nil && err == nil {
-			err = add("licenses/rpatchur-"+name+".txt", b)
+	for _, src := range slices.Sorted(maps.Keys(licences)) {
+		if b, rerr := os.ReadFile(src); rerr == nil && err == nil {
+			err = add(licences[src], b)
 		}
 	}
 	if err == nil {
@@ -150,9 +202,77 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+patcherZip+`"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+zipName+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(buf.Bytes())
+}
+
+// patcherInfo tells our own patcher what it shows and where everything is.
+// It's read each time the patcher starts, so the news, the server name and
+// the patcher's own updates reach players without a new download.
+func (a *app) patcherInfo(w http.ResponseWriter, r *http.Request) {
+	base := a.conn.BaseURL(r)
+	info := map[string]any{
+		"server_name": a.conn.ServerName(),
+		"account_url": base + "/account",
+		"connect_url": base + "/connect",
+		"news_url":    base + "/news",
+		"plist_url":   base + "/patcher/plist.txt",
+		"patch_url":   base + "/patcher/data/",
+		"news":        nil,
+	}
+	if title, text := a.conn.latestNewsText(); title != "" || text != "" {
+		info["news"] = map[string]string{"title": title, "text": text}
+	}
+	if sum := a.conn.Patcher.newExeSHA256(); sum != "" {
+		info["patcher"] = map[string]string{"url": base + "/patcher/" + patcherName + ".exe", "sha256": sum}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(info)
+}
+
+// newPatcherExe serves our own patcher on its own, for its self-update.
+func (a *app) newPatcherExe(w http.ResponseWriter, r *http.Request) {
+	if !a.conn.Patcher.NewAvailable() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeFile(w, r, a.conn.Patcher.NewExe)
+}
+
+// The patcher exe's checksum, kept until the file changes.
+var exeSum struct {
+	sync.Mutex
+	path string
+	mod  time.Time
+	size int64
+	sum  string
+}
+
+func (p patcherFiles) newExeSHA256() string {
+	st, err := os.Stat(p.NewExe)
+	if err != nil || !st.Mode().IsRegular() {
+		return ""
+	}
+	exeSum.Lock()
+	defer exeSum.Unlock()
+	if exeSum.path == p.NewExe && exeSum.mod.Equal(st.ModTime()) && exeSum.size == st.Size() {
+		return exeSum.sum
+	}
+	f, err := os.Open(p.NewExe)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	exeSum.path, exeSum.mod, exeSum.size, exeSum.sum = p.NewExe, st.ModTime(), st.Size(), hex.EncodeToString(h.Sum(nil))
+	return exeSum.sum
 }
 
 // patcherList serves plist.txt. With nothing published it's empty, which

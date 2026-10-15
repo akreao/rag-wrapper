@@ -200,17 +200,8 @@ type newsData struct {
 // first; anything above the first one (such as the rules) shows only on
 // the news page.
 func (c connectInfo) news() newsData {
-	f, err := os.Open(filepath.Join(c.Overrides, filepath.FromSlash(newsFile)))
-	if err != nil {
-		return newsData{Missing: true}
-	}
-	defer f.Close()
-	src, err := io.ReadAll(io.LimitReader(f, newsMaxSize))
-	if err != nil {
-		log.Printf("news: %v", err)
-		return newsData{Missing: true}
-	}
-	if len(bytes.TrimSpace(src)) == 0 {
+	src := c.newsSource()
+	if src == nil {
 		return newsData{Missing: true}
 	}
 	return newsData{
@@ -218,6 +209,24 @@ func (c connectInfo) news() newsData {
 		Latest: renderMarkdown(latestPost(src)),
 		Titled: strings.HasPrefix(string(bytes.TrimSpace(src)), "# "),
 	}
+}
+
+// newsSource is the news file's Markdown, or nil when there's none.
+func (c connectInfo) newsSource() []byte {
+	f, err := os.Open(filepath.Join(c.Overrides, filepath.FromSlash(newsFile)))
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	src, err := io.ReadAll(io.LimitReader(f, newsMaxSize))
+	if err != nil {
+		log.Printf("news: %v", err)
+		return nil
+	}
+	if len(bytes.TrimSpace(src)) == 0 {
+		return nil
+	}
+	return src
 }
 
 // latestPost is the first "## " section of the news file, up to the next

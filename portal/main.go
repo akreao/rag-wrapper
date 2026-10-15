@@ -58,8 +58,9 @@ func main() {
 		Renewal:   env("PRERE", "yes") == "no",
 		Overrides: env("OVERRIDES_DIR", "/overrides"),
 		Patcher: patcherFiles{
-			Dir: env("PATCHES_DIR", "/patches"),
-			Exe: env("PATCHER_EXE", "/patcher/rpatchur.exe"),
+			Dir:    env("PATCHES_DIR", "/patches"),
+			Exe:    env("PATCHER_EXE", "/patcher/rpatchur.exe"),
+			NewExe: env("NEW_PATCHER_EXE", "/patcher/rag-wrapper-patcher.exe"),
 		},
 	}
 

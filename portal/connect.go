@@ -207,6 +207,10 @@ func (a *app) gmAccounts(ctx context.Context) []int {
 func (c connectInfo) PatcherZip() string { return patcherZip }
 func (c connectInfo) PatcherExe() string { return patcherName + ".exe" }
 
+// NewPatcherZip is our own patcher's download, offered beside rpatchur's
+// while it's being tested.
+func (c connectInfo) NewPatcherZip() string { return newPatcherZip }
+
 // The client's web server settings file and where it goes in the client
 // folder. Clients since 2020 save hotkeys and UI settings to rAthena's web
 // server and load guild emblems from it, at the address in AssistAddr.
