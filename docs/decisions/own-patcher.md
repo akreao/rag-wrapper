@@ -17,3 +17,4 @@ Questions asked about the finished patcher (PR #52), one at a time.
 
 - **One player's Windows PC decides.** Once one player's Windows test passes, a follow-up PR makes ours the main download and drops rpatchur and its Rust build from the portal image. Waiting for weeks of use or keeping rpatchur for good were the alternatives; the self-update means later fixes reach players anyway.
 - **The patcher has the desktop app's icon.** A copy of `desktop/src-tauri/icons/icon.png` sits in `portal/cmd/patcher/` (the portal image's build only sees `portal/`), so players see the same icon in the client folder and the taskbar.
+- **The patcher updates itself without asking.** Patches can already replace the client exe, so a Yes/No box before a patcher update would protect nothing; the window just says "Updating the patcher..." and restarts.
