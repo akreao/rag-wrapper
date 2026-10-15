@@ -93,9 +93,19 @@ new_account: no
 CONF
 	} > conf/import/login_conf.txt
 
+	# New characters all start in the same place instead of one of rAthena's
+	# five copies (iz_int01-04 lead to izlude_a-d, new_2-1 to new_5-1 on
+	# Pre-Renewal): a LAN server is too small for channels, and some NPCs are
+	# only on the main izlude. Set before the overrides folder's file, so a
+	# server can still choose its own start points there.
+	#
 	# No PIN code window before character select: accounts already have a
 	# portal password, and a forgotten PIN can only be reset in the database.
-	{ user_import char_conf.txt; cat <<CONF
+	{
+		echo "start_point: iz_int,18,26"
+		echo "start_point_pre: new_1-1,53,111"
+		user_import char_conf.txt
+		cat <<CONF
 pincode_enabled: no
 userid: ${INTER_USER}
 passwd: ${INTER_PASSWORD}
