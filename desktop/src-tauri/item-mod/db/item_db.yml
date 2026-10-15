@@ -1,0 +1,32 @@
+# The server half of the kit's two items, in rAthena's item_db.yml format.
+# Custom items take an Id from 40000 to 49999, which neither rAthena nor the
+# client's own item list uses. Give each of yours a new Id and AegisName.
+Header:
+  Type: ITEM_DB
+  Version: 3
+
+Body:
+  - Id: 40000
+    AegisName: Kit_Potion
+    Name: Kit Potion
+    Type: Healing
+    Buy: 20
+    Weight: 70
+    Script: |
+      itemheal 100,0;
+  - Id: 40001
+    AegisName: Kit_Ribbon
+    Name: Kit Ribbon
+    Type: Armor
+    Buy: 1000
+    Weight: 100
+    Defense: 1
+    Slots: 1
+    Locations:
+      Head_Top: true
+    ArmorLevel: 1
+    Refineable: true
+    # The look worn on the head: 17 is the Ribbon's. See README.md for a look of your own.
+    View: 17
+    Script: |
+      bonus bMdef,5;

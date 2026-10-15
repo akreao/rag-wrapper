@@ -4,6 +4,7 @@ mod clientpatch;
 mod envfile;
 mod host;
 mod images;
+mod itemkit;
 mod jobs;
 mod live;
 mod luamerge;
@@ -694,6 +695,14 @@ fn move_mod(app: State<App>, name: String, up: bool) -> Result<(), String> {
     mods::move_mod(&app.mods_dir(), &name, up)
 }
 
+/// Starts a mod for custom items from the item kit's template and opens
+/// its folder. It's switched off until the Mods screen switches it on.
+#[tauri::command]
+fn new_item_mod(app: State<App>, name: String) -> Result<(), String> {
+    let root = itemkit::create(&app.mods_dir(), &name)?;
+    host::open(root.as_os_str())
+}
+
 /// Opens the mods folder in the file manager, to add mods by copying folders in.
 #[tauri::command]
 fn open_mods(app: State<App>) -> Result<(), String> {
@@ -792,6 +801,7 @@ pub fn run() {
             set_mod_enabled,
             move_mod,
             open_mods,
+            new_item_mod,
             follow_logs
         ])
         .on_window_event(|window, event| {

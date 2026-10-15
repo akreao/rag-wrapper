@@ -982,6 +982,19 @@ function modItem(m) {
     details.append(summary, p, pre);
     li.append(details);
   }
+  if (m.item_warnings.length) {
+    const details = document.createElement("details");
+    details.dataset.key = `${m.name}/items`;
+    const summary = document.createElement("summary");
+    summary.textContent = `${count(m.item_warnings.length, "problem", "problems")} with its custom items`;
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "A custom item needs an entry in db/item_db.yml for the server and one in client/SystemEN/itemInfo_C.lua for the players' clients, under the same Id.";
+    const pre = document.createElement("pre");
+    pre.textContent = m.item_warnings.join("\n\n");
+    details.append(summary, p, pre);
+    li.append(details);
+  }
   if (m.errors.length) {
     const details = document.createElement("details");
     details.dataset.key = `${m.name}/errors`;
@@ -1037,6 +1050,17 @@ $("open-mods").addEventListener("click", async () => {
   } catch (err) {
     modsError(`Couldn't open the folder: ${err}`);
   }
+});
+
+$("new-item-mod").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  modsError(null);
+  try {
+    await invoke("new_item_mod", { name: $("new-item-mod-name").value });
+  } catch (err) {
+    modsError(String(err));
+  }
+  await refreshMods();
 });
 
 // A rebuild backs up first; the "Restart on the new version" bar then appears.

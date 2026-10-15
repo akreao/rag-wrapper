@@ -1,0 +1,6 @@
+//===== rag-wrapper item kit =================================
+// A shop next to Prontera's centre that sells the kit's items,
+// so they can be tried in game straight away. Delete it, or add
+// your items to it: Id:price, with -1 for the item's Buy price.
+//============================================================
+prontera,143,170,5	shop	Item Kit Shop#kit	4_M_01,40000:-1,40001:-1
