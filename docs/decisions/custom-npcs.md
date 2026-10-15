@@ -11,3 +11,10 @@ Roadmap feature 20: switch on the custom NPCs rAthena ships under `npc/custom/`,
 - **Pending and Rebuild work as for mods.** The stack folder's `.custom-npcs-applied` records what the server loaded at its last start from the app; a difference shows "loads on restart" or "unloads on restart". `entrypoint.sh` prints `Custom NPCs on:` on every start, and an image without that line asks for a Rebuild.
 - **Errors come from the map server's log.** rAthena's errors and warnings that name one of an NPC's scripts, including the `[Debug]` lines that say which script a failing command ran in, show under it.
 - **Checked on a real build.** Every listed script loaded with the rest of rAthena in both modes, at the pinned commit (b6f89ab), with no errors except the Card Seller's missing SQL table. CI's stack smoke tests switch on every NPC the app offers, the way the screen writes them, and fail if one doesn't load or logs an error, so a new rAthena commit that drops or breaks one shows up there.
+
+Questions asked about the finished work (PR #53), one at a time.
+
+- **The list stays on the Mods screen.** It applies on the same restart as mods, so one screen means one restart notice.
+- **The Card Seller and Hunting Missions stay greyed out.** Filling the SQL item and monster tables would mean building rAthena's converter into the image and loading them on every start, for two NPCs; the Shop Street and quest shop cover buying gear.
+- **Every custom NPC starts off.** New servers start like standard rAthena, and existing ones are never changed; the Warper and Job Master change how a server plays, so they're the server owner's choice.
+- **The screen's labels say what each NPC does,** not its in-game name (rAthena's own English names, such as "Wise Old Woman" for the card remover), which aren't iRO's either.
