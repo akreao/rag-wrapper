@@ -10,3 +10,4 @@
 /client-files/
 __pycache__/
 /images.json
+*.whl
