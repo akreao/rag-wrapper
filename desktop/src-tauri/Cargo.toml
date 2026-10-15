@@ -1,6 +1,6 @@
 [package]
 name = "rag-wrapper"
-version = "0.3.0"
+version = "0.4.0"
 description = "Runs a private rAthena server and its database"
 edition = "2021"
 publish = false
