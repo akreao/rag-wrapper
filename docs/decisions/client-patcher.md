@@ -9,7 +9,7 @@ Roadmap feature 10's portal side: the portal hosts an [rpatchur](https://github.
 - **Fixed names in the client folder.** The first patch installs the patched exe as `rag-wrapper.exe`, which the patcher's Play button starts; GRF patches go into `rag-wrapper.grf`. Neither overwrites an official file. The publish button has to follow these names, and the client's `DATA.INI` must list `rag-wrapper.grf` above `data.grf` (open for the publish button: whether a patch writes `DATA.INI`, given llchrisll's translation may ship its own).
 - **The patcher's window is a portal page** (`/patcher/`): server name, progress, Play, Settings (the client's `opensetup.exe`, which WARPGATE ships) and Exit, and links to the account and How to connect pages that open in the browser. rpatchur shows it with Windows' old IE engine, so its CSS and script are plain ES5.
 - **The connect page switches when there's something to install.** For a `20250716` server with at least one published patch, the steps are: account, client from WARPGATE, llchrisll's translation, download the patcher, start it and click Play. With nothing published yet, it keeps the hand-patching steps with WARP0716 (plus the translation link), since the patcher would have no exe to give. Other client dates keep the generic WARP steps.
-- **Not verified on Windows yet.** The cross-compiled patcher, the page in rpatchur's window and the first patch get their first real test once the publish button can build a patch.
+- **Works on Windows** (reported 2026-10-15, after the publish button landed). A tester ran the cross-compiled patcher with a published patch on a Windows PC and the client works.
 
 Questions asked about the finished patcher hosting (PR #12), one at a time.
 
