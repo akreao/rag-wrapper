@@ -305,17 +305,25 @@ class MergeModsTest(unittest.TestCase):
         self.mod("b", "mob_db.yml", "- Id: 1002\n  Hp: 2\n", sub="db/re")
         self.mod("c", "item_db.yml", "- Id: 501\n  Buy: 3\n")
         self.mod("c", "notes.yml", "- Id: 501\n")
+        self.mod("a", "barters.yml", "- Name: Shop\n  Items:\n    - Index: 0\n      Item: Apple\n")
+        self.mod("b", "barters.yml", "- Name: Shop\n  Items:\n    - Index: 0\n      Item: Jellopy\n    - Index: 1\n      Item: Apple\n")
         self.write("mods/enabled.txt", "# order\nb\r\n  a  # comment\nb\ngone\n../x\n")
         self.assertEqual(
             merge_mods.enabled("mods", "pre-re"),
-            [("item_db.yml", "mods/b/db/pre-re/item_db.yml"), ("item_db.yml", "mods/a/db/item_db.yml")],
+            [
+                ("barters.yml", "mods/b/db/barters.yml"),
+                ("item_db.yml", "mods/b/db/pre-re/item_db.yml"),
+                ("barters.yml", "mods/a/db/barters.yml"),
+                ("item_db.yml", "mods/a/db/item_db.yml"),
+            ],
         )
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             self.assertEqual(merge_mods.main(["merge_mods.py", "--check", "mods", "re"]), 0)
         warnings = out.getvalue().splitlines()
-        self.assertEqual(len(warnings), 1, warnings)
-        self.assertIn("mob_db.yml, Id 1002, Hp: mods/b/db/re/mob_db.yml line 6 sets 2, mods/a/db/re/mob_db.yml line 6 sets 1", warnings[0])
+        self.assertEqual(len(warnings), 2, warnings)
+        self.assertIn("barters.yml, Name shop, Items[Index 0].Item: mods/b/db/barters.yml line 8 sets Jellopy, mods/a/db/barters.yml line 8 sets Apple", warnings[0])
+        self.assertIn("mob_db.yml, Id 1002, Hp: mods/b/db/re/mob_db.yml line 6 sets 2, mods/a/db/re/mob_db.yml line 6 sets 1", warnings[1])
         self.assertFalse(os.path.exists("db/import/mods-merged"))
 
     def test_broken_files_are_left_to_rathena(self):
