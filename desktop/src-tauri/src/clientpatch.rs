@@ -16,6 +16,13 @@
 //! mode's folder, whose files win over shared ones of the same name, so
 //! after a mode switch the next patch swaps the players' files.
 //!
+//! Enabled mods can carry client files too, in a `client/` folder laid out
+//! the same way (mode folders included). They're added after the client
+//! files folder, in load order: a mod's file replaces an earlier one of the
+//! same path, except that Lua tables (`.lub`, `.lua`) are merged entry by
+//! entry ([`crate::luamerge`]). Where two of them set something differently
+//! the later one is used, and the clash is listed.
+//!
 //! `patches/published.json` remembers each published file's checksum and
 //! the patch history, so the next patch carries only what changed.
 
@@ -27,6 +34,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::luamerge;
 use crate::thor::ThorWriter;
 
 /// Fixed names, shared with the portal (`portal/patcher.go`): the patcher's
@@ -113,35 +121,53 @@ pub struct Status {
     pub changes: Changes,
     /// Files that can't be published as they are; publishing waits for them.
     pub problems: Vec<String>,
+    /// The enabled mods whose client files the patch carries, in load order.
+    pub mods: Vec<String>,
+    /// Where the client files folder and mods, or two mods, set something
+    /// differently; the later one is used.
+    pub clashes: Vec<String>,
     /// Newest first.
     pub history: Vec<Publish>,
 }
 
-/// What would be published, and what has been.
-pub fn status(client_files: &Path, patches: &Path, renewal: bool) -> Result<Status, String> {
+/// What would be published, and what has been. `mods` are the enabled
+/// mods' names and client folders, in load order.
+pub fn status(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, renewal: bool) -> Result<Status, String> {
     let manifest = Manifest::load(patches)?;
-    let (files, _, problems) = scan(client_files, renewal)?;
+    let (files, layout) = scan(client_files, mods, renewal)?;
     let mode = mode_name(renewal);
     Ok(Status {
         folder: client_files.display().to_string(),
         mode,
         switched_from: manifest.mode.filter(|m| m != mode),
         changes: diff(&manifest.files, &files),
-        problems,
+        problems: layout.problems,
+        mods: layout.mods,
+        clashes: layout.clashes.into_iter().map(|c| c.text).collect(),
         history: manifest.history.into_iter().rev().collect(),
     })
+}
+
+/// Where the client files folder and the enabled mods' client files, or
+/// two mods', set something differently, as the next patch would have them.
+pub fn clashes(client_files: &Path, mods: &[(String, PathBuf)], renewal: bool) -> Vec<Clash> {
+    if mods.is_empty() {
+        return Vec::new();
+    }
+    layout(client_files, mods, renewal).map(|l| l.clashes).unwrap_or_default()
 }
 
 /// Builds and publishes a patch of what changed since the last one: up to
 /// two THOR files, one for `rag-wrapper.grf` and one for the client folder.
 /// Each `.thor` is written before its line is added to `plist.txt`, which is
 /// what makes the portal serve it.
-pub fn publish(client_files: &Path, patches: &Path, renewal: bool) -> Result<Publish, String> {
+pub fn publish(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, renewal: bool) -> Result<Publish, String> {
     let mut manifest = Manifest::load(patches)?;
-    let (files, sources, problems) = scan(client_files, renewal)?;
-    if !problems.is_empty() {
-        return Err(format!("Fix these files first:\n{}", problems.join("\n")));
+    let (files, layout) = scan(client_files, mods, renewal)?;
+    if !layout.problems.is_empty() {
+        return Err(format!("Fix these files first:\n{}", layout.problems.join("\n")));
     }
+    let sources = layout.sources;
     let changes = diff(&manifest.files, &files);
     if changes.is_empty() {
         return Err("Nothing has changed since the last patch.".into());
@@ -164,7 +190,7 @@ pub fn publish(client_files: &Path, patches: &Path, renewal: bool) -> Result<Pub
         let out = BufWriter::new(File::create(&tmp).map_err(|e| e.to_string())?);
         let mut thor = ThorWriter::new(out, grf_part.then_some(GRF.as_bytes())).map_err(|e| e.to_string())?;
         for path in update {
-            let content = fs::read(&sources[path.as_str()]).map_err(|e| format!("{path}: {e}"))?;
+            let content = sources[path.as_str()].read().map_err(|e| format!("{path}: {e}"))?;
             thor.add(&encode(path)?, &content).map_err(|e| format!("{path}: {e}"))?;
             manifest.files.insert(path.clone(), state_of(&content));
         }
@@ -257,48 +283,185 @@ fn hash_file(path: &Path) -> io::Result<FileState> {
     })
 }
 
-/// The files players get in this mode, by their `/`-separated path in the
-/// client folder: the shared ones plus the mode's folder. Also where each
-/// one is on disk, and what's wrong with any that can't be published.
-type Scan = (BTreeMap<String, FileState>, BTreeMap<String, PathBuf>, Vec<String>);
+/// Where one of the files players get comes from.
+enum Source {
+    File(PathBuf),
+    /// Lua tables merged from several files.
+    Merged(Vec<u8>),
+}
 
-fn scan(root: &Path, renewal: bool) -> Result<Scan, String> {
-    let mut files = BTreeMap::new();
-    let mut sources = BTreeMap::new();
-    let mut problems = Vec::new();
-    if !root.exists() {
-        return Ok((files, sources, problems));
+impl Source {
+    fn read(&self) -> io::Result<Vec<u8>> {
+        match self {
+            Source::File(path) => fs::read(path),
+            Source::Merged(bytes) => Ok(bytes.clone()),
+        }
     }
-    walk(root, true, &mut files, &mut sources, &mut problems)?;
+
+    fn state(&self) -> io::Result<FileState> {
+        match self {
+            Source::File(path) => hash_file(path),
+            Source::Merged(bytes) => Ok(state_of(bytes)),
+        }
+    }
+}
+
+/// Something two of the layers set differently, and the mods it names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Clash {
+    pub text: String,
+    pub mods: Vec<String>,
+}
+
+/// The files players get in this mode, by their `/`-separated path in the
+/// client folder, and where each comes from; what's wrong with any that
+/// can't be published; and the clashes between layers.
+#[derive(Default)]
+struct Layout {
+    sources: BTreeMap<String, Source>,
+    problems: Vec<String>,
+    mods: Vec<String>,
+    clashes: Vec<Clash>,
+}
+
+/// The layout, and each file's checksum.
+fn scan(root: &Path, mods: &[(String, PathBuf)], renewal: bool) -> Result<(BTreeMap<String, FileState>, Layout), String> {
+    let layout = layout(root, mods, renewal)?;
+    let mut files = BTreeMap::new();
+    for (path, source) in &layout.sources {
+        files.insert(path.clone(), source.state().map_err(|e| format!("{path}: {e}"))?);
+    }
+    Ok((files, layout))
+}
+
+/// The label a layer's files go by in clashes.
+const CLIENT_FILES: &str = "the client files folder";
+
+fn layout(root: &Path, mods: &[(String, PathBuf)], renewal: bool) -> Result<Layout, String> {
+    let mut layout = Layout::default();
+    // Each file's layers, by its path as the first layer spells it.
+    let mut layers: BTreeMap<String, Vec<(String, PathBuf)>> = BTreeMap::new();
+    let mut spelling: BTreeMap<String, String> = BTreeMap::new();
+    let roots = std::iter::once((None, root.to_path_buf())).chain(mods.iter().map(|(n, p)| (Some(n.as_str()), p.clone())));
+    for (name, dir) in roots {
+        if !dir.is_dir() {
+            continue;
+        }
+        let mut files = BTreeMap::new();
+        let mut problems = Vec::new();
+        collect(&dir, renewal, &mut files, &mut problems)?;
+        let (label, prefix) = match name {
+            None => (CLIENT_FILES.to_owned(), String::new()),
+            Some(n) => (format!("mods/{n}"), format!("mods/{n}/client/")),
+        };
+        if name.is_some() {
+            if files.is_empty() {
+                continue;
+            }
+            layout.mods.push(name.unwrap_or_default().to_owned());
+            // The patcher's Play button starts the one patched client.
+            if let Some(exe) = files.keys().find(|p| p.eq_ignore_ascii_case(EXE)).cloned() {
+                files.remove(&exe);
+                problems.push(format!("{exe}: only the client files folder carries the patched client. Delete this one."));
+            }
+        }
+        layout.problems.extend(problems.into_iter().map(|p| format!("{prefix}{p}")));
+        for (path, source) in files {
+            // Windows doesn't tell `System/a.lub` from `system/A.lub`.
+            let path = spelling.entry(path.to_lowercase()).or_insert(path).clone();
+            layers.entry(path).or_default().push((label.clone(), source));
+        }
+    }
+    for (path, mut found) in layers {
+        let source = if found.len() == 1 {
+            Source::File(found.remove(0).1)
+        } else {
+            resolve(&path, &found, &mut layout.clashes)?
+        };
+        layout.sources.insert(path, source);
+    }
+    // Once anything is published, the portal sends players to the
+    // patcher, whose Play button starts the exe.
+    if !layout.sources.is_empty() && !layout.sources.keys().any(|p| p.eq_ignore_ascii_case(EXE)) {
+        layout.problems.push(format!("{EXE} is missing: every patch needs the patched client, which the patcher's Play button starts."));
+    }
+    layout.problems.sort();
+    Ok(layout)
+}
+
+/// A file several layers have, from the first to the last: Lua tables are
+/// merged, and anything else is the last layer's.
+fn resolve(path: &str, found: &[(String, PathBuf)], clashes: &mut Vec<Clash>) -> Result<Source, String> {
+    let read = |p: &Path| fs::read(p).map_err(|e| format!("{path}: {e}"));
+    let lower = path.to_lowercase();
+    let mut clash = |text: String, labels: &[&str]| {
+        let mods = labels.iter().filter_map(|l| l.strip_prefix("mods/")).map(str::to_owned).collect();
+        clashes.push(Clash { text, mods });
+    };
+    if !(lower.ends_with(".lub") || lower.ends_with(".lua")) {
+        let (last, earlier) = found.split_last().expect("several layers");
+        let content = read(&last.1)?;
+        for (label, p) in earlier {
+            if read(p)? != content {
+                clash(format!("{path}: {label} and {} both have this file; the one from {} is used (later in load order)", last.0, last.0), &[label, &last.0]);
+            }
+        }
+        return Ok(Source::File(last.1.clone()));
+    }
+    let mut text = read(&found[0].1)?;
+    let mut owners: BTreeMap<(String, String), &str> = luamerge::keys(&text).into_iter().map(|k| (k, found[0].0.as_str())).collect();
+    // The layers the text has come from since a whole file last replaced it.
+    let mut from: Vec<&str> = vec![&found[0].0];
+    for (label, p) in &found[1..] {
+        let add = read(p)?;
+        let merged = luamerge::unmergeable(&text).is_none().then(|| luamerge::merge(&text, &add)).flatten();
+        let Some((next, outcomes)) = merged else {
+            let reason = luamerge::unmergeable(&text).or(luamerge::unmergeable(&add)).unwrap_or("no tables could be read from it");
+            if add != text {
+                let earlier = from.join(" and ");
+                let mut labels = from.clone();
+                labels.push(label);
+                clash(format!("{path}: {earlier} and {label} both have this file, and it can't be merged ({reason}); the one from {label} is used (later in load order)"), &labels);
+            }
+            text = add;
+            owners = luamerge::keys(&text).into_iter().map(|k| (k, label.as_str())).collect();
+            from = vec![label];
+            continue;
+        };
+        for (table, key, outcome) in outcomes {
+            let owner = owners.insert((table.clone(), key.clone()), label);
+            if let (luamerge::Outcome::Replaced, Some(owner)) = (outcome, owner) {
+                clash(format!("{path}, {table}[{key}]: {owner} and {label} set it differently; the one from {label} is used (later in load order)"), &[owner, label]);
+            }
+        }
+        text = next;
+        from.push(label);
+    }
+    Ok(Source::Merged(text))
+}
+
+/// Adds the files players get in this mode from one layer's folder to
+/// `files`: the shared ones plus the mode's folder, whose files replace
+/// shared ones of the same path.
+fn collect(root: &Path, renewal: bool, files: &mut BTreeMap<String, PathBuf>, problems: &mut Vec<String>) -> Result<(), String> {
+    walk(root, true, files, problems)?;
     // A mode folder's name may differ in case, as Windows folders often do.
     let entries = fs::read_dir(root).map_err(|e| format!("{}: {e}", root.display()))?;
     for entry in entries.flatten() {
         let name = entry.file_name();
         if name.to_str().is_some_and(|n| n.eq_ignore_ascii_case(mode_name(renewal))) && entry.path().is_dir() {
             let mut mode_problems = Vec::new();
-            walk(&entry.path(), false, &mut files, &mut sources, &mut mode_problems)?;
+            walk(&entry.path(), false, files, &mut mode_problems)?;
             let folder = name.to_string_lossy();
             problems.extend(mode_problems.into_iter().map(|p| format!("{folder}/{p}")));
         }
     }
-    // Once anything is published, the portal sends players to the
-    // patcher, whose Play button starts the exe.
-    if !files.is_empty() && !files.keys().any(|p| p.eq_ignore_ascii_case(EXE)) {
-        problems.push(format!("{EXE} is missing: every patch needs the patched client, which the patcher's Play button starts."));
-    }
-    problems.sort();
-    Ok((files, sources, problems))
+    Ok(())
 }
 
 /// Adds the files under `root` to `files`, replacing any of the same path.
 /// `skip_modes` leaves out the mode folders at the top.
-fn walk(
-    root: &Path,
-    skip_modes: bool,
-    files: &mut BTreeMap<String, FileState>,
-    sources: &mut BTreeMap<String, PathBuf>,
-    problems: &mut Vec<String>,
-) -> Result<(), String> {
+fn walk(root: &Path, skip_modes: bool, files: &mut BTreeMap<String, PathBuf>, problems: &mut Vec<String>) -> Result<(), String> {
     let mut dirs = vec![PathBuf::new()];
     while let Some(rel) = dirs.pop() {
         let entries = fs::read_dir(root.join(&rel)).map_err(|e| format!("{}: {e}", root.join(&rel).display()))?;
@@ -330,9 +493,7 @@ fn walk(
                 problems.push(format!("{path}: {problem}"));
                 continue;
             }
-            let state = hash_file(&entry.path()).map_err(|e| format!("{path}: {e}"))?;
-            sources.insert(path.clone(), entry.path());
-            files.insert(path, state);
+            files.insert(path, entry.path());
         }
     }
     Ok(())
@@ -426,7 +587,7 @@ mod tests {
             read::archive(&fs::read(self.patches().join(name)).unwrap())
         }
         fn publish(&self) -> Result<Publish, String> {
-            publish(&self.files(), &self.patches(), false)
+            publish(&self.files(), &[], &self.patches(), false)
         }
     }
 
@@ -499,7 +660,7 @@ mod tests {
         assert_eq!(p.changes.removed, ["System/b.lub", "data/a.txt"]);
         assert_eq!(d.thor("0003_data.thor").files[&b"data\\a.txt"[..]], None);
         assert_eq!(d.thor("0004_client.thor").files[&b"System\\b.lub"[..]], None);
-        let s = status(&d.files(), &d.patches(), false).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), false).unwrap();
         assert!(s.changes.is_empty());
         assert_eq!(s.history.len(), 2);
         assert_eq!(s.history[0].patches, ["0003_data.thor", "0004_client.thor"]);
@@ -525,7 +686,7 @@ mod tests {
         d.put(".hidden", b"");
         d.put("data/Thumbs.db", b"");
         d.put("data/ok.txt", b"");
-        let s = status(&d.files(), &d.patches(), false).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), false).unwrap();
         assert_eq!(s.problems.len(), 5, "{:?}", s.problems);
         assert!(s.problems.iter().any(|p| p.starts_with(&format!("{EXE} is missing"))));
         assert_eq!(s.changes.added, ["data/ok.txt"]);
@@ -548,19 +709,74 @@ mod tests {
         assert!(a.files.contains_key(&b"System\\shared.lub"[..]));
         assert!(!a.files.keys().any(|k| k.starts_with(b"Pre-Renewal") || k.starts_with(b"renewal")));
 
-        let s = status(&d.files(), &d.patches(), true).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), true).unwrap();
         assert_eq!((s.mode, s.switched_from.as_deref()), ("Renewal", Some("Pre-Renewal")));
         assert_eq!(s.changes.changed, ["System/tr.lub"]);
         assert_eq!(s.changes.added, ["data/re.txt"]);
-        let p = publish(&d.files(), &d.patches(), true).unwrap();
+        let p = publish(&d.files(), &[], &d.patches(), true).unwrap();
         assert_eq!(p.patches, ["0002_data.thor", "0003_client.thor"]);
         assert_eq!(d.thor("0003_client.thor").files[&b"System\\tr.lub"[..]].as_deref(), Some(&b"re tr"[..]));
-        assert_eq!(status(&d.files(), &d.patches(), true).unwrap().switched_from, None);
+        assert_eq!(status(&d.files(), &[], &d.patches(), true).unwrap().switched_from, None);
 
         // Switching back takes the Renewal-only file away again.
-        let s = status(&d.files(), &d.patches(), false).unwrap();
+        let s = status(&d.files(), &[], &d.patches(), false).unwrap();
         assert_eq!(s.changes.removed, ["data/re.txt"]);
         assert_eq!(s.changes.changed, ["System/tr.lub"]);
+    }
+
+    #[test]
+    fn mods_client_files_are_layered_and_lua_tables_merged() {
+        let d = Dirs::new("mods");
+        d.put(EXE, b"MZ");
+        d.put("System/itemInfo.lua", b"tbl = {\n\t[501] = { name = \"Red Potion\" },\n}\nfunction main() return true end\n");
+        d.put("System/shared.txt", b"from the folder");
+        let mods = d.root.join("mods");
+        let put = |path: &str, content: &[u8]| {
+            let p = mods.join(path);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, content).unwrap();
+        };
+        put("a/client/System/iteminfo.lua", b"tbl = { [501] = { name = \"Red\" }, [30000] = { name = \"Coin\" } }");
+        put("a/client/data/sprite/a.spr", b"a");
+        put("a/client/Renewal/System/re.lub", b"re = {}");
+        put("b/client/System/itemInfo.lua", b"tbl = { [30000] = { name = \"Eden Coin\" } }");
+        put("b/client/System/shared.txt", b"from b");
+        put("b/client/System/compiled.lub", b"\x1bLuaQ b");
+        put("a/client/System/compiled.lub", b"\x1bLuaQ a");
+        put("b/client/rag-wrapper.exe", b"MZ b");
+        let layers = vec![("a".to_owned(), mods.join("a/client")), ("b".to_owned(), mods.join("b/client")), ("c".to_owned(), mods.join("c/client"))];
+
+        let s = status(&d.files(), &layers, &d.patches(), false).unwrap();
+        assert_eq!(s.mods, ["a", "b"]);
+        assert_eq!(s.problems, ["mods/b/client/rag-wrapper.exe: only the client files folder carries the patched client. Delete this one."]);
+        assert_eq!(
+            s.clashes,
+            [
+                "System/compiled.lub: mods/a and mods/b both have this file, and it can't be merged (it's compiled Lua); the one from mods/b is used (later in load order)",
+                "System/itemInfo.lua, tbl[501]: the client files folder and mods/a set it differently; the one from mods/a is used (later in load order)",
+                "System/itemInfo.lua, tbl[30000]: mods/a and mods/b set it differently; the one from mods/b is used (later in load order)",
+                "System/shared.txt: the client files folder and mods/b both have this file; the one from mods/b is used (later in load order)",
+            ]
+        );
+        let found = clashes(&d.files(), &layers, false);
+        assert_eq!(found[1].mods, ["a"]);
+        assert_eq!(found[2].mods, ["a", "b"]);
+
+        fs::remove_file(mods.join("b/client/rag-wrapper.exe")).unwrap();
+        publish(&d.files(), &layers, &d.patches(), false).unwrap();
+        assert!(d.thor("0001_data.thor").files.contains_key(&b"data\\sprite\\a.spr"[..]));
+        let client = d.thor("0002_client.thor");
+        let info = String::from_utf8(client.files[&b"System\\itemInfo.lua"[..]].clone().unwrap()).unwrap();
+        assert_eq!(info, "tbl = {\n\t[501] = { name = \"Red\" },\n\t[30000] = { name = \"Eden Coin\" },\n}\nfunction main() return true end\n");
+        assert_eq!(client.files[&b"System\\shared.txt"[..]].as_deref(), Some(&b"from b"[..]));
+        assert_eq!(client.files[&b"System\\compiled.lub"[..]].as_deref(), Some(&b"\x1bLuaQ b"[..]));
+        assert!(!client.files.contains_key(&b"System\\re.lub"[..]), "another mode's file");
+
+        // Switching a mod off takes its files away with the next patch.
+        let s = status(&d.files(), &layers[1..], &d.patches(), false).unwrap();
+        assert_eq!(s.changes.removed, ["data/sprite/a.spr"]);
+        assert_eq!(s.changes.changed, ["System/itemInfo.lua"]);
+        assert!(status(&d.files(), &[], &d.patches(), false).unwrap().clashes.is_empty());
     }
 
     #[test]

@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,9 @@ pub struct Mod {
     pub scripts: Vec<String>,
     /// The database files it loads, relative to the mod's folder.
     pub databases: Vec<String>,
+    /// How many client files it has in `client/`, which go out with the
+    /// next client patch rather than the next restart.
+    pub client_files: usize,
     /// Why it can't be switched on.
     pub problem: Option<String>,
     /// Switched on or off, or its files changed, since the running server started.
@@ -47,6 +50,8 @@ pub struct Mod {
     /// Values it and another mod both set differently, as the enabled
     /// mods are now; one of them is used.
     pub clashes: Vec<String>,
+    /// The same for its client files, as the next client patch has them.
+    pub client_clashes: Vec<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -178,8 +183,10 @@ fn folders(dir: &Path) -> Vec<String> {
     names
 }
 
-/// The enabled mods `entrypoint.sh` would load now, in order, with their fingerprints.
+/// The enabled mods `entrypoint.sh` would load now, in order, with their
+/// fingerprints. A mod with only client files gives the server nothing.
 fn current(dir: &Path) -> Vec<(String, Fingerprint)> {
+    let none = checksum(dir, &[]);
     enabled(dir)
         .into_iter()
         .filter(|n| valid_name(n) && dir.join(n).is_dir())
@@ -187,7 +194,32 @@ fn current(dir: &Path) -> Vec<(String, Fingerprint)> {
             let print = fingerprint(&dir.join(&n));
             (n, print)
         })
+        .filter(|(_, print)| print.files != none)
         .collect()
+}
+
+/// The folder a mod keeps its client files in, laid out like the game
+/// client's folder.
+const CLIENT: &str = "client";
+
+/// The enabled mods with client files, in load order, and their client
+/// folders, which the next client patch adds to the client files folder.
+pub fn client_mods(dir: &Path) -> Vec<(String, PathBuf)> {
+    enabled(dir)
+        .into_iter()
+        .filter(|n| valid_name(n))
+        .map(|n| {
+            let client = dir.join(&n).join(CLIENT);
+            (n, client)
+        })
+        .filter(|(_, client)| client.is_dir())
+        .collect()
+}
+
+fn count_files(root: &Path) -> usize {
+    let mut n = 0;
+    walk(root, CLIENT, &mut |_| n += 1);
+    n
 }
 
 fn applied(dir: &Path) -> Vec<(String, Fingerprint)> {
@@ -231,7 +263,14 @@ pub fn clash_key(dir: &Path) -> String {
 /// `log` is its log, searched for errors in each mod's files. `checked` is
 /// the output of `merge_mods.py --check` for the mods as they are now;
 /// without it, clashes come from the map server's latest start in `log`.
-pub fn status(dir: &Path, running: bool, log: &str, checked: Option<&str>) -> Status {
+/// `client_clashes` are the clashes in the mods' client files, by mod.
+pub fn status(
+    dir: &Path,
+    running: bool,
+    log: &str,
+    checked: Option<&str>,
+    mut client_clashes: BTreeMap<String, Vec<String>>,
+) -> Status {
     let on = enabled(dir);
     let loaded = applied(dir);
     let applied: BTreeMap<&String, &Fingerprint> = loaded.iter().map(|(n, p)| (n, p)).collect();
@@ -244,10 +283,12 @@ pub fn status(dir: &Path, running: bool, log: &str, checked: Option<&str>) -> St
         .map(|name| {
             let root = dir.join(&name);
             let (scripts, databases) = files(&root);
+            let client_files = count_files(&root);
+            let server = !scripts.is_empty() || !databases.is_empty();
             let problem = if !valid_name(&name) {
                 Some("Rename the folder to switch it on: only letters, digits, . _ and - work in a mod's name.".to_owned())
-            } else if scripts.is_empty() && databases.is_empty() {
-                Some("Nothing to load: put NPC scripts (.txt) in npc/ or database files (.yml) in db/.".to_owned())
+            } else if !server && client_files == 0 {
+                Some("Nothing to load: put NPC scripts (.txt) in npc/, database files (.yml) in db/ or client files in client/.".to_owned())
             } else {
                 None
             };
@@ -255,12 +296,14 @@ pub fn status(dir: &Path, running: bool, log: &str, checked: Option<&str>) -> St
             let pending = running
                 && match (enabled, applied.get(&name)) {
                     (true, Some(a)) => **a != fingerprint(&root),
-                    (true, None) => true,
+                    (true, None) => server,
                     (false, loaded) => loaded.is_some(),
                 };
             Mod {
                 errors: errors.remove(&name).unwrap_or_default(),
                 clashes: clashes.remove(&name).unwrap_or_default(),
+                client_clashes: client_clashes.remove(&name).unwrap_or_default(),
+                client_files,
                 name,
                 enabled,
                 scripts,
@@ -437,7 +480,7 @@ mod tests {
         write(&dir, ".hidden/npc/x.txt", "x");
         write(&dir, "README.md", "x");
 
-        let s = status(&dir, false, "", None);
+        let s = status(&dir, false, "", None, BTreeMap::new());
         let names: Vec<&str> = s.mods.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(names, ["a-empty", "b-shop", "bad name"]);
         assert!(s.mods[0].problem.as_deref().unwrap().starts_with("Nothing to load"));
@@ -446,6 +489,23 @@ mod tests {
         assert!(s.mods[1].problem.is_none());
         assert!(s.mods[2].problem.as_deref().unwrap().starts_with("Rename"));
         assert!(!s.restart_needed);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn client_files_go_out_with_a_patch_not_a_restart() {
+        let dir = temp_dir("client");
+        write(&dir, "icons/client/System/itemInfo.lua", "x");
+        write(&dir, "icons/client/data/texture/a.bmp", "x");
+        write(&dir, "off/client/System/x.lub", "x");
+        write(&dir, ENABLED, "icons\n");
+        let clashes = BTreeMap::from([("icons".to_owned(), vec!["System/itemInfo.lua, tbl[501]: ...".to_owned()])]);
+        let s = status(&dir, true, "", None, clashes);
+        let icons = &s.mods[0];
+        assert_eq!((icons.client_files, icons.problem.is_none(), icons.pending), (2, true, false));
+        assert_eq!(icons.client_clashes.len(), 1);
+        assert!(!s.restart_needed);
+        assert_eq!(client_mods(&dir), [("icons".to_owned(), dir.join("icons/client"))]);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -462,14 +522,14 @@ mod tests {
         assert_eq!(fs::read_to_string(dir.join(ENABLED)).unwrap(), format!("{ENABLED_HEADER}warper\nshop\n"));
 
         // Stopped: nothing is pending, it loads at the next start.
-        assert!(!status(&dir, false, "", None).mods.iter().any(|m| m.pending));
-        let s = status(&dir, true, "", None);
+        assert!(!status(&dir, false, "", None, BTreeMap::new()).mods.iter().any(|m| m.pending));
+        let s = status(&dir, true, "", None, BTreeMap::new());
         assert!(s.restart_needed);
         assert!(s.mods.iter().find(|m| m.name == "shop").unwrap().pending);
         assert!(new_databases(&dir).is_empty());
 
         record_applied(&dir).unwrap();
-        let s = status(&dir, true, "", None);
+        let s = status(&dir, true, "", None, BTreeMap::new());
         assert!(!s.restart_needed);
         assert!(!s.mods.iter().any(|m| m.pending));
 
@@ -483,7 +543,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         write(&dir, "items/db/item_db.yml", "changed");
         assert!(new_databases(&dir).is_empty());
-        assert!(status(&dir, true, "", None).mods.iter().find(|m| m.name == "items").unwrap().pending);
+        assert!(status(&dir, true, "", None, BTreeMap::new()).mods.iter().find(|m| m.name == "items").unwrap().pending);
         // A loaded mod that gains its first database file does.
         write(&dir, "shop/db/mob_db.yml", "x");
         assert_eq!(new_databases(&dir), ["shop"]);
@@ -491,7 +551,7 @@ mod tests {
 
         // Switching off shows as pending until the restart.
         set_enabled(&dir, "shop", false).unwrap();
-        let s = status(&dir, true, "", None);
+        let s = status(&dir, true, "", None, BTreeMap::new());
         assert!(s.restart_needed);
         assert!(s.mods.iter().find(|m| m.name == "shop").unwrap().pending);
         fs::remove_dir_all(dir).unwrap();
@@ -506,7 +566,7 @@ mod tests {
         write(&dir, ENABLED, "c\ngone\na\nc\n");
         set_enabled(&dir, "b", true).unwrap();
         assert_eq!(enabled(&dir), ["c", "gone", "a", "b"]);
-        let order = |dir: &Path| status(dir, false, "", None).mods.into_iter().map(|m| m.name).collect::<Vec<_>>();
+        let order = |dir: &Path| status(dir, false, "", None, BTreeMap::new()).mods.into_iter().map(|m| m.name).collect::<Vec<_>>();
         assert_eq!(order(&dir), ["c", "a", "b", "d"]);
 
         record_applied(&dir).unwrap();
@@ -518,7 +578,7 @@ mod tests {
         assert_eq!(enabled(&dir), ["a", "gone", "c", "b"]);
         assert!(move_mod(&dir, "d", true).is_err());
         // Reordering waits for a restart too.
-        assert!(status(&dir, true, "", None).restart_needed);
+        assert!(status(&dir, true, "", None, BTreeMap::new()).restart_needed);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -526,11 +586,11 @@ mod tests {
     fn spots_an_image_without_mod_loading() {
         let dir = temp_dir("rebuild");
         write(&dir, "shop/npc/x.txt", "x");
-        assert!(!status(&dir, true, "[Info]: old image\n", None).rebuild_needed);
+        assert!(!status(&dir, true, "[Info]: old image\n", None, BTreeMap::new()).rebuild_needed);
         set_enabled(&dir, "shop", true).unwrap();
-        assert!(status(&dir, true, "[Info]: old image\n", None).rebuild_needed);
-        assert!(!status(&dir, true, "Mods enabled: shop \nMod: shop\n", None).rebuild_needed);
-        assert!(!status(&dir, false, "", None).rebuild_needed);
+        assert!(status(&dir, true, "[Info]: old image\n", None, BTreeMap::new()).rebuild_needed);
+        assert!(!status(&dir, true, "Mods enabled: shop \nMod: shop\n", None, BTreeMap::new()).rebuild_needed);
+        assert!(!status(&dir, false, "", None, BTreeMap::new()).rebuild_needed);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -596,8 +656,8 @@ Mods enabled: a b c
         write(&dir, ENABLED, "a\nb\n");
         let log = "Mods enabled: a b\n[Warning]: Mod clash in item_db.yml, Id 501, Buy: mods/a/db/item_db.yml line 6 sets 1, mods/b/db/item_db.yml line 6 sets 2; the value from mods/b/ is used (later in load order)\n";
         let clashes = |s: Status| s.mods.into_iter().map(|m| m.clashes.len()).collect::<Vec<_>>();
-        assert_eq!(clashes(status(&dir, true, log, None)), [1, 1]);
-        assert_eq!(clashes(status(&dir, true, log, Some(""))), [0, 0]);
+        assert_eq!(clashes(status(&dir, true, log, None, BTreeMap::new())), [1, 1]);
+        assert_eq!(clashes(status(&dir, true, log, Some(""), BTreeMap::new())), [0, 0]);
         let key = clash_key(&dir);
         assert!(key.starts_with("a:") && key.contains("\nb:"));
         write(&dir, ENABLED, "b\na\n");

@@ -106,6 +106,9 @@ main { flex: 1; min-height: 0; padding: 16px 20px; }
 #mods details { margin: 4px 0 0 22px; font-size: 12px; }
 #mods summary { color: var(--bad); cursor: pointer; }
 #mods pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+#patch-clashes { margin: 8px 0; font-size: 12px; }
+#patch-clashes[hidden] { display: none; }
+#patch-clashes pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg); border-radius: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 #live-page { overflow: auto; display: flex; flex-direction: column; gap: 16px; }
 #live-page .card { max-width: 760px; width: 100%; }
 #live-page[hidden] { display: none; }
