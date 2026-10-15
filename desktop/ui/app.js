@@ -1242,7 +1242,9 @@ $("news-page").addEventListener("input", (e) => {
 });
 
 $("news-add").addEventListener("click", () => {
-  const card = newsCard({ title: "", body: "" });
+  // The date in italics on the first line, so players can tell how old a post is.
+  const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const card = newsCard({ title: "", body: `*${today}*\n\n` });
   $("news-posts").prepend(card);
   renumberNews();
   setNewsDirty(true);
