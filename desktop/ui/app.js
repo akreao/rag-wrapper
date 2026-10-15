@@ -277,6 +277,7 @@ async function refreshOverview() {
   $("nav-live").hidden = !overview.configured;
   $("nav-patch").hidden = !overview.configured;
   $("nav-mods").hidden = !overview.configured;
+  $("nav-news").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
     if ($("setup-ip").value !== "other") {
@@ -416,7 +417,7 @@ function updateButtons() {
   $("cancel").hidden = !["build", "update", "start", "restart", "readdress", "portal"].includes(task);
 }
 
-// ---- Pages: the main screen, Dashboard, Settings, Backups and Client patch ----
+// ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods and News ----
 
 let page = "dashboard";
 
@@ -428,11 +429,13 @@ function showPage(next) {
   $("live-page").hidden = next !== "live";
   $("patch-page").hidden = next !== "patch";
   $("mods-page").hidden = next !== "mods";
+  $("news-page").hidden = next !== "news";
   $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
   $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
   $("nav-live").textContent = page === "live" ? "Back to server" : "Dashboard";
   $("nav-patch").textContent = page === "patch" ? "Back to server" : "Client patch";
   $("nav-mods").textContent = page === "mods" ? "Back to server" : "Mods";
+  $("nav-news").textContent = page === "news" ? "Back to server" : "News";
   if (next === "live") refreshLive();
 }
 
@@ -1150,6 +1153,121 @@ $("mods-rebuild-button").addEventListener("click", () => {
 $("mods-restart").addEventListener("click", () => {
   showPage("dashboard");
   runTask("restart");
+});
+
+// ---- News: the portal's news.md, one card per post ----
+
+let newsText = ""; // the file as last read, so a save can spot a hand edit
+let newsDirty = false;
+
+function newsMessage(error, saved) {
+  $("news-error").textContent = error || "";
+  $("news-error").hidden = !error;
+  $("news-saved").hidden = !saved;
+}
+
+function setNewsDirty(dirty) {
+  newsDirty = dirty;
+  $("news-save").disabled = !dirty;
+  if (dirty) newsMessage(null, false);
+}
+
+function newsCard(post) {
+  const card = document.createElement("section");
+  card.className = "card post";
+  const head = document.createElement("div");
+  head.className = "post-head";
+  const title = document.createElement("input");
+  title.className = "title";
+  title.value = post.title;
+  title.placeholder = "Title";
+  title.setAttribute("aria-label", "Title");
+  const newest = document.createElement("span");
+  newest.className = "newest muted";
+  newest.textContent = "Shown in the patcher";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Delete";
+  remove.title = "Removed when you save. Reload brings it back until then.";
+  remove.addEventListener("click", () => {
+    card.remove();
+    renumberNews();
+    setNewsDirty(true);
+  });
+  head.append(title, newest, remove);
+  const body = document.createElement("textarea");
+  body.className = "body";
+  body.rows = Math.min(16, Math.max(4, post.body.split("\n").length + 1));
+  body.value = post.body;
+  body.placeholder = "What's new";
+  body.setAttribute("aria-label", "Text");
+  card.append(head, body);
+  return card;
+}
+
+// Only the first card is the newest post, which the patcher's window shows.
+function renumberNews() {
+  const cards = [...$("news-posts").children];
+  cards.forEach((card, i) => (card.querySelector(".newest").hidden = i !== 0));
+  $("no-news").hidden = cards.length > 0;
+}
+
+function showNews(news) {
+  newsText = news.text;
+  $("news-intro").value = news.intro;
+  $("news-intro-box").open = !!news.intro;
+  $("news-posts").replaceChildren(...news.posts.map(newsCard));
+  renumberNews();
+  setNewsDirty(false);
+}
+
+async function loadNews() {
+  newsMessage(null, false);
+  try {
+    showNews(await invoke("news"));
+  } catch (err) {
+    newsMessage(String(err), false);
+  }
+}
+
+$("nav-news").addEventListener("click", async () => {
+  if (page === "news") return showPage("dashboard");
+  // Unsaved edits stay while other screens are open.
+  if (!newsDirty) await loadNews();
+  showPage("news");
+});
+
+$("news-page").addEventListener("input", (e) => {
+  if (e.target.matches("input, textarea")) setNewsDirty(true);
+});
+
+$("news-add").addEventListener("click", () => {
+  const card = newsCard({ title: "", body: "" });
+  $("news-posts").prepend(card);
+  renumberNews();
+  setNewsDirty(true);
+  card.querySelector(".title").focus();
+});
+
+$("news-save").addEventListener("click", async () => {
+  const posts = [...$("news-posts").children].map((card) => ({
+    title: card.querySelector(".title").value,
+    body: card.querySelector(".body").value,
+  }));
+  try {
+    showNews(await invoke("save_news", { news: { intro: $("news-intro").value, posts, text: newsText } }));
+    newsMessage(null, true);
+  } catch (err) {
+    newsMessage(String(err), false);
+  }
+});
+
+$("news-reload").addEventListener("click", loadNews);
+
+$("news-open").addEventListener("click", () => {
+  // The portal's address is known only while it runs.
+  if ($("portal").hidden) return newsMessage("Start the server to open the account portal.", false);
+  invoke("open_url", { url: `${$("portal-link").dataset.url}news` });
 });
 
 // ---- Tasks ----
