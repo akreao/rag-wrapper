@@ -10,3 +10,9 @@ Roadmap feature 16: a template mod with both halves of a custom item and a guide
 - **The template ships inside the app.** It's compiled into the desktop app (`desktop/src-tauri/item-mod/`, `itemkit.rs`), not kept in `mods/`, so it isn't listed as a mod. The Mods screen's New item mod button copies it into `mods/<name>/`, switched off, and opens the folder.
 - **The Mods screen checks each mod's custom items.** It lists an item in the custom range in the mod's `item_db.yml` with no `tbl_custom` entry in its client files, a `tbl_custom` entry with no `item_db.yml` entry, and any other itemInfo file, which would replace the players' list or not be read. The check is per mod, as one mod is meant to carry both halves, and only for the custom range, since a mod changing an official item's price needs no client entry.
 - **Checked on real files.** The template loaded in a local build of the pinned rAthena commit (Pre-Renewal, 20250716) with no errors or warnings: 2 items from the mod's `item_db.yml`, the shop among the NPCs. The template's `itemInfo_C.lua` loaded in Lua 5.1 the translation's way and gave the right CP949 sprite names.
+
+Questions asked about the finished work (PR #50), one at a time.
+
+- **Custom items carry the server's name.** Asked whether to hide the translation's "[ExampleRO]" tag, show the server's name or leave it; Steven wanted the server's name, which the `CServerName` line above does.
+- **A new item mod starts switched off.** The button only creates the folder, so the items are edited before they load; switching it on and restarting stays a separate step.
+- **The missing-half check stays per mod.** A mod is warned even when another enabled mod has the other half, since the kit keeps both halves in one mod and the warning should point at the mod to fix, not move when other mods are switched off.
