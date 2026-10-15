@@ -179,12 +179,13 @@ func run() int {
 	icc := struct{ Size, ICC uint32 }{8, iccProgress | iccStandard}
 	pInitCommonControlsE.Call(uintptr(unsafe.Pointer(&icc)))
 
+	// The path Windows started the patcher from. It isn't resolved any
+	// further (filepath.EvalSymlinks): under Wine that can fail with "Path
+	// not found" on folders it reads differently, and the client folder is
+	// simply where the patcher is.
 	exe, err := os.Executable()
-	if err == nil {
-		exe, err = filepath.EvalSymlinks(exe)
-	}
 	if err != nil {
-		messageBox(0, "Patcher", err.Error(), mbIconErr)
+		messageBox(0, "Patcher", "Couldn't find the patcher's own folder: "+err.Error(), mbIconErr)
 		return 1
 	}
 	dir := filepath.Dir(exe)
