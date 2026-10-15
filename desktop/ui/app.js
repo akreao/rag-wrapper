@@ -335,8 +335,6 @@ function renderAddressChange(change) {
   $("address-hint").hidden = !overview.public_ip_auto;
 }
 
-const connectLink = () => `http://${overview.address_change.to}:${overview.portal_port}/connect`;
-
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text);
@@ -355,7 +353,7 @@ async function copyText(text) {
 
 $("address-copy").addEventListener("click", async () => {
   try {
-    await copyText(connectLink());
+    await copyText(overview.address_change.link);
     $("address-copy").textContent = "Copied";
     setTimeout(() => ($("address-copy").textContent = "Copy the link"), 2000);
   } catch (err) {
