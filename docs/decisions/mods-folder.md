@@ -42,3 +42,10 @@ Questions asked about the finished feature (PR #24), one at a time.
 - **Two mods adding the same drop to a monster give it once, not twice.** rAthena rolls every drop on its own, so a second copy doesn't dilute the others, but it doubles the item's chance and takes a second of the monster's 10 drop slots, which neither mod meant. Built in the follow-up PR.
 - **Clashes show on the Mods screen as soon as a mod's files change**, not only after a restart. The app runs the server's own check (`merge_mods.py --check`) in the rAthena image whenever the enabled mods, their order or their database files change, so the rules stay in one place, and the screen refreshes every 5 seconds while it's open. When the image predates the check, it falls back to the clashes in the map server's log from its latest start.
 - **A mod file with `Header: Clear: true` still loads, with a warning** under the mod. It empties that database, rAthena's own entries and earlier mods' included, which is how a mod replaces a whole table (custom EXP levels, say); skipping the file would guard against a copy-paste slip but rule that out.
+
+## Barters and replacing NPCs
+
+Asked when Steven tested his first mod (2026-10-15).
+
+- **A mod's `db/barters.yml` loads**, under the `Footer` of `npc/custom/barters.yml`, since rAthena reads barters from `npc/barters.yml` rather than `db/import/`. The entrypoint keeps a copy of `npc/custom/barters.yml` from the first start and restores it on every start, as it does for the `db/import/` files, so a mod switched off leaves nothing behind. Clashes are checked like the other databases (by `Name`, then item `Index`). Before this the file was skipped with a warning.
+- **Replacing one of rAthena's NPCs is done in the mod's script with `unloadnpc`**, not by the loader: an NPC with the same unique name loads as a second NPC and gets renamed, so the mod gives its NPC its own name and unloads the original `OnInit`. Checked on a real build: the original was gone and the mod's NPC stood in its place.

@@ -136,6 +136,15 @@ enabled_mods() {
 		done | awk '!seen[$0]++'
 }
 
+# The import file a mod's database file is added to. Most are rAthena's
+# db/import/ files; barters live with the NPCs, under npc/custom/.
+import_target() {
+	case "$1" in
+		barters.yml) echo npc/custom/barters.yml ;;
+		*) if [ -f "db/import-tmpl/$1" ]; then echo "db/import/$1"; fi ;;
+	esac
+}
+
 apply_mods() {
 	mode=re
 	if [ "${PRERE:-yes}" = "yes" ]; then
@@ -147,6 +156,11 @@ apply_mods() {
 	for path in db/import-tmpl/*.yml; do
 		cp "${path}" "db/import/$(basename "${path}")"
 	done
+	# npc/custom/barters.yml has no template, so the first start keeps a copy.
+	if [ ! -f npc/custom/barters.yml.orig ]; then
+		cp npc/custom/barters.yml npc/custom/barters.yml.orig
+	fi
+	cp npc/custom/barters.yml.orig npc/custom/barters.yml
 	if ! grep -qx 'import: npc/mods.conf' npc/scripts_custom.conf; then
 		printf '\nimport: npc/mods.conf\n' >> npc/scripts_custom.conf
 	fi
@@ -166,8 +180,8 @@ apply_mods() {
 				continue
 			fi
 			file=$(basename "${path}")
-			if [ ! -f "db/import-tmpl/${file}" ]; then
-				echo "[Warning]: ${path} skipped: it isn't named after one of rAthena's databases in db/import" >&2
+			if [ -z "$(import_target "${file}")" ]; then
+				echo "[Warning]: ${path} skipped: it isn't named after one of rAthena's databases in db/import (or barters.yml)" >&2
 				continue
 			fi
 			printf '%s %s\n' "${file}" "${path}" >> "${imports}"
@@ -190,7 +204,7 @@ apply_mods() {
 		{
 			printf '\nFooter:\n  Imports:\n'
 			awk -v f="${file}" '$1 == f { sub(/^[^ ]+ /, ""); gsub(/\047/, "\047\047"); printf "    - Path: \047%s\047\n", $0 }' "${imports}"
-		} >> "db/import/${file}"
+		} >> "$(import_target "${file}")"
 	done
 	rm -f "${imports}"
 }

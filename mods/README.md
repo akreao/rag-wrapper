@@ -17,8 +17,19 @@ mods/
     db/pre-re/mob_db.yml
 ```
 
-- **`npc/`**: every `.txt` file in it (subfolders too) is loaded as an NPC script, in path order, after rAthena's own scripts. `@reloadscript` keeps them.
-- **`db/`**: YAML files named like rAthena's `db/import/` files (`item_db.yml`, `mob_db.yml`, `quest_db.yml`, ...), in the same format, `Header` included. They're loaded after rAthena's own entries and `db/import`, so an entry with an existing `Id` changes it and a new one adds to it. Files in `db/pre-re/` or `db/re/` are only loaded in that game mode.
+- **`npc/`**: every `.txt` file in it (subfolders too) is loaded as an NPC script, in path order, after rAthena's own scripts. `@reloadscript` keeps them. An NPC doesn't replace one of rAthena's with the same name: both load, and yours is renamed with a `Duplicate unique name` warning. To replace one, give yours its own unique name and unload the original when the scripts load:
+
+  ```
+  prontera,104,49,0	shop	Fruit Gardener#eden	102,512:-1
+  -	script	EdenUnload	-1,{
+  OnInit:
+  	unloadnpc "Fruit Gardener#prt";
+  	end;
+  }
+  ```
+
+  `unloadnpc` takes the original's unique name (after `#`, if it has one) and also unloads its `duplicate`s.
+- **`db/`**: YAML files named like rAthena's `db/import/` files (`item_db.yml`, `mob_db.yml`, `quest_db.yml`, ...), in the same format, `Header` included, plus `barters.yml` for barter shops (rAthena's `npc/barters.yml` format), which loads after `npc/custom/barters.yml`. They're loaded after rAthena's own entries and `db/import`, so an entry with an existing `Id` changes it and a new one adds to it. Files in `db/pre-re/` or `db/re/` are only loaded in that game mode.
 - Nothing for the game client: sprites, item names in the client and other client files go out through the desktop app's Client patch screen.
 
 ## Turning mods on

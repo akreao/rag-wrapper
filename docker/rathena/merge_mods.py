@@ -134,6 +134,7 @@ RULES = {
     "elemental_db.yml": {"key": ["Id"]},
     "pet_db.yml": {"key": ["Mob"], "lists": {"Evolution": ["Target"], "Evolution.ItemRequirements": ["Item"]}},
     "stylist.yml": {"key": ["Look"], "lists": {"Options": ["Index"]}},
+    "barters.yml": {"key": ["Name"], "lists": {"Items": ["Index"], "Items.RequiredItems": ["Index"]}},
     "achievement_db.yml": {"key": ["Id"], "lists": {"Targets": ["Id"]}},
     "achievement_level_db.yml": {"key": ["Level"]},
     "guild_skill_tree.yml": {"key": ["Id"], "lists": {"Required": ["Id"]}},
@@ -148,6 +149,9 @@ RULES = {
 
 # rAthena's own import files, relative to /rathena.
 IMPORT_TMPL = "db/import-tmpl"
+# Database files a mod may have that aren't in IMPORT_TMPL (entrypoint.sh's
+# import_target()).
+OTHER_IMPORTS = {"barters.yml"}
 
 # Longest value quoted in a warning.
 MAX_VALUE = 40
@@ -462,7 +466,7 @@ def enabled(mods_dir, mode):
                 continue
             for file in found:
                 path = os.path.join(folder, file)
-                if file.endswith(".yml") and os.path.isfile(path) and os.path.isfile(os.path.join(IMPORT_TMPL, file)):
+                if file.endswith(".yml") and os.path.isfile(path) and (file in OTHER_IMPORTS or os.path.isfile(os.path.join(IMPORT_TMPL, file))):
                     files.append((file, path))
     return files
 
