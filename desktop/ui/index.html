@@ -233,6 +233,22 @@
       <p id="no-players" class="hint">The server is off.</p>
     </section>
     <section class="card">
+      <div class="online-head">
+        <h2>Players over time</h2>
+        <span id="history-summary" class="muted"></span>
+        <span class="range" role="group" aria-label="Time range">
+          <button id="history-day" aria-pressed="true">Last day</button>
+          <button id="history-week" aria-pressed="false">Last week</button>
+        </span>
+      </div>
+      <div id="history-chart" class="chart" hidden>
+        <svg id="history-svg" role="img" aria-labelledby="history-summary"></svg>
+        <div id="history-tip" class="chart-tip" hidden></div>
+      </div>
+      <p id="no-history" class="hint">No counts yet.</p>
+      <p id="history-hint" class="hint"></p>
+    </section>
+    <section class="card">
       <h2>Resources</h2>
       <table id="usage" class="table" hidden>
         <thead><tr><th>Service</th><th class="num">CPU</th><th class="num">Memory</th></tr></thead>
