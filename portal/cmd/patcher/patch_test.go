@@ -57,7 +57,7 @@ func runUpdate(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := fetchInfo(context.Background(), cfg)
+	info, err := fetchInfo(context.Background(), dir, &cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

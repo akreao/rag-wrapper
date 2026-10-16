@@ -205,6 +205,7 @@ fn write_setup(
     }
     env.set("ADMIN_USER", admin_user);
     env.set("ADMIN_PASSWORD", admin_password);
+    ensure_signing_key(&mut env)?;
     apply_public_ip(&mut env, public_ip);
     env.save().map_err(|e| e.to_string())
 }
@@ -632,13 +633,28 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
 /// address unless one is pinned.
 fn up_command(app: &App) -> Result<std::process::Command, String> {
     let mut env = app.env().ok_or("Finish setup first.")?;
+    let mut changed = ensure_signing_key(&mut env)?;
     if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
         apply_public_ip(&mut env, None);
+        changed = true;
+    }
+    if changed {
         env.save().map_err(|e| e.to_string())?;
     }
     let mut cmd = stack::compose(&app.dir);
     cmd.args(["--progress", "plain", "up", "--detach"]);
     Ok(cmd)
+}
+
+/// Makes the secret the portal signs the patcher's downloads with
+/// (`portal/signing.go`), once: players' patchers keep the key it makes, so
+/// it never changes. Returns whether it was made.
+fn ensure_signing_key(env: &mut EnvFile) -> Result<bool, String> {
+    if !env.get("PATCH_SIGNING_KEY").unwrap_or_default().is_empty() {
+        return Ok(false);
+    }
+    env.set("PATCH_SIGNING_KEY", &envfile::random_password(40).map_err(|e| e.to_string())?);
+    Ok(true)
 }
 
 /// Where players reach the server: its address and the portal port, as
@@ -1061,6 +1077,7 @@ mod tests {
         passwords.sort();
         passwords.dedup();
         assert_eq!(passwords.len(), 3);
+        assert_eq!(env.get("PATCH_SIGNING_KEY").map(|k| k.len()), Some(40));
 
         assert_eq!(env.get("ADMIN_USER").as_deref(), Some("admin"));
         assert_eq!(env.get("ADMIN_PASSWORD").as_deref(), Some("secret_1"));
@@ -1089,15 +1106,28 @@ mod tests {
         }
 
         // Running setup again only changes the admin account and address.
+        let key = env.get("PATCH_SIGNING_KEY");
         let mut edited = EnvFile::load(&path).unwrap();
         edited.set("DB_PASSWORD", "kept");
         edited.save().unwrap();
         write_setup(&path, || panic!("not asked again"), "admin2", "secret_2", Some("192.168.0.5".into())).unwrap();
         let env = EnvFile::load(&path).unwrap();
         assert_eq!(env.get("DB_PASSWORD").as_deref(), Some("kept"));
+        assert_eq!(env.get("PATCH_SIGNING_KEY"), key);
         assert_eq!(env.get("ADMIN_USER").as_deref(), Some("admin2"));
         assert_eq!(env.get("PUBLIC_IP").as_deref(), Some("192.168.0.5"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn signing_key_is_made_once() {
+        // An install from before signing gets one on its next start.
+        let mut env = EnvFile::parse("PATCH_SIGNING_KEY=\n");
+        assert!(ensure_signing_key(&mut env).unwrap());
+        let key = env.get("PATCH_SIGNING_KEY").unwrap();
+        assert_eq!(key.len(), 40);
+        assert!(!ensure_signing_key(&mut env).unwrap());
+        assert_eq!(env.get("PATCH_SIGNING_KEY"), Some(key));
     }
 
     #[test]

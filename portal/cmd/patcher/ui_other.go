@@ -30,7 +30,7 @@ func run() int {
 		return 1
 	}
 	ctx := context.Background()
-	info, err := fetchInfo(ctx, cfg)
+	info, err := fetchInfo(ctx, *dir, &cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

@@ -252,7 +252,12 @@ func (w *window) patch() {
 		s.status = "Connecting to " + w.cfg.Portal + "..."
 	})
 	ctx := context.Background()
-	info, err := fetchInfo(ctx, w.cfg)
+	info, err := fetchInfo(ctx, w.dir, &w.cfg)
+	var untrusted *trustError
+	if errors.As(err, &untrusted) {
+		set(func() { s.failed, s.status = true, untrusted.Error() })
+		return
+	}
 	if err != nil {
 		set(func() {
 			s.failed = true
@@ -263,7 +268,7 @@ func (w *window) patch() {
 	}
 	set(func() {
 		s.title = info.ServerName
-		s.links = [3]string{info.AccountURL, info.ConnectURL, info.NewsURL}
+		s.links = [3]string{safeLink(w.cfg.Portal, info.AccountURL), safeLink(w.cfg.Portal, info.ConnectURL), safeLink(w.cfg.Portal, info.NewsURL)}
 		s.news = "No news yet."
 		if info.News != nil {
 			s.news = info.News.Title + "\n\n" + info.News.Text
