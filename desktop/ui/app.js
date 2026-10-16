@@ -1549,6 +1549,7 @@ $("start").addEventListener("click", () => runTask("start"));
 $("stop").addEventListener("click", () => runTask("stop"));
 $("build").addEventListener("click", () => runTask("build"));
 $("cancel").addEventListener("click", () => invoke("cancel_task"));
+$("quit").addEventListener("click", () => invoke("quit_app"));
 $("tab-activity").addEventListener("click", () => showView("activity"));
 
 listen("task-line", ({ payload }) => {

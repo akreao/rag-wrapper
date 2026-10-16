@@ -1063,7 +1063,8 @@ pub fn run() {
             set_keep_running,
             set_start_at_login,
             launched_at_login,
-            show_window
+            show_window,
+            quit_app
         ])
         .on_window_event(|window, event| {
             // Only the main window's close concerns the server; the battle
@@ -1170,6 +1171,12 @@ fn set_start_at_login(handle: AppHandle, on: bool) -> Result<(), String> {
 #[tauri::command]
 fn launched_at_login(app: State<App>) -> bool {
     app.at_login.swap(false, Ordering::SeqCst)
+}
+
+/// The window's Quit button, for a desktop that shows no tray.
+#[tauri::command]
+fn quit_app(handle: AppHandle) {
+    quit(&handle);
 }
 
 /// Shows the window, when something started in the background needs the user.

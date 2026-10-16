@@ -36,7 +36,7 @@ CI publishes the rAthena image for each pinned commit and the previous release's
 
 Closing the window while the server runs (or a build, start or backup is under way) hides it and keeps everything running; rag-wrapper stays in the system tray. The tray icon's menu opens the window, starts or stops the server, or quits. When the server is off, closing the window quits. Opening the app again from the applications menu also brings the window back, which is the way in on a desktop that shows no tray (GNOME without the AppIndicator extension).
 
-**Quitting** (the tray's **Stop server and quit**, or closing the window with nothing running) cancels any build, start or restore test in progress, makes the daily backup if one is due, runs `docker compose down` (keeping the database volume) and then exits, showing its output in the window meanwhile.
+**Quitting** (the header's **Quit**, the tray's **Stop server and quit**, or closing the window with nothing running) cancels any build, start or restore test in progress, makes the daily backup if one is due, runs `docker compose down` (keeping the database volume) and then exits, showing its output in the window meanwhile.
 
 Settings' **Running in the background** card has two switches:
 - **Keep the server running when this window is closed** (on by default). Off, closing the window quits as above. Saved as `KEEP_RUNNING_ON_CLOSE=no` in `.env`.
