@@ -1,6 +1,20 @@
 # MariaDB, rAthena's login, char, map and web servers, and the account portal.
 # Settings come from .env (copy .env.example to start).
 
+# Docker keeps each container's output for as long as the container
+# exists; this caps it at 30 MB per service.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Ports are published on every address of this computer unless BIND_IP
+# names one (an IPv4 address of this computer, such as its LAN or VPN
+# address), which keeps them off other networks the computer is on.
+# Docker's port rules go around ufw and firewalld, so a host firewall
+# doesn't do that on its own.
+
 # Every rAthena service runs the same image. Only db-init has `build:`,
 # so the image is built once (when missing, or with --build); the others
 # use it and never try to pull it from a registry.
@@ -8,6 +22,7 @@ x-rathena: &rathena
   image: rag-wrapper/rathena:${PACKETVER:-20250716}
   pull_policy: never
   restart: on-failure
+  logging: *logging
   # Config overrides from the desktop app's Settings screen or written by
   # hand; entrypoint.sh imports them after rAthena's stock configs. It
   # also loads the mods switched on in mods/enabled.txt.
@@ -31,6 +46,7 @@ services:
   db:
     image: mariadb:11.4
     restart: on-failure
+    logging: *logging
     environment:
       MARIADB_DATABASE: ragnarok
       MARIADB_USER: ragnarok
@@ -68,7 +84,7 @@ services:
     <<: *rathena
     command: login
     ports:
-      - "6900:6900"
+      - "${BIND_IP:+${BIND_IP}:}6900:6900"
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -77,7 +93,7 @@ services:
     <<: *rathena
     command: char
     ports:
-      - "6121:6121"
+      - "${BIND_IP:+${BIND_IP}:}6121:6121"
     depends_on:
       - login
 
@@ -85,7 +101,7 @@ services:
     <<: *rathena
     command: map
     ports:
-      - "5121:5121"
+      - "${BIND_IP:+${BIND_IP}:}5121:5121"
     depends_on:
       - char
 
@@ -93,7 +109,7 @@ services:
     <<: *rathena
     command: web
     ports:
-      - "8888:8888"
+      - "${BIND_IP:+${BIND_IP}:}8888:8888"
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -103,6 +119,7 @@ services:
     build: portal
     image: rag-wrapper/portal
     restart: on-failure
+    logging: *logging
     environment:
       DB_HOST: db
       DB_NAME: ragnarok
@@ -118,7 +135,7 @@ services:
       - ./overrides:/overrides:ro
       - ./patches:/patches:ro
     ports:
-      - "${PORTAL_PORT:-8080}:8080"
+      - "${BIND_IP:+${BIND_IP}:}${PORTAL_PORT:-8080}:8080"
     depends_on:
       db-init:
         condition: service_completed_successfully

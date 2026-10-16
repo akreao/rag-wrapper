@@ -16,6 +16,7 @@ The image builds one exact commit, `RATHENA_COMMIT` in `.env`, from the `rag-wra
 
 - When the table is empty (a fresh import, or a database from before this existed), every current file is recorded as applied without running, because `main.sql` already includes them.
 - After moving `RATHENA_COMMIT`, any new upgrade files run once each, in date order. A failure stops setup, so the servers don't start against a half-upgraded database.
+- A file that fails partway is never run again on its own: it's recorded as started (`done=0`) before it runs, and every later start stops, naming the file, until the pre-update backup is restored or the row is marked done by hand ([stack-audit-fixes.md](stack-audit-fixes.md)).
 - Files are tracked rather than re-run because some upstream upgrades aren't safe to run twice. Optional extras like `premium_storage.sql` are not applied.
 
 ## Start-up: only when the user starts the server

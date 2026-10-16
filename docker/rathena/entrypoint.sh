@@ -44,6 +44,21 @@ esac
 # RATHENA_DIR lets the tests run this on a copy outside the image.
 cd "${RATHENA_DIR:-/rathena}"
 
+mode_name() {
+	if [ "$1" = "yes" ]; then echo Pre-Renewal; else echo Renewal; fi
+}
+
+# The game mode is compiled into the servers, and PRERE picks the
+# characters database and the mods' files to match. An image built for the
+# other mode (a mode switch whose rebuild failed or never ran) would play
+# one mode's characters with the other's rules, so stop. Images built
+# before BUILD_PRERE existed have no file and aren't checked.
+if [ -f BUILD_PRERE ] && [ "$(cat BUILD_PRERE)" != "${PRERE:-yes}" ]; then
+	echo "This server was built for $(mode_name "$(cat BUILD_PRERE)"), but the settings ask for $(mode_name "${PRERE:-yes}") (PRERE=${PRERE:-yes})." >&2
+	echo "Rebuild the server so it matches (Rebuild in the desktop app, or docker compose build db-init), or switch the mode back." >&2
+	exit 66
+fi
+
 # conf/user is the overrides folder from the host: the desktop app's
 # Settings screen writes there, and so can people by hand. Each file in it
 # with the name of one of rAthena's conf/import files is used in its place;
@@ -85,6 +100,15 @@ write_imports() {
 			esac
 		done
 	} > conf/import/inter_conf.txt
+
+	# rAthena logs every item that moves, down to each potion drunk and
+	# arrow fired, into tables nothing trims, and every backup copies them.
+	# Keep the logs that answer "where did this item go" between players
+	# (trades, vending, storage, mail, MVP prizes, GM commands and so on)
+	# and drop (P) player drops and pickups, (L) monster loot and (C)
+	# consumed items. Set before the overrides folder's file, so a server
+	# can turn them back on there.
+	{ echo "enable_logs: 0xFFFFFF73"; user_import log_conf.txt; } > conf/import/log_conf.txt
 
 	# Passwords are stored as MD5; accounts come from the portal, not _M/_F.
 	{ user_import login_conf.txt; cat <<CONF
@@ -332,24 +356,61 @@ apply_upgrades() {
 	cmd=$1
 	"${cmd}" -e "CREATE TABLE IF NOT EXISTS wrapper_sql_upgrades (
 		file varchar(64) NOT NULL PRIMARY KEY,
-		applied_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+		applied_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP);
+		ALTER TABLE wrapper_sql_upgrades ADD COLUMN IF NOT EXISTS done tinyint(1) NOT NULL DEFAULT 1"
 
-	baseline=
-	if [ "$("${cmd}" -N -e "SELECT COUNT(*) FROM wrapper_sql_upgrades")" = "0" ]; then
-		baseline=yes
+	# A file is recorded with done=0 before it runs and set to done=1 once
+	# it has. The mysql client stops at a failing statement but keeps what
+	# came before it, and rAthena's tables are mostly MyISAM, so nothing
+	# rolls back: running the file again would fail on its first change.
+	unfinished=$("${cmd}" -N -e "SELECT file FROM wrapper_sql_upgrades WHERE done=0 ORDER BY file")
+	if [ -n "${unfinished}" ]; then
+		upgrade_failed "${cmd}" "$(echo "${unfinished}" | head -n 1)"
 	fi
 
-	for path in $(ls sql-files/upgrades/upgrade_*.sql | sort); do
+	# Assigned first, so a failed query stops the script.
+	count=$("${cmd}" -N -e "SELECT COUNT(*) FROM wrapper_sql_upgrades")
+	applied=$("${cmd}" -N -e "SELECT file FROM wrapper_sql_upgrades")
+	files=$(ls sql-files/upgrades/upgrade_*.sql | sort)
+
+	if [ "${count}" = "0" ]; then
+		# One statement, so an interrupted first start records all of them
+		# or none.
+		values=
+		for path in ${files}; do
+			values="${values}${values:+,}('$(basename "${path}")')"
+		done
+		if [ -n "${values}" ]; then
+			"${cmd}" -e "INSERT INTO wrapper_sql_upgrades (file) VALUES ${values}"
+		fi
+		return 0
+	fi
+
+	for path in ${files}; do
 		file=$(basename "${path}")
-		if [ -n "$("${cmd}" -N -e "SELECT 1 FROM wrapper_sql_upgrades WHERE file='${file}'")" ]; then
+		if echo "${applied}" | grep -qxF "${file}"; then
 			continue
 		fi
-		if [ -z "${baseline}" ]; then
-			echo "Applying upgrade ${file}"
-			"${cmd}" < "${path}"
+		echo "Applying upgrade ${file}"
+		"${cmd}" -e "INSERT INTO wrapper_sql_upgrades (file, done) VALUES ('${file}', 0)"
+		if ! "${cmd}" < "${path}"; then
+			upgrade_failed "${cmd}" "${file}"
 		fi
-		"${cmd}" -e "INSERT INTO wrapper_sql_upgrades (file) VALUES ('${file}')"
+		"${cmd}" -e "UPDATE wrapper_sql_upgrades SET done=1, applied_at=CURRENT_TIMESTAMP WHERE file='${file}'"
 	done
+}
+
+# Stops the start-up after an upgrade file failed partway, now or on an
+# earlier start, without running it again.
+upgrade_failed() {
+	case "$1" in
+		char_cmd) db=${CHAR_DB_NAME} ;;
+		*) db=${DB_NAME} ;;
+	esac
+	echo "The database upgrade $2 didn't finish in the ${db} database, so the servers can't start." >&2
+	echo "Part of it may have been applied, so it isn't run again. Restore the backup made before the server update." >&2
+	echo "If you finished the upgrade by hand instead, mark it done: UPDATE ${db}.wrapper_sql_upgrades SET done=1 WHERE file='$2';" >&2
+	exit 67
 }
 
 # Upgrades a database has recorded that are dated after this image's
@@ -473,7 +534,8 @@ init_char_db() {
 		# upgrades already applied to them come along too.
 		root_cmd -e "RENAME TABLE ${moves};
 			CREATE TABLE IF NOT EXISTS \`${CHAR_DB_NAME}\`.wrapper_sql_upgrades LIKE \`${DB_NAME}\`.wrapper_sql_upgrades;
-			INSERT IGNORE INTO \`${CHAR_DB_NAME}\`.wrapper_sql_upgrades SELECT * FROM \`${DB_NAME}\`.wrapper_sql_upgrades"
+			INSERT IGNORE INTO \`${CHAR_DB_NAME}\`.wrapper_sql_upgrades (file, applied_at)
+				SELECT file, applied_at FROM \`${DB_NAME}\`.wrapper_sql_upgrades"
 	fi
 
 	# rAthena's upgrade files can change any table, so both databases keep
