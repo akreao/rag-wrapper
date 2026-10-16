@@ -14,3 +14,7 @@ A button on the desktop app's Mods screen, **Install from zip…**, that unpacks
   - the unpacked size is capped at 4 GB, counted from what actually comes out rather than what the zip claims, and the zip at 100,000 entries.
 - **Two files whose names differ only in capitals keep the first**, with a note, since the players' Windows clients can't hold both.
 - **The zip goes from the screen to the app as raw bytes** (Tauri's raw request body, with the file name in a header), from an ordinary file picker. No dialog plugin or new permission was needed.
+
+Questions asked about the finished feature (PR #83), one at a time.
+
+- **Replace an installed mod when its zip is installed again?** Ask, then replace (Steven, 2026-10-16), as above: updating a mod is the usual reason to install the same zip again, and the confirm step guards against accidents.
