@@ -77,7 +77,6 @@ func (s *store) items(ctx context.Context, query string, id int) ([]Item, error)
 	}
 	defer rows.Close()
 	var items []Item
-	ids := map[int]bool{}
 	for rows.Next() {
 		var it Item
 		var equip int64
@@ -89,19 +88,33 @@ func (s *store) items(ctx context.Context, query string, id int) ([]Item, error)
 		it.Equipped = equip != 0
 		it.Identified = identify != 0
 		it.Broken = attribute != 0
-		ids[it.ItemID] = true
-		for _, c := range it.cardIDs() {
-			ids[c] = true
-		}
 		items = append(items, it)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	ptrs := make([]*Item, len(items))
+	for i := range items {
+		ptrs[i] = &items[i]
+	}
+	if err := s.nameItems(ctx, ptrs); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
 
+// nameItems fills in the names of items and their cards.
+func (s *store) nameItems(ctx context.Context, items []*Item) error {
+	ids := map[int]bool{}
+	for _, it := range items {
+		ids[it.ItemID] = true
+		for _, c := range it.cardIDs() {
+			ids[c] = true
+		}
+	}
 	names, err := s.itemNames(ctx, ids)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	name := func(id int) string {
 		if n, ok := names[id]; ok {
@@ -109,13 +122,14 @@ func (s *store) items(ctx context.Context, query string, id int) ([]Item, error)
 		}
 		return "Item " + strconv.Itoa(id)
 	}
-	for i := range items {
-		items[i].Name = name(items[i].ItemID)
-		for _, c := range items[i].cardIDs() {
-			items[i].CardNames = append(items[i].CardNames, name(c))
+	for _, it := range items {
+		it.Name = name(it.ItemID)
+		it.CardNames = nil
+		for _, c := range it.cardIDs() {
+			it.CardNames = append(it.CardNames, name(c))
 		}
 	}
-	return items, nil
+	return nil
 }
 
 // itemNames looks up item names in wrapper_item_names, which the rAthena
