@@ -382,3 +382,75 @@ func TestSlowPatchDownloadFinishes(t *testing.T) {
 		t.Fatalf("read %d of %d bytes", n, size)
 	}
 }
+
+// A patcher download is built once and served again until something in it
+// changes: the exe, the address it was reached on, or the server's name.
+func TestPatcherZipCached(t *testing.T) {
+	h, dir := patcherSetup(t, "1 0001_client.thor\n")
+	exe := filepath.Join(dir, "rpatchur.exe")
+	url := "http://10.0.0.5:8080/connect/" + patcherZip
+	first := get(h, url).Body.Bytes()
+	if second := get(h, url).Body.Bytes(); !bytes.Equal(first, second) {
+		t.Fatal("the same download came out different")
+	}
+
+	// Same size and time: the kept zip is served, so the exe isn't read.
+	st, _ := os.Stat(exe)
+	os.WriteFile(exe, []byte("XX"), 0o644)
+	os.Chtimes(exe, st.ModTime(), st.ModTime())
+	if files := unzip(t, get(h, url)); files[patcherName+".exe"] != "MZ" {
+		t.Errorf("exe: %q, want the kept zip's", files[patcherName+".exe"])
+	}
+	// A new build (a new time) is picked up.
+	os.Chtimes(exe, st.ModTime().Add(time.Hour), st.ModTime().Add(time.Hour))
+	if files := unzip(t, get(h, url)); files[patcherName+".exe"] != "XX" {
+		t.Errorf("exe after a new build: %q", files[patcherName+".exe"])
+	}
+
+	// Another address and another server name each get their own zip.
+	if files := unzip(t, get(h, "http://192.168.1.9:8080/connect/"+patcherZip)); !strings.Contains(files[patcherName+".yml"], "http://192.168.1.9:8080/") {
+		t.Errorf("yml for another address: %s", files[patcherName+".yml"])
+	}
+	os.WriteFile(filepath.Join(dir, "char_conf.txt"), []byte("server_name: Renamed\n"), 0o644)
+	if files := unzip(t, get(h, url)); !strings.Contains(files[patcherName+".yml"], "Renamed") ||
+		!strings.Contains(files["data/clientinfo.xml"], "Renamed") {
+		t.Errorf("yml after renaming: %s", files[patcherName+".yml"])
+	}
+
+	patcherZips.mu.Lock()
+	n := len(patcherZips.entries)
+	patcherZips.mu.Unlock()
+	if n > patcherZips.max {
+		t.Errorf("%d zips kept, at most %d", n, patcherZips.max)
+	}
+}
+
+func TestZipCacheEvictsLeastRecentlyUsed(t *testing.T) {
+	c := &zipCache{max: 2}
+	builds := 0
+	get := func(k byte) string {
+		b, err := c.get([32]byte{k}, func() ([]byte, error) { builds++; return []byte{k}, nil })
+		if err != nil || len(b) != 1 || b[0] != k {
+			t.Fatalf("%d: %v %v", k, b, err)
+		}
+		return string(b)
+	}
+	get(1)
+	get(2)
+	get(1) // 2 is now the least recently used
+	get(3) // drops 2
+	if builds != 3 {
+		t.Errorf("%d builds, want 3", builds)
+	}
+	get(1)
+	get(2)
+	if builds != 4 {
+		t.Errorf("%d builds, want 4", builds)
+	}
+	if _, err := c.get([32]byte{9}, func() ([]byte, error) { return nil, os.ErrNotExist }); err == nil {
+		t.Error("a failed build was served")
+	}
+	if _, ok := c.lookup([32]byte{9}); ok {
+		t.Error("a failed build was kept")
+	}
+}

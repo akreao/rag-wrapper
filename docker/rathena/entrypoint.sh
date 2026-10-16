@@ -59,6 +59,31 @@ if [ -f BUILD_PRERE ] && [ "$(cat BUILD_PRERE)" != "${PRERE:-yes}" ]; then
 	exit 66
 fi
 
+# The passwords .env.example comes with are public. The desktop app makes
+# random ones for a new install, but a .env copied by hand, or made by the
+# app next to an existing database, can still have them. Only warned
+# about: refusing would stop a server that has run on them for months, and
+# the database passwords can't simply be changed in .env (MariaDB keeps
+# the ones it was created with).
+warn_placeholder_passwords() {
+	placeholders=""
+	[ "${DB_PASSWORD}" = "change-me" ] && placeholders="${placeholders} DB_PASSWORD"
+	[ "${DB_ROOT_PASSWORD:-}" = "change-me-too" ] && placeholders="${placeholders} DB_ROOT_PASSWORD"
+	[ "${INTER_PASSWORD}" = "changeme123" ] && placeholders="${placeholders} INTER_PASSWORD"
+	[ -n "${placeholders}" ] || return 0
+	for key in ${placeholders}; do
+		echo "WARNING: ${key} is still the example value from .env.example, which anyone can look up." >&2
+	done
+	case "${placeholders}" in *INTER_PASSWORD*)
+		echo "WARNING: With INTER_PASSWORD known, someone on your network can connect a fake char server while the real one is down or restarting. Set a new random INTER_PASSWORD in .env and restart the whole stack; db-init updates the account on every start." >&2
+		;;
+	esac
+	case "${placeholders}" in *DB_*)
+		echo "WARNING: The database port isn't published, so the database passwords matter less. Changing them in .env alone stops the server from starting: MariaDB keeps the passwords it was created with." >&2
+		;;
+	esac
+}
+
 # conf/user is the overrides folder from the host: the desktop app's
 # Settings screen writes there, and so can people by hand. Each file in it
 # with the name of one of rAthena's conf/import files is used in its place;
@@ -145,6 +170,21 @@ char_ip: ${CHAR_HOST}
 map_ip: ${PUBLIC_IP}
 CONF
 	} > conf/import/map_conf.txt
+}
+
+# The stack's own scripts in npc/wrapper/ (docker/rathena/npc/ in
+# rag-wrapper), such as the desktop app's in-game announcements, load
+# after rAthena's own, before the custom NPCs and mods.
+apply_wrapper_npcs() {
+	if ! grep -qx 'import: npc/wrapper.conf' npc/scripts_custom.conf; then
+		printf '\nimport: npc/wrapper.conf\n' >> npc/scripts_custom.conf
+	fi
+	: > npc/wrapper.conf
+	for path in npc/wrapper/*.txt; do
+		if [ -f "${path}" ]; then
+			echo "npc: ${path}" >> npc/wrapper.conf
+		fi
+	done
 }
 
 # rAthena ships custom NPCs (npc/custom/) that npc/scripts_custom.conf
@@ -525,6 +565,33 @@ init_char_db() {
 	done
 }
 
+# Group 99 is Admin in conf/groups.yml. The account is only created once:
+# an existing one keeps its password and group, since they may have been
+# changed on the portal since. The desktop app reads the lines that start
+# "Admin account kept:" and "Admin account not created:" from db-init's
+# log to tell the person, so keep those starts as they are.
+create_admin() {
+	[ -n "${ADMIN_USER}" ] && [ -n "${ADMIN_PASSWORD}" ] || return 0
+	# userid compares without case, as the login server's lookup does.
+	existing=$(mysql_cmd -N -e "SELECT account_id, group_id, user_pass = MD5('${ADMIN_PASSWORD}') FROM login WHERE userid='${ADMIN_USER}' LIMIT 1")
+	if [ -z "${existing}" ]; then
+		mysql_cmd -e "INSERT INTO login (userid, user_pass, sex, email, group_id) VALUES ('${ADMIN_USER}', MD5('${ADMIN_PASSWORD}'), 'M', 'a@a.com', 99)"
+		echo "Created admin account ${ADMIN_USER}"
+		return 0
+	fi
+	# shellcheck disable=SC2086 # splits the three columns
+	set -- ${existing}
+	if [ "$1" = "1" ]; then
+		echo "Admin account not created: ${ADMIN_USER} is the name of the server-to-server login (INTER_USER). Pick another admin name." >&2
+	elif [ "$3" != "1" ]; then
+		echo "Admin account kept: ${ADMIN_USER} already exists, so its password wasn't changed to ADMIN_PASSWORD. Change it on the portal's account page." >&2
+	elif [ "$2" != "99" ]; then
+		echo "Admin account kept: ${ADMIN_USER} already exists as a player account (group $2), so it wasn't made an admin." >&2
+	else
+		echo "Admin account ${ADMIN_USER} already exists"
+	fi
+}
+
 init_db() {
 	if [ -z "$(mysql_cmd -N -e "SHOW TABLES LIKE 'login'")" ]; then
 		echo "Empty database: importing rAthena schema"
@@ -539,23 +606,32 @@ init_db() {
 	init_char_db
 	apply_upgrades char_cmd
 
+	# The desktop app's in-game announcements, which the image's
+	# npc/wrapper/announcements.txt shows and marks shown. A month of
+	# them is kept.
+	char_cmd -e "CREATE TABLE IF NOT EXISTS wrapper_announcements (
+		id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		message varchar(255) NOT NULL,
+		created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		shown_at datetime NULL,
+		skipped tinyint(1) NOT NULL DEFAULT 0);
+		DELETE FROM wrapper_announcements WHERE created_at < NOW() - INTERVAL 30 DAY"
+
 	# Account 1 is the server-to-server login; replace the stock s1/p1.
 	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass=MD5('${INTER_PASSWORD}') WHERE account_id=1"
 
-	# Group 99 is Admin in conf/groups.yml. Only created once; later runs
-	# leave an existing account alone.
-	if [ -n "${ADMIN_USER}" ] && [ -n "${ADMIN_PASSWORD}" ]; then
-		if [ -z "$(mysql_cmd -N -e "SELECT 1 FROM login WHERE userid='${ADMIN_USER}'")" ]; then
-			mysql_cmd -e "INSERT INTO login (userid, user_pass, sex, email, group_id) VALUES ('${ADMIN_USER}', MD5('${ADMIN_PASSWORD}'), 'M', 'a@a.com', 99)"
-			echo "Created admin account ${ADMIN_USER}"
-		fi
-	fi
+	create_admin
 	echo "Database ready"
 }
 
 write_imports
+apply_wrapper_npcs
 apply_custom_npcs
 apply_mods
+
+case "${1:-}" in
+	init|config) warn_placeholder_passwords ;;
+esac
 
 case "${1:-}" in
 	init)  init_db ;;

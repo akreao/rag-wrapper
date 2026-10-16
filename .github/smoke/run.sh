@@ -33,6 +33,26 @@ set -a
 set +a
 python3 .github/smoke/check.py
 
+# The map server shows the desktop app's in-game announcements: its script
+# marks a new one shown within a couple of seconds.
+chars=ragnarok_prere
+if [ "${PRERE:-yes}" = "no" ]; then
+	chars=ragnarok_re
+fi
+chars_sql() { docker compose exec -T -e MYSQL_PWD="${DB_PASSWORD}" db mariadb --user=ragnarok --batch --skip-column-names "${chars}" -e "$1"; }
+id=$(chars_sql "INSERT INTO wrapper_announcements (message) VALUES ('Smoke test'); SELECT LAST_INSERT_ID();")
+shown=
+for _ in $(seq 20); do
+	shown=$(chars_sql "SELECT shown_at IS NOT NULL AND skipped = 0 FROM wrapper_announcements WHERE id = ${id}")
+	[ "${shown}" = "1" ] && break
+	sleep 1
+done
+if [ "${shown}" != "1" ]; then
+	docker compose logs map | tail -n 50
+	echo "The map server didn't show an announcement" >&2
+	exit 1
+fi
+
 # After going back to an older server version, a database the newer one
 # upgraded stops db-init before the servers start, and is left as it is.
 root_sql() { docker compose exec -T -e MYSQL_PWD="${DB_ROOT_PASSWORD}" db mariadb --user=root ragnarok -e "$1"; }

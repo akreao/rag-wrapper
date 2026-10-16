@@ -15,6 +15,8 @@ pub struct Running {
     /// The process the current step is waiting on, if any.
     pub pid: Option<u32>,
     pub cancelled: bool,
+    /// The host asked to skip the rest of the wait before a restart or stop.
+    pub skip_wait: bool,
 }
 
 impl Running {
@@ -54,6 +56,11 @@ impl Ctx {
             Some(r) if r.cancelled => Err("Cancelled.".into()),
             _ => Ok(()),
         }
+    }
+
+    /// Whether the host asked to skip the wait before a restart or stop.
+    pub fn skip_requested(&self) -> bool {
+        self.slot.lock().unwrap().as_ref().is_some_and(|r| r.skip_wait)
     }
 
     /// Runs a command to completion, streaming its output to the Activity

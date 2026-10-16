@@ -171,6 +171,13 @@ pub fn check_docker() -> Result<String, String> {
     let mut v = host::command("docker");
     v.args(["compose", "version", "--short"]);
     let version = output(v).map_err(|e| format!("Docker Compose isn't available: {e}"))?;
+    if too_old(&version) {
+        return Err(format!(
+            "Docker Compose {} is too old: the server needs 2.24 or newer to read its compose.yaml. \
+             Update the Docker Compose plugin (docker-compose-plugin from Docker's own packages).",
+            version.trim()
+        ));
+    }
 
     let mut info = host::command("docker");
     info.args(["info", "--format", "{{.ServerVersion}}"]);
@@ -184,6 +191,22 @@ pub fn check_docker() -> Result<String, String> {
         }
     })?;
     Ok(version.trim().to_owned())
+}
+
+/// Whether `docker compose version --short` names a version before 2.24,
+/// which can't read `compose.yaml`'s `!reset`. A version it can't read
+/// (a distro's own numbering) is given the benefit of the doubt.
+fn too_old(version: &str) -> bool {
+    let mut parts = version.trim().trim_start_matches('v').split('.');
+    let mut number = || -> Option<u32> {
+        let part = parts.next()?;
+        let digits = part.find(|c: char| !c.is_ascii_digit()).map_or(part, |end| &part[..end]);
+        digits.parse().ok()
+    };
+    match (number(), number()) {
+        (Some(major), Some(minor)) => (major, minor) < (2, 24),
+        _ => false,
+    }
 }
 
 pub fn volume_exists(name: &str) -> bool {
@@ -560,6 +583,16 @@ pub fn stack_dir_override() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compose_before_2_24_is_too_old() {
+        for old in ["2.20.2", "v2.23.3", "2.20.2+ds1-0ubuntu1~22.04.1", "1.29.2\n"] {
+            assert!(too_old(old), "{old}");
+        }
+        for new in ["2.24.0", "v2.24.6", "2.40.3-desktop.1", "5.6.0\n", "10.0", "", "unknown"] {
+            assert!(!too_old(new), "{new}");
+        }
+    }
 
     fn write(path: &Path, text: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();

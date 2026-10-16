@@ -17,6 +17,7 @@ const LABELS = {
 let overview = null;
 let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "restore" or "test-restore" while one runs
 let view = "activity"; // or a service name
+let warningLeft = null; // seconds until the restart or stop while players are being warned
 let logGeneration = 0;
 const activity = [];
 let serviceLines = [];
@@ -452,6 +453,8 @@ async function refreshOverview() {
     if (!buildFormDirty) fillBuildForm();
   }
   renderAddressChange(overview.configured && overview.address_change);
+  renderAdminNotice(overview.configured && overview.admin_notice);
+  renderPlaceholders(overview.configured && overview.placeholder_passwords);
   renderUpdate(overview.configured && overview.server_update);
   // One bar at a time, in the order they're dealt with: update, rebuild, restart.
   const rebuild = overview.configured && !overview.server_update && overview.rebuild;
@@ -570,6 +573,90 @@ $("address-dismiss").addEventListener("click", async () => {
   await refreshOverview();
 });
 
+// ---- Admin account: setup asked for one the last start didn't make ----
+
+function renderAdminNotice(notice) {
+  $("admin-bar").hidden = !notice;
+  if (!notice) return;
+  const user = notice.user;
+  const [title, why] = {
+    password: [
+      `The admin account ${user} already existed, so its password wasn't changed.`,
+      "Log in with the password it had. To change it, log in on the portal and use your account page. If nobody knows it, another admin can set a new one on the portal's Admin page.",
+    ],
+    player: [
+      `${user} already existed as a player account, so it wasn't made an admin.`,
+      "Its password wasn't changed either. Another admin can put it in the Admin group on the portal's Admin page.",
+    ],
+    inter: [
+      `No admin account was made: ${user} is the name the game servers log in to each other with.`,
+      "Set another ADMIN_USER and ADMIN_PASSWORD in .env, then start the server again.",
+    ],
+  }[notice.why] || [`The admin account ${user} wasn't made.`, "See the Database setup log."];
+  $("admin-title").textContent = title;
+  $("admin-why").textContent = why;
+}
+
+$("admin-dismiss").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_admin_notice");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
+// ---- Example passwords: the public ones from .env.example ----
+
+function renderPlaceholders(found) {
+  $("placeholder-bar").hidden = !found;
+  if (!found) return;
+  $("placeholder-inter").hidden = !found.inter;
+  $("placeholder-db").hidden = !found.database;
+  const confirming = !$("placeholder-fix-yes").hidden;
+  $("placeholder-fix").hidden = !found.inter || confirming;
+  // Only the database part has nothing to fix, so only it can be hidden.
+  $("placeholder-dismiss").hidden = found.inter || confirming;
+}
+
+function placeholderConfirm(on) {
+  $("placeholder-confirm").hidden = !on;
+  $("placeholder-fix-yes").hidden = !on;
+  $("placeholder-fix-no").hidden = !on;
+  renderPlaceholders(overview.configured && overview.placeholder_passwords);
+}
+
+async function changeInterPassword() {
+  placeholderConfirm(false);
+  const restarting = serverRunning();
+  if (restarting) {
+    activity.length = 0;
+    clearProgress();
+    await showView("activity");
+  }
+  try {
+    const restarted = await invoke("change_inter_password");
+    if (!restarted) banner("INTER_PASSWORD changed. The server uses it from its next start.");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+}
+
+// A running server restarts in full, so every part has the new password.
+$("placeholder-fix").addEventListener("click", () => (serverRunning() ? placeholderConfirm(true) : changeInterPassword()));
+$("placeholder-fix-yes").addEventListener("click", changeInterPassword);
+$("placeholder-fix-no").addEventListener("click", () => placeholderConfirm(false));
+
+$("placeholder-dismiss").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_db_placeholders");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
 // ---- Server update: the rAthena commit this app version comes with ----
 
 const short = (sha) => (sha ? sha.slice(0, 7) : "none");
@@ -613,8 +700,47 @@ function updateButtons() {
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task);
+  // Stop and restore can be called off only while players are being warned.
+  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task) && warningLeft == null;
+  $("skip-wait").hidden = warningLeft == null;
+  $("announce-send").disabled = !ready;
 }
+
+// ---- Warning players before a restart or stop, and messages of the host's own ----
+
+listen("warning", ({ payload }) => {
+  warningLeft = payload;
+  if (payload != null) {
+    const m = Math.floor(payload / 60);
+    const s = String(payload % 60).padStart(2, "0");
+    $("skip-wait").textContent = `Go ahead now (${m}:${s} left)`;
+  }
+  updateButtons();
+});
+$("skip-wait").addEventListener("click", () => invoke("skip_wait"));
+
+async function sendAnnouncement() {
+  const text = $("announce-text").value.trim();
+  if (!text) return;
+  $("announce-error").hidden = true;
+  $("announce-sent").hidden = true;
+  $("announce-send").disabled = true;
+  try {
+    await invoke("send_announcement", { message: text });
+    $("announce-sent").textContent = `Sent: "${text}"`;
+    $("announce-sent").hidden = false;
+    $("announce-text").value = "";
+  } catch (e) {
+    $("announce-error").textContent = String(e);
+    $("announce-error").hidden = false;
+  } finally {
+    updateButtons();
+  }
+}
+$("announce-send").addEventListener("click", sendAnnouncement);
+$("announce-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendAnnouncement();
+});
 
 // ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods and News ----
 
@@ -1659,6 +1785,7 @@ listen("task-line", ({ payload }) => {
 
 listen("task", async ({ payload }) => {
   task = payload.running ? payload.kind : null;
+  if (!payload.running) warningLeft = null;
   updateButtons();
   if (!payload.running) {
     clearProgress();
@@ -1674,7 +1801,10 @@ listen("task", async ({ payload }) => {
     if (page === "mods") refreshMods();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
-      if (payload.ok) await runTask("start");
+      // A restart while the map server still runs, so players are warned
+      // first; the new image gets the same full `up` as a start.
+      const mapUp = lastServices.some((s) => s.service === "map" && s.state === "running");
+      if (payload.ok) await runTask(mapUp ? "restart" : "start");
     }
   }
 });

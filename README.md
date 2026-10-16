@@ -6,7 +6,7 @@ A Linux desktop app that runs a private rAthena server and its database, for use
 
 The app in [`desktop/`](desktop/README.md) runs the stack for you: first-run admin setup, start and stop, build progress, and each service's status and logs.
 
-It ships as an AppImage on the [releases page](https://github.com/akreao/rag-wrapper/releases). It needs Docker with the Compose plugin (your user in the `docker` group) and FUSE 2 (`libfuse2`, or `libfuse2t64` on Ubuntu 24.04 and later):
+It ships as an AppImage on the [releases page](https://github.com/akreao/rag-wrapper/releases). It needs Docker with the Compose plugin 2.24 or newer (your user in the `docker` group) and FUSE 2 (`libfuse2`, or `libfuse2t64` on Ubuntu 24.04 and later):
 
 ```sh
 chmod +x rag-wrapper-*-x86_64.AppImage

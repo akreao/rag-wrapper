@@ -129,9 +129,27 @@ func (a *thorArchive) content(e thorEntry) ([]byte, error) {
 	return b, nil
 }
 
+// inflateTo streams an entry's content to w, checking it against its
+// stated size, so a large file is never held in memory whole.
+func (a *thorArchive) inflateTo(w io.Writer, e thorEntry) error {
+	z, err := zlib.NewReader(a.raw(e))
+	if err != nil {
+		return fmt.Errorf("%s: %w", e.Path, err)
+	}
+	defer z.Close()
+	n, err := io.Copy(w, io.LimitReader(z, int64(e.Size)+1))
+	if err != nil {
+		return fmt.Errorf("%s: %w", e.Path, err)
+	}
+	if n != int64(e.Size) {
+		return fmt.Errorf("%s: %d bytes instead of %d", e.Path, n, e.Size)
+	}
+	return nil
+}
+
 // checkIntegrity compares each file with the CRC32 that data.integrity
-// lists for it ("<path>=0x<crc>" lines), so a damaged download is never
-// applied, GRF entries included. The desktop app lists every file, so a
+// lists for it ("<path>=0x<crc>" lines), and its size with the patch's,
+// so a damaged download is never applied, GRF entries included. The desktop app lists every file, so a
 // patch without data.integrity, or a file it doesn't list, is refused.
 func (a *thorArchive) checkIntegrity() error {
 	var sums map[string]uint32
@@ -157,11 +175,11 @@ func (a *thorArchive) checkIntegrity() error {
 		if !ok {
 			return fmt.Errorf("%s isn't listed in the patch's data.integrity, so the patcher can't check it", e.Path)
 		}
-		b, err := a.content(e)
-		if err != nil {
+		h := crc32.NewIEEE()
+		if err := a.inflateTo(h, e); err != nil {
 			return err
 		}
-		if got := crc32.ChecksumIEEE(b); got != want {
+		if got := h.Sum32(); got != want {
 			return fmt.Errorf("%s is damaged (checksum %08x, expected %08x)", e.Path, got, want)
 		}
 	}
