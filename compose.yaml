@@ -69,6 +69,8 @@ services:
         RATHENA_COMMIT: ${RATHENA_COMMIT:-266a587f6a0901bbd9d6935f359c7ff0bf65b9aa}
         PACKETVER: ${PACKETVER:-20250716}
         PRERE: ${PRERE:-yes}
+        # Empty picks the compile job count from the memory available.
+        MAKE_JOBS: ${MAKE_JOBS:-}
     pull_policy: !reset null
     command: init
     # Only db-init gets root: it makes each game mode's characters database.
