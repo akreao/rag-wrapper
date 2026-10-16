@@ -108,6 +108,23 @@ func TestExternalSettings(t *testing.T) {
 	}
 }
 
+func TestLinuxLauncher(t *testing.T) {
+	h := newTestRoutes(t)
+	rec := get(h, "/connect/play-on-linux.sh")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Disposition"), "play-on-linux.sh") ||
+		!strings.HasPrefix(rec.Body.String(), "#!/usr/bin/env bash\n") || !strings.Contains(rec.Body.String(), "patcher="+patcherName+".exe\n") ||
+		!strings.Contains(rec.Body.String(), "client="+clientExe+"\n") {
+		t.Fatalf("GET play-on-linux.sh: %d %v\n%s", rec.Code, rec.Header(), rec.Body)
+	}
+
+	// Without a published patch, players start their own patched client.
+	body := get(h, "/connect").Body.String()
+	if !strings.Contains(body, "Playing on Linux") || !strings.Contains(body, `href="/connect/play-on-linux.sh"`) ||
+		!strings.Contains(body, "run program.exe") || strings.Contains(body, "run WARPGATE.exe") {
+		t.Fatalf("connect without a patch:\n%s", body)
+	}
+}
+
 func newTestRoutes(t *testing.T) http.Handler {
 	a, err := newApp(nil, 99, connectInfo{Address: "10.0.0.5", PacketVer: "20250716"})
 	if err != nil {

@@ -101,6 +101,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /news", a.page(a.newsPage))
 	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile)
 	mux.HandleFunc("GET /connect/ExternalSettings_kr.lub", a.externalSettingsFile)
+	mux.HandleFunc("GET /connect/"+linuxLauncherName, a.linuxLauncherFile)
 	mux.HandleFunc("GET /connect/"+patcherZip, a.patcherDownload)
 	mux.HandleFunc("GET /connect/"+newPatcherZip, a.newPatcherDownload)
 	mux.HandleFunc("GET /patcher/info.json", a.patcherInfo)
