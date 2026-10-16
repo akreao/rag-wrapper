@@ -6,8 +6,9 @@
 #   bash play-on-linux.sh setup    open OpenSetup to pick DirectX 9 and a resolution
 #   bash play-on-linux.sh run X    run any other Windows program in the same Wine setup
 #
-# The first run makes a Wine prefix just for the game and installs DXVK into
-# it, which runs the client's DirectX 9 renderer on Vulkan. Settings, all
+# The first run makes a Wine prefix just for the game, installs the core
+# fonts and DXVK into it (DXVK runs the client's DirectX 9 renderer on
+# Vulkan) and opens OpenSetup before the game. Settings, all
 # optional:
 #   WINEPREFIX=...  the Wine prefix to use (default ~/.local/share/rag-wrapper-wine)
 #   RO_FPS=...      the frame cap, written to ~/.config/dxvk-ro.conf on the first run
@@ -39,8 +40,17 @@ if [ ! -d "$WINEPREFIX" ]; then
 	wineboot --init
 fi
 
+command -v winetricks >/dev/null || die "winetricks isn't installed; install it with your distribution's package manager"
+
+# The client's windows and text need Microsoft's core fonts, which a new
+# prefix doesn't have.
+if [ ! -e "$WINEPREFIX/.rag-wrapper-corefonts" ]; then
+	echo "Installing the core fonts into the prefix..."
+	winetricks -q corefonts
+	touch "$WINEPREFIX/.rag-wrapper-corefonts"
+fi
+
 if [ "${RO_DXVK:-1}" != 0 ] && [ ! -e "$WINEPREFIX/.rag-wrapper-dxvk" ]; then
-	command -v winetricks >/dev/null || die "winetricks isn't installed; install it, or run with RO_DXVK=0 to play without DXVK"
 	if command -v vulkaninfo >/dev/null && ! vulkaninfo --summary >/dev/null 2>&1; then
 		echo "Warning: vulkaninfo can't find a Vulkan graphics card, and DXVK needs one." >&2
 		echo "If the game won't start, run with RO_DXVK=0." >&2
@@ -62,13 +72,24 @@ if [ "${RO_DXVK:-1}" = 0 ]; then
 fi
 
 case "${1:-}" in
-setup) exec wine opensetup.exe ;;
+setup)
+	wine opensetup.exe
+	touch "$WINEPREFIX/.rag-wrapper-setup"
+	;;
 run)
 	[ $# -ge 2 ] || die "say which program to run, like: bash play-on-linux.sh run WARPGATE.exe"
 	shift
 	exec wine "$@"
 	;;
 "")
+	# The client saves the graphics card it uses, as the Wine prefix it ran
+	# in saw it. In any other prefix, such as a new one, it runs without
+	# ever opening its window until OpenSetup saves the card again.
+	if [ ! -e "$WINEPREFIX/.rag-wrapper-setup" ]; then
+		echo "Opening OpenSetup: set the renderer to DirectX 9, pick your graphics card, then save and close it."
+		wine opensetup.exe
+		touch "$WINEPREFIX/.rag-wrapper-setup"
+	fi
 	if [ -e "$patcher" ]; then
 		exec wine "$patcher"
 	elif [ -e "$client" ]; then
