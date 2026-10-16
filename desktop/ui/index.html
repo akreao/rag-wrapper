@@ -121,6 +121,15 @@
         </p>
         <p id="ip-error" class="error" hidden></p>
         <p class="hint">Changing it while the server runs restarts the char and map servers. Players then need to download the patcher again.</p>
+        <label class="check">
+          <input id="bind-ip" type="checkbox">
+          This network only
+        </label>
+        <p class="hint">Players can reach the server only at the address above, not from any other network this computer joins, such as public Wi-Fi. The server won't start while the computer doesn't have that address.</p>
+        <p id="bind-confirm" class="notice" hidden>Restart the game servers and portal to apply this? Players in game are disconnected.<br>
+          <button id="bind-yes">Apply and restart</button><button id="bind-no">Cancel</button>
+        </p>
+        <p id="bind-error" class="error" hidden></p>
         <label for="portal-port">Account portal port</label>
         <div class="row">
           <input id="portal-port" type="number" min="1024" max="65535">

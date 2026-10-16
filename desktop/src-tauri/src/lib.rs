@@ -105,6 +105,8 @@ struct Overview {
     public_ip: String,
     portal_port: String,
     public_ip_auto: bool,
+    /// Ports are published on `public_ip` only ("This network only", `BIND_IP`).
+    bind_ip: bool,
     addresses: Vec<net::Address>,
     packetver: String,
     prere: bool,
@@ -167,6 +169,7 @@ fn read_overview(app: &App) -> Overview {
         public_ip: get("PUBLIC_IP"),
         portal_port: env.as_ref().and_then(|e| e.get("PORTAL_PORT")).unwrap_or_else(|| "8080".into()),
         public_ip_auto: get("PUBLIC_IP_AUTO") != "no",
+        bind_ip: !get("BIND_IP").is_empty(),
         addresses: net::lan_addresses(),
         packetver: get("PACKETVER"),
         prere: get("PRERE") != "no",
@@ -424,6 +427,25 @@ fn apply_public_ip(env: &mut EnvFile, public_ip: Option<String>) {
             env.set("PUBLIC_IP", &net::best_lan_ip().unwrap_or_else(|| "127.0.0.1".into()));
         }
     }
+    // "This network only" follows the address players are sent to.
+    if !env.get("BIND_IP").unwrap_or_default().is_empty() {
+        env.set("BIND_IP", &env.get("PUBLIC_IP").unwrap_or_default());
+    }
+}
+
+/// "This network only": publishes the server's ports on the address players
+/// connect to, rather than on every address of this computer. Returns
+/// whether it changed, in which case running servers need a restart.
+#[tauri::command]
+fn set_this_network_only(app: State<App>, on: bool) -> Result<bool, String> {
+    app.edit_env(|env| Ok(set_bind(env, on)))
+}
+
+fn set_bind(env: &mut EnvFile, on: bool) -> bool {
+    let before = env.get("BIND_IP").unwrap_or_default();
+    let bind = if on { env.get("PUBLIC_IP").unwrap_or_default() } else { String::new() };
+    env.set("BIND_IP", &bind);
+    bind != before
 }
 
 /// Each service's container state. The main screen asks every few
@@ -483,7 +505,8 @@ enum Step {
 }
 
 /// Runs `start`, `restart`, `readdress` (after the address changed),
-/// `portal` (after the portal port changed), `stop`,
+/// `portal` (after the portal port changed), `rebind` (after "This network
+/// only" changed), `stop`,
 /// `build`, `update`, `go-back`, `backup`, or `restore` or `test-restore` (of `file`), streaming its
 /// output as `task-line` events. Asks Docker which images are here before
 /// it starts, so it runs off the main thread.
@@ -503,7 +526,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
 
     let mut cmd = stack::compose(&app.dir);
     let steps = match kind.as_str() {
-        "start" | "restart" | "readdress" | "portal" => {
+        "start" | "restart" | "readdress" | "portal" | "rebind" => {
             let mut cmd = up_command(app)?;
             // After a rebuild or update the new image needs a full `up`,
             // so `db-init` applies its database upgrades first; that
@@ -516,8 +539,12 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
                 // the database keeps running. A new address only concerns
                 // the char and map servers, which hand it to the client,
                 // and the portal's "How to connect" page.
+                let bound = app.env().and_then(|e| e.get("BIND_IP")).is_some_and(|ip| !ip.is_empty());
                 let services: &[&str] = match kind.as_str() {
+                    // With "This network only" on, the address is in every published port.
+                    "readdress" if bound => &stack::PUBLISHED,
                     "readdress" => &stack::READDRESSED,
+                    "rebind" => &stack::PUBLISHED,
                     "portal" => &["portal"],
                     _ => &stack::GAME_SERVERS,
                 };
@@ -632,7 +659,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         // An address change restarts the map server too, and a restore starts
         // the game servers again when they were running.
         let started = match kind.as_str() {
-            "start" | "restart" | "readdress" | "portal" => true,
+            "start" | "restart" | "readdress" | "portal" | "rebind" => true,
             "restore" => stack::status(&ctx.dir)
                 .unwrap_or_default()
                 .iter()
@@ -977,6 +1004,7 @@ pub fn run() {
             setup,
             set_public_ip,
             set_portal_port,
+            set_this_network_only,
             save_build_settings,
             skip_server_update,
             dismiss_address_change,
@@ -1166,6 +1194,21 @@ mod tests {
         assert_eq!(env.get("PUBLIC_IP_AUTO").as_deref(), Some("yes"));
         let ip = env.get("PUBLIC_IP").unwrap();
         assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "{ip}");
+    }
+
+    #[test]
+    fn this_network_only_follows_the_address() {
+        let mut env = EnvFile::parse("PUBLIC_IP=192.168.0.5\nBIND_IP=\n");
+        assert!(set_bind(&mut env, true));
+        assert_eq!(env.get("BIND_IP").as_deref(), Some("192.168.0.5"));
+        assert!(!set_bind(&mut env, true));
+        apply_public_ip(&mut env, Some("10.8.0.1".into()));
+        assert_eq!(env.get("BIND_IP").as_deref(), Some("10.8.0.1"));
+        assert!(set_bind(&mut env, false));
+        assert_eq!(env.get("BIND_IP").as_deref(), Some(""));
+        // Off stays off when the address changes.
+        apply_public_ip(&mut env, Some("10.8.0.2".into()));
+        assert_eq!(env.get("BIND_IP").as_deref(), Some(""));
     }
 
     #[test]

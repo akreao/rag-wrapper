@@ -33,6 +33,9 @@ pub const GAME_SERVERS: [&str; 3] = ["login", "char", "map"];
 /// The services that use `PUBLIC_IP`, restarted when it changes.
 pub const READDRESSED: [&str; 3] = ["char", "map", "portal"];
 
+/// The services that publish ports, all restarted when `BIND_IP` changes.
+pub const PUBLISHED: [&str; 5] = ["login", "char", "map", "web", "portal"];
+
 /// The settings template, compiled in: Tauri's resource bundling skips dotfiles.
 /// The database with the characters of the game mode `.env` in `dir` sets
 /// (`PRERE`), one per mode; db-init makes it on the first start in that mode.
@@ -427,6 +430,20 @@ fn parse_ps_ports(column: &str) -> Vec<u16> {
 /// already holds, and says what holds it and how to free it, instead of
 /// Docker's "address already in use" halfway through the start.
 pub fn check_ports(dir: &Path) -> Result<(), String> {
+    // With "This network only" on, ports are published on that one address,
+    // which Docker can't do while the computer doesn't have it.
+    let bind = crate::envfile::EnvFile::load(&dir.join(".env"))
+        .ok()
+        .and_then(|env| env.get("BIND_IP"))
+        .filter(|ip| !ip.is_empty());
+    let host: std::net::IpAddr = match &bind {
+        Some(ip) => {
+            let ip = ip.parse().map_err(|_| format!("BIND_IP in .env, \"{ip}\", isn't an IPv4 address."))?;
+            missing_address(ip)?;
+            ip
+        }
+        None => std::net::Ipv4Addr::UNSPECIFIED.into(),
+    };
     // Without the config there's nothing to check; `up` reports the problem.
     let Ok(wanted) = published_ports(dir) else {
         return Ok(());
@@ -466,7 +483,7 @@ pub fn check_ports(dir: &Path) -> Result<(), String> {
                 ))
             }
             None => {
-                if let Err(e) = std::net::TcpListener::bind(("0.0.0.0", port)) {
+                if let Err(e) = std::net::TcpListener::bind((host, port)) {
                     if e.kind() == std::io::ErrorKind::AddrInUse {
                         return Err(format!(
                             "Port {port}, for {what}, is in use by another program on this computer. \
@@ -478,6 +495,19 @@ pub fn check_ports(dir: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Fails when this computer doesn't have `ip`, such as a VPN address while
+/// the VPN is down or a LAN address DHCP has since given to another machine.
+fn missing_address(ip: std::net::IpAddr) -> Result<(), String> {
+    match std::net::TcpListener::bind((ip, 0)) {
+        Err(e) if e.kind() == std::io::ErrorKind::AddrNotAvailable => Err(format!(
+            "\"This network only\" is on, but this computer doesn't have the address {ip} right now. \
+             Connect to that network or VPN, pick another address under Connecting, or switch \"This network only\" off, \
+             then start again."
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// Starts `cmd` with stdout and stderr piped, calling `on_line` for each
@@ -623,6 +653,14 @@ mod tests {
         let mut fail = Command::new("sh");
         fail.args(["-c", "echo out; echo err >&2; exit 1"]);
         assert_eq!(output(fail).unwrap_err(), "err");
+    }
+
+    #[test]
+    fn an_address_this_computer_lacks_stops_the_start() {
+        assert!(missing_address("127.0.0.1".parse().unwrap()).is_ok());
+        // TEST-NET-3, which no machine running the tests has.
+        let err = missing_address("203.0.113.77".parse().unwrap()).unwrap_err();
+        assert!(err.contains("doesn't have the address 203.0.113.77"), "{err}");
     }
 
     #[test]
