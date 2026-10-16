@@ -147,6 +147,21 @@ CONF
 	} > conf/import/map_conf.txt
 }
 
+# The stack's own scripts in npc/wrapper/ (docker/rathena/npc/ in
+# rag-wrapper), such as the desktop app's in-game announcements, load
+# after rAthena's own, before the custom NPCs and mods.
+apply_wrapper_npcs() {
+	if ! grep -qx 'import: npc/wrapper.conf' npc/scripts_custom.conf; then
+		printf '\nimport: npc/wrapper.conf\n' >> npc/scripts_custom.conf
+	fi
+	: > npc/wrapper.conf
+	for path in npc/wrapper/*.txt; do
+		if [ -f "${path}" ]; then
+			echo "npc: ${path}" >> npc/wrapper.conf
+		fi
+	done
+}
+
 # rAthena ships custom NPCs (npc/custom/) that npc/scripts_custom.conf
 # lists switched off. conf/user/custom_npcs.txt, which the desktop app's
 # Mods screen writes, names the ones to load, one script per line. A line
@@ -590,6 +605,7 @@ init_db() {
 }
 
 write_imports
+apply_wrapper_npcs
 apply_custom_npcs
 apply_mods
 

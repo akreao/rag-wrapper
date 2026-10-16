@@ -1,7 +1,7 @@
 //! Messages to everyone in game: the warning before a restart or stop,
 //! and messages the host types on the Dashboard. Each is a row in the
 //! characters database's `wrapper_announcements`, which the image's NPC
-//! script (`docker/rathena/announcements.txt`) shows within a couple of
+//! script (`docker/rathena/npc/announcements.txt`) shows within a couple of
 //! seconds and marks shown. A map server that never marks it runs an
 //! image from before the script.
 

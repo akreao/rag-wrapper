@@ -42,15 +42,14 @@ COPY --from=build /src/rathena/db ./db
 COPY --from=build /src/rathena/npc ./npc
 COPY --from=build /src/rathena/sql-files ./sql-files
 COPY entrypoint.sh merge_mods.py /usr/local/bin/
-# Shows the desktop app's in-game announcements (restart warnings, the
-# host's own messages); loaded after rAthena's own scripts.
-COPY announcements.txt npc/wrapper/announcements.txt
+# The stack's own NPC scripts, such as the desktop app's in-game
+# announcements; entrypoint.sh loads every one after rAthena's own.
+COPY npc/ npc/wrapper/
 
 # The game mode is compiled in, so entrypoint.sh compares it with PRERE at
 # start-up and stops when they differ.
 ARG PRERE=yes
 RUN mkdir -p log save \
- && printf '\nnpc: npc/wrapper/announcements.txt\n' >> npc/scripts_custom.conf \
  && echo "${PRERE}" > BUILD_PRERE \
  && chown -R rathena:rathena /rathena \
  && chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/merge_mods.py
