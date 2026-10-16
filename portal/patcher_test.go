@@ -3,7 +3,9 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -11,6 +13,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -274,6 +278,72 @@ func TestPatcherConfigFromLocalhost(t *testing.T) {
 	// A server that only advertises loopback keeps the address it was reached on.
 	if got := (connectInfo{Address: "127.0.0.1"}).BaseURL(httptest.NewRequest(http.MethodGet, "http://localhost:8080/", nil)); got != "http://localhost:8080" {
 		t.Errorf("loopback server: %s", got)
+	}
+}
+
+// With PATCH_SIGNING_KEY set, info.json is signed and lists each patch's
+// checksum, and the patcher download carries the key to check it with.
+func TestSignedPatcherInfo(t *testing.T) {
+	dir := t.TempDir()
+	patches := filepath.Join(dir, "patches")
+	os.Mkdir(patches, 0o755)
+	os.WriteFile(filepath.Join(patches, "plist.txt"), []byte("1 0001_client.thor\n3 0003_data.thor\n"), 0o644)
+	os.WriteFile(filepath.Join(patches, "0001_client.thor"), []byte("THOR"), 0o644)
+	os.WriteFile(filepath.Join(dir, "rag-wrapper-patcher.exe"), []byte("MZ new"), 0o644)
+	key := signingKey("secret")
+	a, err := newApp(nil, 99, connectInfo{
+		Address: "10.0.0.5", PacketVer: "20250716", Overrides: dir,
+		Patcher: patcherFiles{Dir: patches, Exe: "/nonexistent", NewExe: filepath.Join(dir, "rag-wrapper-patcher.exe"), Key: key},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.routes()
+
+	files := unzip(t, get(h, "http://10.0.0.5:8080/connect/"+newPatcherZip))
+	var cfg struct{ Portal, Public_Key string }
+	if err := json.Unmarshal([]byte(files[newPatcherConfig]), &cfg); err != nil || cfg.Public_Key != publicKey(key) {
+		t.Fatalf("config: %s", files[newPatcherConfig])
+	}
+
+	var info struct {
+		ServerName string `json:"server_name"`
+		PublicKey  string `json:"public_key"`
+		Signed     string
+		Signature  string
+	}
+	body := get(h, "http://10.0.0.5:8080/patcher/info.json").Body.Bytes()
+	if err := json.Unmarshal(body, &info); err != nil || info.PublicKey != publicKey(key) {
+		t.Fatalf("info: %s", body)
+	}
+	payload, _ := base64.StdEncoding.DecodeString(info.Signed)
+	sig, _ := base64.StdEncoding.DecodeString(info.Signature)
+	pub, _ := base64.StdEncoding.DecodeString(cfg.Public_Key)
+	if !ed25519.Verify(pub, append([]byte(signingContext), payload...), sig) {
+		t.Fatal("the signature doesn't verify")
+	}
+	var signed struct {
+		ServerName string `json:"server_name"`
+		Patches    []signedPatch
+		Patcher    struct{ SHA256 string }
+	}
+	json.Unmarshal(payload, &signed)
+	thor, exe := sha256.Sum256([]byte("THOR")), sha256.Sum256([]byte("MZ new"))
+	// A listed patch that's missing has no checksum; the patcher stops there.
+	want := []signedPatch{{1, "0001_client.thor", 4, hex.EncodeToString(thor[:])}, {3, "0003_data.thor", 0, ""}}
+	if signed.ServerName != info.ServerName || !slices.Equal(signed.Patches, want) || signed.Patcher.SHA256 != hex.EncodeToString(exe[:]) {
+		t.Fatalf("signed: %s", payload)
+	}
+
+	// The patcher checks with the same context.
+	src, _ := os.ReadFile("cmd/patcher/sign.go")
+	if !strings.Contains(string(src), "const signingContext = "+strconv.Quote(signingContext)) {
+		t.Error("cmd/patcher's signingContext differs from the portal's")
+	}
+
+	// Without a key nothing is signed, as before.
+	if signingKey("") != nil {
+		t.Error("an empty PATCH_SIGNING_KEY made a key")
 	}
 }
 

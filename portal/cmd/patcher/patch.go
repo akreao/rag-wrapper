@@ -28,6 +28,8 @@ const (
 // config is the file the portal puts in the patcher's download.
 type config struct {
 	Portal string `json:"portal"` // the portal's address, e.g. http://192.168.1.10:8080
+	// PublicKey checks the portal's signatures (sign.go): base64 ed25519.
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 func loadConfig(dir string) (config, error) {
@@ -62,6 +64,14 @@ type serverInfo struct {
 		URL    string `json:"url"`
 		SHA256 string `json:"sha256"`
 	} `json:"patcher"`
+	// Only in the signed info: the patches with their checksums.
+	Patches []signedPatch `json:"patches"`
+	// The signature (sign.go): the whole info, encoded, and its signature.
+	PublicKey string `json:"public_key"`
+	Signed    string `json:"signed"`
+	Signature string `json:"signature"`
+
+	signed bool // checked against the signature
 }
 
 var httpClient = &http.Client{Timeout: 30 * time.Minute}
@@ -85,7 +95,9 @@ func get(ctx context.Context, url string) (*http.Response, error) {
 	return resp, nil
 }
 
-func fetchInfo(ctx context.Context, c config) (*serverInfo, error) {
+// fetchInfo gets the server's info, checked against its signature (see
+// trust), which can add the server's key to c.
+func fetchInfo(ctx context.Context, dir string, c *config) (*serverInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	resp, err := get(ctx, c.Portal+"/patcher/info.json")
@@ -97,10 +109,10 @@ func fetchInfo(ctx context.Context, c config) (*serverInfo, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&info); err != nil {
 		return nil, fmt.Errorf("the server's patcher info: %w", err)
 	}
-	if info.PlistURL == "" || info.PatchURL == "" {
+	if (info.PlistURL == "" || info.PatchURL == "") && info.Signed == "" {
 		return nil, errors.New("the server's patcher info has no patch list")
 	}
-	return &info, nil
+	return trust(dir, c, &info)
 }
 
 // plistEntry is one line of plist.txt: "<number> <file>".
@@ -188,12 +200,7 @@ type progress func(text string, fraction float64)
 // update brings the client folder up to date with the server's patches.
 func update(ctx context.Context, dir string, info *serverInfo, report progress) error {
 	report("Checking for updates...", 0)
-	resp, err := get(ctx, info.PlistURL)
-	if err != nil {
-		return err
-	}
-	list, err := parsePlist(io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
+	list, signed, err := patchList(ctx, info)
 	if err != nil {
 		return err
 	}
@@ -211,7 +218,11 @@ func update(ctx context.Context, dir string, info *serverInfo, report progress) 
 			}
 			report(fmt.Sprintf("Downloading %s (%s, %s)", label, p.Name, sizeText(done, total)), base+share*0.8*f)
 		})
+		if err == nil && info.signed {
+			err = checkDownload(path, signed[p.Name])
+		}
 		if err != nil {
+			os.Remove(path)
 			return fmt.Errorf("downloading %s: %w", p.Name, err)
 		}
 		report(fmt.Sprintf("Applying %s (%s)", label, p.Name), base+share*0.8)
@@ -227,6 +238,30 @@ func update(ctx context.Context, dir string, info *serverInfo, report progress) 
 	}
 	report("Ready to play.", 1)
 	return nil
+}
+
+// patchList is the server's patches in the order they apply: from the
+// signed info with their checksums when it's signed, else from plist.txt.
+func patchList(ctx context.Context, info *serverInfo) ([]plistEntry, map[string]signedPatch, error) {
+	if info.signed {
+		var list []plistEntry
+		sums := map[string]signedPatch{}
+		for _, p := range info.Patches {
+			if !safeName(p.Name) {
+				return nil, nil, fmt.Errorf("the server lists a patch named %q, which the patcher won't download", p.Name)
+			}
+			list = append(list, plistEntry{p.N, p.Name})
+			sums[p.Name] = p
+		}
+		return list, sums, nil
+	}
+	resp, err := get(ctx, info.PlistURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	list, err := parsePlist(io.LimitReader(resp.Body, 1<<20))
+	return list, nil, err
 }
 
 func sizeText(done, total int64) string {

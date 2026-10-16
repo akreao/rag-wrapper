@@ -4,8 +4,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
+	"crypto/ed25519"
 	"encoding/json"
 	"html/template"
 	"io"
@@ -18,7 +17,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -59,6 +57,8 @@ type patcherFiles struct {
 	Dir    string // the stack's patches/ folder: plist.txt and the .thor files
 	Exe    string // rpatchur.exe, built into the image; its licence files sit beside it
 	NewExe string // our own patcher, built into the image; Go's licence sits beside it as LICENSE-Go
+	// Key signs what our patcher downloads (signing.go); nil signs nothing.
+	Key ed25519.PrivateKey
 }
 
 // patchName is what a patch file in plist.txt may be called. It keeps
@@ -68,12 +68,26 @@ var patchName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*\.thor$`)
 // Patches returns the published patch files in plist.txt order. A missing
 // plist.txt means nothing is published yet.
 func (p patcherFiles) Patches() []string {
+	var names []string
+	for _, l := range p.listed() {
+		names = append(names, l.name)
+	}
+	return names
+}
+
+type listedPatch struct {
+	n    int
+	name string
+}
+
+// listed is plist.txt's patches with their numbers.
+func (p patcherFiles) listed() []listedPatch {
 	f, err := os.Open(filepath.Join(p.Dir, "plist.txt"))
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
-	var names []string
+	var list []listedPatch
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		// "<number> <file>", the format THOR patchers read.
@@ -81,11 +95,11 @@ func (p patcherFiles) Patches() []string {
 		if len(fields) < 2 {
 			continue
 		}
-		if _, err := strconv.Atoi(fields[0]); err == nil && patchName.MatchString(fields[1]) {
-			names = append(names, fields[1])
+		if n, err := strconv.Atoi(fields[0]); err == nil && patchName.MatchString(fields[1]) {
+			list = append(list, listedPatch{n, fields[1]})
 		}
 	}
-	return names
+	return list
 }
 
 // Available is true when the image has the patcher to hand out.
@@ -151,9 +165,13 @@ func (a *app) newPatcherDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The new patcher isn't in this portal's image. Rebuild the portal with docker compose build portal.", http.StatusNotFound)
 		return
 	}
-	cfg, _ := json.MarshalIndent(map[string]string{"portal": a.conn.BaseURL(r)}, "", "  ")
+	cfg := map[string]string{"portal": a.conn.BaseURL(r)}
+	if a.conn.Patcher.Key != nil {
+		cfg["public_key"] = publicKey(a.conn.Patcher.Key)
+	}
+	cfgJSON, _ := json.MarshalIndent(cfg, "", "  ")
 	a.servePatcherZip(w, r, newPatcherZip, a.conn.Patcher.NewExe, map[string][]byte{
-		newPatcherConfig: append(cfg, '\n'),
+		newPatcherConfig: append(cfgJSON, '\n'),
 	}, map[string]string{
 		filepath.Join(filepath.Dir(a.conn.Patcher.NewExe), "LICENSE-Go"): "licenses/go-LICENSE.txt",
 	})
@@ -228,6 +246,14 @@ func (a *app) patcherInfo(w http.ResponseWriter, r *http.Request) {
 	if sum := a.conn.Patcher.newExeSHA256(); sum != "" {
 		info["patcher"] = map[string]string{"url": base + "/patcher/" + patcherName + ".exe", "sha256": sum}
 	}
+	if key := a.conn.Patcher.Key; key != nil {
+		info["patches"] = a.conn.Patcher.signedPatches()
+		if err := signInfo(key, info); err != nil {
+			log.Printf("sign patcher info: %v", err)
+			http.Error(w, "couldn't sign the patcher info", http.StatusInternalServerError)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(info)
@@ -245,36 +271,9 @@ func (a *app) newPatcherExe(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, a.conn.Patcher.NewExe)
 }
 
-// The patcher exe's checksum, kept until the file changes.
-var exeSum struct {
-	sync.Mutex
-	path string
-	mod  time.Time
-	size int64
-	sum  string
-}
-
 func (p patcherFiles) newExeSHA256() string {
-	st, err := os.Stat(p.NewExe)
-	if err != nil || !st.Mode().IsRegular() {
-		return ""
-	}
-	exeSum.Lock()
-	defer exeSum.Unlock()
-	if exeSum.path == p.NewExe && exeSum.mod.Equal(st.ModTime()) && exeSum.size == st.Size() {
-		return exeSum.sum
-	}
-	f, err := os.Open(p.NewExe)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return ""
-	}
-	exeSum.path, exeSum.mod, exeSum.size, exeSum.sum = p.NewExe, st.ModTime(), st.Size(), hex.EncodeToString(h.Sum(nil))
-	return exeSum.sum
+	_, sum := fileSum(p.NewExe)
+	return sum
 }
 
 // patcherList serves plist.txt. With nothing published it's empty, which

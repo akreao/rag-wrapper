@@ -129,6 +129,8 @@ services:
       PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
       PACKETVER: ${PACKETVER:-20250716}
       PRERE: ${PRERE:-yes}
+      # Signs what the players' patcher downloads (portal/signing.go).
+      PATCH_SIGNING_KEY: ${PATCH_SIGNING_KEY:-}
     # The server name comes from the Settings screen's char_conf.txt.
     # patches/ holds the client patches the patcher downloads.
     volumes:

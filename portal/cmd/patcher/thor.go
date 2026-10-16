@@ -131,7 +131,8 @@ func (a *thorArchive) content(e thorEntry) ([]byte, error) {
 
 // checkIntegrity compares each file with the CRC32 that data.integrity
 // lists for it ("<path>=0x<crc>" lines), so a damaged download is never
-// applied. A patch without data.integrity has nothing to check against.
+// applied, GRF entries included. The desktop app lists every file, so a
+// patch without data.integrity, or a file it doesn't list, is refused.
 func (a *thorArchive) checkIntegrity() error {
 	var sums map[string]uint32
 	for _, e := range a.Entries {
@@ -146,7 +147,7 @@ func (a *thorArchive) checkIntegrity() error {
 		}
 	}
 	if sums == nil {
-		return nil
+		return errors.New("the patch has no data.integrity, so the patcher can't check it")
 	}
 	for _, e := range a.Entries {
 		if e.Remove || strings.EqualFold(e.Path, integrityFile) {
@@ -154,7 +155,7 @@ func (a *thorArchive) checkIntegrity() error {
 		}
 		want, ok := sums[e.Path]
 		if !ok {
-			continue
+			return fmt.Errorf("%s isn't listed in the patch's data.integrity, so the patcher can't check it", e.Path)
 		}
 		b, err := a.content(e)
 		if err != nil {

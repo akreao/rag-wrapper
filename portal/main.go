@@ -63,7 +63,11 @@ func main() {
 			Dir:    env("PATCHES_DIR", "/patches"),
 			Exe:    env("PATCHER_EXE", "/patcher/rpatchur.exe"),
 			NewExe: env("NEW_PATCHER_EXE", "/patcher/rag-wrapper-patcher.exe"),
+			Key:    signingKey(os.Getenv("PATCH_SIGNING_KEY")),
 		},
+	}
+	if conn.Patcher.Key == nil {
+		log.Print("PATCH_SIGNING_KEY isn't set, so the patcher's downloads aren't signed")
 	}
 
 	app, err := newApp(&store{db: db, chars: charsPrefix(cfg.DBName, conn.Renewal)}, adminGroup, conn)
