@@ -187,22 +187,16 @@ pub fn publish(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, 
         }
         let name = format!("{number:04}_{}.thor", if grf_part { "data" } else { "client" });
         let tmp = patches.join(format!(".{name}.tmp"));
-        let out = BufWriter::new(File::create(&tmp).map_err(|e| e.to_string())?);
-        let mut thor = ThorWriter::new(out, grf_part.then_some(GRF.as_bytes())).map_err(|e| e.to_string())?;
-        for path in update {
-            let content = sources[path.as_str()].read().map_err(|e| format!("{path}: {e}"))?;
-            thor.add(&encode(path)?, &content).map_err(|e| format!("{path}: {e}"))?;
-            manifest.files.insert(path.clone(), state_of(&content));
+        let written = write_thor(&tmp, grf_part, &update, &remove, data_ini, &sources, &mut manifest)
+            .and_then(|()| fs::rename(&tmp, patches.join(&name)).map_err(|e| e.to_string()));
+        if let Err(e) = written {
+            // Nothing lists these yet, so they would only take up disk space.
+            let _ = fs::remove_file(&tmp);
+            for (_, name) in &built {
+                let _ = fs::remove_file(patches.join(name));
+            }
+            return Err(e);
         }
-        for path in remove {
-            thor.remove(&encode(path)?);
-            manifest.files.remove(path);
-        }
-        if data_ini {
-            thor.add(DATA_INI.as_bytes(), DATA_INI_CONTENT.as_bytes()).map_err(|e| e.to_string())?;
-        }
-        thor.finish().map_err(|e| e.to_string())?;
-        fs::rename(&tmp, patches.join(&name)).map_err(|e| e.to_string())?;
         manifest.grf |= grf_part;
         built.push((number, name));
         number += 1;
@@ -226,6 +220,60 @@ pub fn publish(client_files: &Path, mods: &[(String, PathBuf)], patches: &Path, 
     let json = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
     write_atomic(&patches.join(MANIFEST), &json)?;
     Ok(publish)
+}
+
+/// Writes one THOR file to `tmp`, compressing each file straight into it,
+/// and notes in `manifest` what each file it carries now is.
+fn write_thor(
+    tmp: &Path,
+    grf_part: bool,
+    update: &[&String],
+    remove: &[&String],
+    data_ini: bool,
+    sources: &BTreeMap<String, Source>,
+    manifest: &mut Manifest,
+) -> Result<(), String> {
+    let out = BufWriter::new(File::create(tmp).map_err(|e| e.to_string())?);
+    let mut thor = ThorWriter::new(out, grf_part.then_some(GRF.as_bytes())).map_err(|e| e.to_string())?;
+    for path in update {
+        let source = sources[path.as_str()].open().map_err(|e| format!("{path}: {e}"))?;
+        let mut content = Hashing::new(source);
+        let size = thor.add_from(&encode(path)?, &mut content).map_err(|e| format!("{path}: {e}"))?;
+        manifest.files.insert((*path).clone(), FileState { size, sha256: content.digest() });
+    }
+    for path in remove {
+        thor.remove(&encode(path)?);
+        manifest.files.remove(*path);
+    }
+    if data_ini {
+        thor.add(DATA_INI.as_bytes(), DATA_INI_CONTENT.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    thor.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// A reader that hashes what passes through it.
+struct Hashing<R> {
+    inner: R,
+    hasher: Sha256,
+}
+
+impl<R: Read> Hashing<R> {
+    fn new(inner: R) -> Self {
+        Self { inner, hasher: Sha256::new() }
+    }
+
+    fn digest(self) -> String {
+        format!("{:x}", self.hasher.finalize())
+    }
+}
+
+impl<R: Read> Read for Hashing<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.hasher.update(&buf[..n]);
+        Ok(n)
+    }
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -291,6 +339,14 @@ enum Source {
 }
 
 impl Source {
+    /// The content, to stream into a patch.
+    fn open(&self) -> io::Result<Box<dyn Read + '_>> {
+        Ok(match self {
+            Source::File(path) => Box::new(File::open(path)?),
+            Source::Merged(bytes) => Box::new(bytes.as_slice()),
+        })
+    }
+
     fn read(&self) -> io::Result<Vec<u8>> {
         match self {
             Source::File(path) => fs::read(path),
@@ -660,6 +716,24 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn a_failed_publish_leaves_no_files_behind() {
+        let d = Dirs::new("failed");
+        d.put(EXE, b"MZ");
+        d.put("data/a.txt", b"a");
+        // A folder where the client patch goes makes its rename fail.
+        fs::create_dir_all(d.patches().join("0002_client.thor/x")).unwrap();
+        assert!(d.publish().is_err());
+        let mut left: Vec<_> = fs::read_dir(d.patches()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        left.sort();
+        assert_eq!(left, ["0002_client.thor"]);
+
+        fs::remove_dir_all(d.patches().join("0002_client.thor")).unwrap();
+        let p = d.publish().unwrap();
+        assert_eq!(p.patches, ["0001_data.thor", "0002_client.thor"]);
+        assert_eq!(d.thor("0001_data.thor").files[&b"data\\a.txt"[..]].as_deref(), Some(&b"a"[..]));
     }
 
     #[test]

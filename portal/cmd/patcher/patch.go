@@ -206,6 +206,7 @@ func update(ctx context.Context, dir string, info *serverInfo, report progress) 
 	}
 	st := loadState(dir)
 	todo := pending(list, st.Applied)
+	warning := ""
 	for i, p := range todo {
 		share := 1 / float64(len(todo))
 		base := float64(i) * share
@@ -226,15 +227,23 @@ func update(ctx context.Context, dir string, info *serverInfo, report progress) 
 			return fmt.Errorf("downloading %s: %w", p.Name, err)
 		}
 		report(fmt.Sprintf("Applying %s (%s)", label, p.Name), base+share*0.8)
-		err = applyFile(dir, path)
+		w, err := applyFile(dir, path)
 		os.Remove(path)
 		if err != nil {
 			return fmt.Errorf("applying %s: %w", p.Name, err)
+		}
+		if w != "" {
+			warning = w
 		}
 		st.Applied = p.N
 		if err := saveState(dir, st); err != nil {
 			return err
 		}
+	}
+	if warning != "" {
+		// The patches applied; this only says what's left for next time.
+		report("Ready to play. "+warning+". That is tried again with the next patch.", 1)
+		return nil
 	}
 	report("Ready to play.", 1)
 	return nil
@@ -313,44 +322,48 @@ func download(ctx context.Context, url, path string, report func(done, total int
 }
 
 // applyFile applies one downloaded THOR patch to the client folder.
-func applyFile(dir, path string) error {
+// warning is something that went wrong after the patch applied, which
+// doesn't stop it counting as applied.
+func applyFile(dir, path string) (warning string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return err
+		return "", err
 	}
 	a, err := readThor(f, st.Size())
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := a.checkIntegrity(); err != nil {
-		return err
+		return "", err
 	}
 	if a.GRFMerging {
 		return applyToGRF(dir, a)
 	}
-	return applyToFolder(dir, a)
+	return "", applyToFolder(dir, a)
 }
 
-func applyToGRF(dir string, a *thorArchive) error {
+// applyToGRF applies a patch to its GRF. warning is set when the patch
+// applied but the GRF couldn't be shrunk afterwards.
+func applyToGRF(dir string, a *thorArchive) (warning string, err error) {
 	name := a.GRF
 	if name == "" {
 		name = defaultGRF
 	}
 	if !safeName(name) || !strings.HasSuffix(strings.ToLower(name), ".grf") {
-		return fmt.Errorf("the patch targets %q, which isn't a GRF in the client folder", name)
+		return "", fmt.Errorf("the patch targets %q, which isn't a GRF in the client folder", name)
 	}
 	if strings.EqualFold(name, "data.grf") {
-		return errors.New("the patch targets data.grf, the official client's GRF, which the patcher never changes")
+		return "", errors.New("the patch targets data.grf, the official client's GRF, which the patcher never changes")
 	}
 	path := filepath.Join(dir, name)
 	g, err := openGRF(path)
 	if err != nil {
-		return inUse(err)
+		return "", inUse(err)
 	}
 	for _, e := range a.Entries {
 		if strings.EqualFold(e.Path, integrityFile) {
@@ -362,17 +375,24 @@ func applyToGRF(dir string, a *thorArchive) error {
 		}
 		if err := g.add(e.Path, a.raw(e), e.Compressed, e.Size); err != nil {
 			g.close()
-			return err
+			return "", err
 		}
 	}
 	if err := g.commit(); err != nil {
 		g.close()
-		return inUse(err)
+		return "", inUse(err)
 	}
 	if g.wasteful() {
-		return inUse(g.compact(path))
+		// The patch is in the GRF already, so a failed compaction only
+		// leaves dead space behind. It mustn't fail the patch, or the
+		// patch would apply (and add its data) again on every run. The
+		// next patch into this GRF tries again.
+		if err := g.compact(path); err != nil {
+			return fmt.Sprintf("Couldn't shrink %s: %v", name, err), nil
+		}
+		return "", nil
 	}
-	return g.close()
+	return "", g.close()
 }
 
 func applyToFolder(dir string, a *thorArchive) error {
@@ -390,14 +410,11 @@ func applyToFolder(dir string, a *thorArchive) error {
 			}
 			continue
 		}
-		b, err := a.content(e)
-		if err != nil {
-			return err
-		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
-		if err := writeFileAtomic(path, b); err != nil {
+		err = writeAtomic(path, func(w io.Writer) error { return a.inflateTo(w, e) })
+		if err != nil {
 			return inUse(err)
 		}
 	}
@@ -432,15 +449,35 @@ func clientPath(dir, p string) (string, error) {
 // writeFileAtomic writes beside the file, then swaps it in, so a half
 // written file is never left in its place.
 func writeFileAtomic(path string, b []byte) error {
+	return writeAtomic(path, func(w io.Writer) error {
+		_, err := w.Write(b)
+		return err
+	})
+}
+
+// writeAtomic is writeFileAtomic for content that write streams in: it
+// goes to a temporary file beside path, which is synced to disk before it
+// replaces path.
+func writeAtomic(path string, write func(io.Writer) error) error {
 	tmp := path + ".rwp-tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	err = write(f)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
 		os.Remove(tmp)
-		return err
 	}
-	return nil
+	return err
 }
 
 // inUse explains the usual reason Windows refuses to replace a client

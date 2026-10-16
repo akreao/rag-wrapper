@@ -20,9 +20,16 @@ RUN git init -q /src/rathena \
 WORKDIR /src/rathena
 ARG PACKETVER=20250716
 ARG PRERE=yes
+# g++ takes 1 to 2 GB for each of rAthena's largest files, so a machine
+# with many cores and little memory runs out with one job per core. Empty
+# MAKE_JOBS runs one job per 2 GB of available memory, at least 1 and at
+# most one per core.
+ARG MAKE_JOBS=
 RUN ./configure --enable-packetver="${PACKETVER}" \
       $( [ "${PRERE}" = "yes" ] && echo "--enable-prere=yes" ) \
- && make server -j"$(nproc)"
+ && jobs="${MAKE_JOBS:-$(awk -v cores="$(nproc)" '/^MemAvailable:/ { j = int($2 / 2097152); if (j < 1) j = 1; if (j > cores) j = cores; print j }' /proc/meminfo)}" \
+ && echo "Building with ${jobs:=1} jobs" \
+ && make server -j"${jobs}"
 
 
 FROM ubuntu:24.04

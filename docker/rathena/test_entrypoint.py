@@ -210,6 +210,72 @@ class EntrypointTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("DB_PASSWORD", result.stderr)
 
+    def test_warns_about_the_example_passwords(self):
+        result = self.run_entrypoint(DB_PASSWORD="change-me", DB_ROOT_PASSWORD="change-me-too", INTER_PASSWORD="changeme123")
+        for key in ("DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"):
+            self.assertIn(f"WARNING: {key} is still the example value from .env.example", result.stderr)
+        self.assertIn("someone on your network can connect a fake char server", result.stderr)
+        self.assertIn("MariaDB keeps the passwords it was created with", result.stderr)
+
+        result = self.run_entrypoint(INTER_PASSWORD="changeme123")
+        self.assertNotIn("DB_PASSWORD", result.stderr)
+        self.assertNotIn("MariaDB keeps", result.stderr)
+
+        result = self.run_entrypoint(DB_PASSWORD="change-me")
+        self.assertIn("WARNING: DB_PASSWORD", result.stderr)
+        self.assertNotIn("INTER_PASSWORD", result.stderr)
+
+        result = self.run_entrypoint(DB_ROOT_PASSWORD="Xk3random")
+        self.assertNotIn("WARNING", result.stderr)
+
+    def create_admin(self, row, user="admin", password="secret"):
+        """Runs entrypoint.sh's create_admin with the login table's row for
+        the name (account_id, group_id, password matches) or none."""
+        with open(ENTRYPOINT, encoding="utf-8") as f:
+            text = f.read()
+        function = text[text.index("create_admin() {") :]
+        function = function[: function.index("\n}\n") + 3]
+        script = textwrap.dedent(
+            """\
+            set -eu
+            mysql_cmd() {
+                case "$*" in
+                    *SELECT*) printf '%s' "$ROW" ;;
+                    *INSERT*) echo "inserted" ;;
+                esac
+            }
+            """
+        ) + function + "create_admin\n"
+        env = {**os.environ, "ROW": row, "ADMIN_USER": user, "ADMIN_PASSWORD": password}
+        result = subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def test_admin_is_created_once(self):
+        result = self.create_admin("")
+        self.assertEqual(result.stdout, "inserted\nCreated admin account admin\n")
+
+        result = self.create_admin("5\t99\t1")
+        self.assertEqual(result.stdout, "Admin account admin already exists\n")
+        self.assertEqual(result.stderr, "")
+
+    def test_an_existing_admin_keeps_its_password_and_says_so(self):
+        result = self.create_admin("5\t99\t0")
+        self.assertNotIn("inserted", result.stdout)
+        self.assertIn("Admin account kept: admin already exists, so its password wasn't changed", result.stderr)
+
+        result = self.create_admin("5\t0\t1")
+        self.assertIn("Admin account kept: admin already exists as a player account (group 0)", result.stderr)
+
+    def test_admin_named_like_the_server_login_is_not_created(self):
+        result = self.create_admin("1\t1\t0", user="wrapper_inter")
+        self.assertNotIn("inserted", result.stdout)
+        self.assertIn("Admin account not created: wrapper_inter is the name of the server-to-server login", result.stderr)
+
+    def test_no_admin_asked_for(self):
+        result = self.create_admin("", password="")
+        self.assertEqual(result.stdout + result.stderr, "")
+
     def test_unknown_command(self):
         result = self.run_entrypoint("serve", code=64)
         self.assertIn("usage:", result.stderr)
