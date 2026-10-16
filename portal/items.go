@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
-
-	"github.com/go-sql-driver/mysql"
 )
 
 // Special values of card0 from rAthena's itemdb.hpp: the card slots of
@@ -50,6 +47,25 @@ func (i Item) cardIDs() []int {
 		}
 	}
 	return ids
+}
+
+// Card is a card in an item, with its name, for linking to its page.
+type Card struct {
+	ID   int
+	Name string
+}
+
+// Cards pairs CardNames with the cards' numbers (0 where unknown).
+func (i Item) Cards() []Card {
+	ids := i.cardIDs()
+	cards := make([]Card, len(i.CardNames))
+	for n, name := range i.CardNames {
+		cards[n].Name = name
+		if n < len(ids) {
+			cards[n].ID = ids[n]
+		}
+	}
+	return cards
 }
 
 // inventory lists what a character carries, equipped items first.
@@ -132,10 +148,10 @@ func (s *store) nameItems(ctx context.Context, items []*Item) error {
 	return nil
 }
 
-// itemNames looks up item names in wrapper_item_names, which the rAthena
-// image's setup step fills from the item database it was built with. Before
-// that has run (an image from before this table existed) there are no
-// names, and pages show item numbers instead.
+// itemNames looks up item names in wrapper_items, which the rAthena image
+// fills from the server's item database when the map server starts (see
+// lookup.go). Until it has, there are no names, and pages show item
+// numbers instead.
 func (s *store) itemNames(ctx context.Context, ids map[int]bool) (map[int]string, error) {
 	names := map[int]string{}
 	if len(ids) == 0 {
@@ -146,9 +162,8 @@ func (s *store) itemNames(ctx context.Context, ids map[int]bool) (map[int]string
 		args = append(args, id)
 	}
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT `id`, `name` FROM "+s.chars+"`wrapper_item_names` WHERE `id` IN (?"+strings.Repeat(", ?", len(args)-1)+")", args...)
-	var me *mysql.MySQLError
-	if errors.As(err, &me) && me.Number == 1146 { // ER_NO_SUCH_TABLE
+		"SELECT `id`, `name` FROM "+s.chars+"`wrapper_items` WHERE `id` IN (?"+strings.Repeat(", ?", len(args)-1)+")", args...)
+	if noSuchTable(err) {
 		return names, nil
 	}
 	if err != nil {

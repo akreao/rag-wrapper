@@ -1,0 +1,30 @@
+{{define "content"}}{{with .Data}}<h1>Monsters</h1>
+{{template "lookupTabs" "monsters"}}
+{{if .Missing}}<p class="error">{{lookupMissing}}</p>{{else}}
+<form method="get" action="/monsters" class="search">
+  <input name="q" value="{{.Q}}" placeholder="Name or number" aria-label="Monster name or number">
+  <label class="choice"><input type="checkbox" name="spawning" value="1"{{if .Spawning}} checked{{end}}>On maps</label>
+  <button>Search</button>
+</form>
+{{with .Mobs}}
+<table>
+  <thead><tr><th>Monster</th><th>Level</th><th>HP</th><th>Race</th><th>Element</th><th>Base exp</th><th>Job exp</th><th>Maps</th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td><a href="/monsters/{{.ID}}">{{.Name}}</a> <small class="note">#{{.ID}}</small>{{if .MVP}} <span class="tag bad">MVP</span>{{else if .Boss}} <span class="tag">Boss</span>{{end}}{{with .Custom}} <span class="tag">{{.}}</span>{{end}}</td>
+    <td>{{.Level}}</td>
+    <td>{{thousands .HP}}</td>
+    <td>{{.Race}}</td>
+    <td>{{.Element}} {{.ElementLevel}}</td>
+    <td>{{thousands .BaseExp}}</td>
+    <td>{{thousands .JobExp}}</td>
+    <td>{{if .Maps}}{{.Maps}}{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No monsters found.</p>
+{{end}}
+{{template "lookupPager" .}}
+{{template "lookupNote" .}}
+{{end}}{{end}}{{end}}

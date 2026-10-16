@@ -59,6 +59,31 @@ if [ -f BUILD_PRERE ] && [ "$(cat BUILD_PRERE)" != "${PRERE:-yes}" ]; then
 	exit 66
 fi
 
+# The passwords .env.example comes with are public. The desktop app makes
+# random ones for a new install, but a .env copied by hand, or made by the
+# app next to an existing database, can still have them. Only warned
+# about: refusing would stop a server that has run on them for months, and
+# the database passwords can't simply be changed in .env (MariaDB keeps
+# the ones it was created with).
+warn_placeholder_passwords() {
+	placeholders=""
+	[ "${DB_PASSWORD}" = "change-me" ] && placeholders="${placeholders} DB_PASSWORD"
+	[ "${DB_ROOT_PASSWORD:-}" = "change-me-too" ] && placeholders="${placeholders} DB_ROOT_PASSWORD"
+	[ "${INTER_PASSWORD}" = "changeme123" ] && placeholders="${placeholders} INTER_PASSWORD"
+	[ -n "${placeholders}" ] || return 0
+	for key in ${placeholders}; do
+		echo "WARNING: ${key} is still the example value from .env.example, which anyone can look up." >&2
+	done
+	case "${placeholders}" in *INTER_PASSWORD*)
+		echo "WARNING: With INTER_PASSWORD known, someone on your network can connect a fake char server while the real one is down or restarting. Set a new random INTER_PASSWORD in .env and restart the whole stack; db-init updates the account on every start." >&2
+		;;
+	esac
+	case "${placeholders}" in *DB_*)
+		echo "WARNING: The database port isn't published, so the database passwords matter less. Changing them in .env alone stops the server from starting: MariaDB keeps the passwords it was created with." >&2
+		;;
+	esac
+}
+
 # conf/user is the overrides folder from the host: the desktop app's
 # Settings screen writes there, and so can people by hand. Each file in it
 # with the name of one of rAthena's conf/import files is used in its place;
@@ -147,13 +172,19 @@ CONF
 	} > conf/import/map_conf.txt
 }
 
-# The stack's own scripts (npc/wrapper/ in the image, from this folder's
-# npc/) load after rAthena's, before the custom NPCs and the mods.
+# The stack's own scripts in npc/wrapper/ (docker/rathena/npc/ in
+# rag-wrapper), such as the desktop app's in-game announcements, load
+# after rAthena's own, before the custom NPCs and mods.
 apply_wrapper_npcs() {
 	if ! grep -qx 'import: npc/wrapper.conf' npc/scripts_custom.conf; then
 		printf '\nimport: npc/wrapper.conf\n' >> npc/scripts_custom.conf
 	fi
-	find npc/wrapper -type f -name '*.txt' 2>/dev/null | LC_ALL=C sort | sed 's/^/npc: /' > npc/wrapper.conf
+	: > npc/wrapper.conf
+	for path in npc/wrapper/*.txt; do
+		if [ -f "${path}" ]; then
+			echo "npc: ${path}" >> npc/wrapper.conf
+		fi
+	done
 }
 
 # rAthena ships custom NPCs (npc/custom/) that npc/scripts_custom.conf
@@ -448,49 +479,25 @@ check_not_newer() {
 	fi
 }
 
-# The portal shows item names (on its admin inventory page) from this
-# table. It is refilled on every start from the item database this image
-# was built with, pre-renewal or renewal, plus db/import/item_db.yml and the
-# enabled mods' item_db.yml, so it follows rAthena updates and custom
-# items. Assumes rAthena's own YAML
-# layout: "  - Id: 501" with "    Name: Red Potion" under it.
-load_item_names() {
+# The portal's item and monster pages (and the item names on its admin
+# pages) read tables lookup_db.py fills from the item and monster
+# databases, drop rate settings and spawns this map server loads. It runs
+# beside the map server each time the map server starts, so mods and
+# settings show once a restart has loaded them, and the portal keeps the
+# previous tables until the new ones are complete. Only the portal uses
+# them, so a failure here leaves the map server running.
+load_lookup() {
 	mode=re
 	if [ "${PRERE:-yes}" = "yes" ]; then
 		mode=pre-re
 	fi
-	# Only the portal uses these names, so a failure here doesn't stop the
-	# servers from starting.
-	if ! {
-		echo "CREATE TABLE IF NOT EXISTS wrapper_item_names (
-			id int unsigned NOT NULL PRIMARY KEY,
-			name varchar(100) NOT NULL);"
-		echo "START TRANSACTION; DELETE FROM wrapper_item_names;"
-		# Later files win, so db/import and then the mods come last.
-		{
-			cat "db/${mode}"/item_db_*.yml db/import/item_db.yml
-			mod_files item_db.yml | while IFS= read -r path; do cat "${path}"; done
-		} 2>/dev/null | awk '
-			{ sub(/\r$/, "") }
-			/^  - Id:/ { id = $3 + 0; next }
-			/^    Name:/ && id > 0 {
-				name = substr($0, index($0, ":") + 1)
-				sub(/^ +/, "", name)
-				if (name ~ /^"/) { name = substr(name, 2); sub(/".*$/, "", name) }
-				else { sub(/[ \t]+#.*$/, "", name); sub(/ +$/, "", name) }
-				gsub(/\\/, "\\\\", name); gsub(/\047/, "\047\047", name)
-				if (n % 500 == 0) printf "%sREPLACE INTO wrapper_item_names VALUES ", (n ? ";\n" : "")
-				else printf ","
-				printf "(%d,\047%s\047)", id, name
-				n++; id = 0
-			}
-			END { if (n) print ";" }'
-		echo "COMMIT;"
-	} | char_cmd; then
-		echo "Couldn't load item names; the portal will show item numbers" >&2
-		return 0
+	sql=$(mktemp)
+	if lookup_db.py "${mode}" > "${sql}" && char_cmd < "${sql}"; then
+		:
+	else
+		echo "[Warning]: couldn't fill the portal's item and monster tables" >&2
 	fi
-	echo "Item names loaded: $(char_cmd -N -e "SELECT COUNT(*) FROM wrapper_item_names")"
+	rm -f "${sql}"
 }
 
 # The tables the login server uses. They stay in the accounts database;
@@ -558,6 +565,33 @@ init_char_db() {
 	done
 }
 
+# Group 99 is Admin in conf/groups.yml. The account is only created once:
+# an existing one keeps its password and group, since they may have been
+# changed on the portal since. The desktop app reads the lines that start
+# "Admin account kept:" and "Admin account not created:" from db-init's
+# log to tell the person, so keep those starts as they are.
+create_admin() {
+	[ -n "${ADMIN_USER}" ] && [ -n "${ADMIN_PASSWORD}" ] || return 0
+	# userid compares without case, as the login server's lookup does.
+	existing=$(mysql_cmd -N -e "SELECT account_id, group_id, user_pass = MD5('${ADMIN_PASSWORD}') FROM login WHERE userid='${ADMIN_USER}' LIMIT 1")
+	if [ -z "${existing}" ]; then
+		mysql_cmd -e "INSERT INTO login (userid, user_pass, sex, email, group_id) VALUES ('${ADMIN_USER}', MD5('${ADMIN_PASSWORD}'), 'M', 'a@a.com', 99)"
+		echo "Created admin account ${ADMIN_USER}"
+		return 0
+	fi
+	# shellcheck disable=SC2086 # splits the three columns
+	set -- ${existing}
+	if [ "$1" = "1" ]; then
+		echo "Admin account not created: ${ADMIN_USER} is the name of the server-to-server login (INTER_USER). Pick another admin name." >&2
+	elif [ "$3" != "1" ]; then
+		echo "Admin account kept: ${ADMIN_USER} already exists, so its password wasn't changed to ADMIN_PASSWORD. Change it on the portal's account page." >&2
+	elif [ "$2" != "99" ]; then
+		echo "Admin account kept: ${ADMIN_USER} already exists as a player account (group $2), so it wasn't made an admin." >&2
+	else
+		echo "Admin account ${ADMIN_USER} already exists"
+	fi
+}
+
 init_db() {
 	if [ -z "$(mysql_cmd -N -e "SHOW TABLES LIKE 'login'")" ]; then
 		echo "Empty database: importing rAthena schema"
@@ -572,20 +606,20 @@ init_db() {
 	init_char_db
 	apply_upgrades char_cmd
 
-	# Account 1 is the server-to-server login; replace the stock s1/p1.
-	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass=MD5('${INTER_PASSWORD}') WHERE account_id=1"
+	# The desktop app's in-game announcements, which the image's
+	# npc/wrapper/announcements.txt shows and marks shown. A month of
+	# them is kept.
+	char_cmd -e "CREATE TABLE IF NOT EXISTS wrapper_announcements (
+		id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		message varchar(255) NOT NULL,
+		created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		shown_at datetime NULL,
+		skipped tinyint(1) NOT NULL DEFAULT 0);
+		DELETE FROM wrapper_announcements WHERE created_at < NOW() - INTERVAL 30 DAY"
 
-	# Group 99 is Admin in conf/groups.yml. Only created once; later runs
-	# leave an existing account alone.
-	if [ -n "${ADMIN_USER}" ] && [ -n "${ADMIN_PASSWORD}" ]; then
-		if [ -z "$(mysql_cmd -N -e "SELECT 1 FROM login WHERE userid='${ADMIN_USER}'")" ]; then
-			mysql_cmd -e "INSERT INTO login (userid, user_pass, sex, email, group_id) VALUES ('${ADMIN_USER}', MD5('${ADMIN_PASSWORD}'), 'M', 'a@a.com', 99)"
-			echo "Created admin account ${ADMIN_USER}"
-		fi
-	fi
 	# The desktop app's Events screen writes EXP and drop events here;
-	# npc/rate_events.txt applies them and sets started once announced.
-	# Times are Unix seconds, rates percent of the server's own.
+	# npc/wrapper/rate_events.txt applies them and sets started once
+	# announced. Times are Unix seconds, rates percent of the server's own.
 	char_cmd -e "CREATE TABLE IF NOT EXISTS wrapper_rate_events (
 		id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
 		title varchar(100) NOT NULL,
@@ -597,7 +631,11 @@ init_db() {
 		end_text varchar(255) NOT NULL DEFAULT '',
 		started tinyint(1) NOT NULL DEFAULT 0,
 		KEY starts_at (starts_at))"
-	load_item_names
+
+	# Account 1 is the server-to-server login; replace the stock s1/p1.
+	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass=MD5('${INTER_PASSWORD}') WHERE account_id=1"
+
+	create_admin
 	echo "Database ready"
 }
 
@@ -607,10 +645,17 @@ apply_custom_npcs
 apply_mods
 
 case "${1:-}" in
+	init|config) warn_placeholder_passwords ;;
+esac
+
+case "${1:-}" in
 	init)  init_db ;;
 	login) exec ./login-server ;;
 	char)  exec ./char-server ;;
-	map)   exec ./map-server ;;
+	map)
+		load_lookup &
+		exec ./map-server
+		;;
 	web)   exec ./web-server ;;
 	config) ;;
 	*)

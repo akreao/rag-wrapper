@@ -5,7 +5,9 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"io"
 	"log"
@@ -17,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -177,43 +180,12 @@ func (a *app) newPatcherDownload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// servePatcherZip builds a patcher download: the exe as
+// servePatcherZip serves a patcher download: the exe as
 // rag-wrapper-patcher.exe, extra files, the connection files, and licence
-// files (image path to name in the zip) that exist.
+// files (image path to name in the zip) that exist. A built zip is kept
+// (patcherZips) and served again while nothing in it changes.
 func (a *app) servePatcherZip(w http.ResponseWriter, r *http.Request, zipName, exePath string, extra map[string][]byte, licences map[string]string) {
-	base := a.conn.BaseURL(r)
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	add := func(name string, data []byte) error {
-		f, err := zw.Create(name)
-		if err == nil {
-			_, err = f.Write(data)
-		}
-		return err
-	}
-	exe, err := os.ReadFile(exePath)
-	if err == nil {
-		err = add(patcherName+".exe", exe)
-	}
-	for _, name := range slices.Sorted(maps.Keys(extra)) {
-		if err == nil {
-			err = add(name, extra[name])
-		}
-	}
-	if err == nil {
-		err = add("data/clientinfo.xml", a.conn.clientInfo(base+"/register", a.gmAccounts(r.Context())))
-	}
-	if err == nil {
-		err = add(externalSettingsPath, a.conn.externalSettings())
-	}
-	for _, src := range slices.Sorted(maps.Keys(licences)) {
-		if b, rerr := os.ReadFile(src); rerr == nil && err == nil {
-			err = add(licences[src], b)
-		}
-	}
-	if err == nil {
-		err = zw.Close()
-	}
+	b, err := a.patcherZip(r, zipName, exePath, extra, licences)
 	if err != nil {
 		log.Printf("patcher zip: %v", err)
 		http.Error(w, "couldn't build the patcher download", http.StatusInternalServerError)
@@ -223,7 +195,127 @@ func (a *app) servePatcherZip(w http.ResponseWriter, r *http.Request, zipName, e
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+zipName+`"`)
 	w.Header().Set("Cache-Control", "no-store")
-	w.Write(buf.Bytes())
+	w.Write(b)
+}
+
+// zipFile is a small file in a patcher download, beside the exe.
+type zipFile struct {
+	name string
+	data []byte
+}
+
+// patcherZip is the download's content. The small files are made on every
+// request (the admin IDs come from the database, so a new admin is in the
+// next download); the zip is only built again when they or the exe change.
+func (a *app) patcherZip(r *http.Request, zipName, exePath string, extra map[string][]byte, licences map[string]string) ([]byte, error) {
+	exe, err := os.Open(exePath)
+	if err != nil {
+		return nil, err
+	}
+	defer exe.Close()
+	// The open file's own size and time, so they match what's read.
+	st, err := exe.Stat()
+	if err != nil {
+		return nil, err
+	}
+	base := a.conn.BaseURL(r)
+	var files []zipFile
+	for _, name := range slices.Sorted(maps.Keys(extra)) {
+		files = append(files, zipFile{name, extra[name]})
+	}
+	files = append(files,
+		zipFile{"data/clientinfo.xml", a.conn.clientInfo(base+"/register", a.gmAccounts(r.Context()))},
+		zipFile{externalSettingsPath, a.conn.externalSettings()})
+	for _, src := range slices.Sorted(maps.Keys(licences)) {
+		if b, err := os.ReadFile(src); err == nil {
+			files = append(files, zipFile{licences[src], b})
+		}
+	}
+
+	// The key covers everything in the zip: the exe by its path, size and
+	// time, and the small files by their content.
+	h := sha256.New()
+	fmt.Fprintf(h, "%q %q %d %d\n", zipName, exePath, st.Size(), st.ModTime().UnixNano())
+	for _, f := range files {
+		fmt.Fprintf(h, "%q %d\n", f.name, len(f.data))
+		h.Write(f.data)
+	}
+	var key [sha256.Size]byte
+	h.Sum(key[:0])
+	return patcherZips.get(key, func() ([]byte, error) {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		fw, err := zw.Create(patcherName + ".exe")
+		if err == nil {
+			_, err = io.Copy(fw, exe)
+		}
+		for _, f := range files {
+			if err == nil {
+				fw, err = zw.Create(f.name)
+			}
+			if err == nil {
+				_, err = fw.Write(f.data)
+			}
+		}
+		if err == nil {
+			err = zw.Close()
+		}
+		return buf.Bytes(), err
+	})
+}
+
+// patcherZips keeps the last few patcher downloads built, so a LAN party's
+// worth of players downloading at once costs one build, not one each. A
+// download differs by the address it was reached on and the zip (rpatchur's
+// or ours), so a few entries cover a server.
+var patcherZips = &zipCache{max: 4}
+
+type zipCache struct {
+	build   sync.Mutex // one build at a time: a rush of downloads builds once
+	mu      sync.Mutex // guards entries
+	max     int
+	entries []zipCacheEntry // least recently used first
+}
+
+type zipCacheEntry struct {
+	key [sha256.Size]byte
+	zip []byte
+}
+
+// get returns the zip kept for key, building it with build if there's none.
+func (c *zipCache) get(key [sha256.Size]byte, build func() ([]byte, error)) ([]byte, error) {
+	if b, ok := c.lookup(key); ok {
+		return b, nil
+	}
+	c.build.Lock()
+	defer c.build.Unlock()
+	if b, ok := c.lookup(key); ok {
+		return b, nil // built while this request waited
+	}
+	b, err := build()
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.entries) >= c.max {
+		c.entries = slices.Delete(c.entries, 0, len(c.entries)-c.max+1)
+	}
+	c.entries = append(c.entries, zipCacheEntry{key, b})
+	return b, nil
+}
+
+func (c *zipCache) lookup(key [sha256.Size]byte) ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, e := range c.entries {
+		if e.key == key {
+			// Move it to the end: the most recently used.
+			c.entries = append(slices.Delete(c.entries, i, i+1), e)
+			return e.zip, true
+		}
+	}
+	return nil, false
 }
 
 // patcherInfo tells our own patcher what it shows and where everything is.

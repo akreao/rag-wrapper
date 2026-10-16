@@ -1,3 +1,4 @@
+mod announce;
 mod backup;
 mod battleconf;
 mod clientpatch;
@@ -15,6 +16,7 @@ mod menu;
 mod mods;
 mod net;
 mod news;
+mod notices;
 mod settings;
 mod stack;
 mod task;
@@ -129,6 +131,10 @@ struct Overview {
     address_change: Option<AddressChange>,
     /// A draft News post for players about this app version, not yet saved or skipped.
     player_news: Option<whatsnew::PlayerNews>,
+    /// Server passwords still on `.env.example`'s public values.
+    placeholder_passwords: Option<notices::Placeholders>,
+    /// The admin account setup asked for that the last start didn't make or change.
+    admin_notice: Option<notices::AdminNotice>,
     task: Option<String>,
 }
 
@@ -187,6 +193,8 @@ fn read_overview(app: &App) -> Overview {
             .and_then(|env| images::rebuild(&app.dir, env)),
         address_change: env.as_ref().and_then(address_change),
         player_news: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(whatsnew::pending),
+        placeholder_passwords: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(notices::placeholders),
+        admin_notice: env.as_ref().and_then(notices::admin_notice),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -233,13 +241,24 @@ fn change_setup(
     admin_password: &str,
     public_ip: Option<String>,
 ) -> Result<(), String> {
+    // db-init would leave that name to the server-to-server login.
+    if admin_user.eq_ignore_ascii_case(&env.get("INTER_USER").unwrap_or_default()) {
+        return Err("That name is taken by the server's own login. Pick another.".into());
+    }
     // Replace the example's placeholder passwords, unless a database made
     // with them already exists and would stop accepting new ones.
+    // INTER_PASSWORD can always change: db-init sets the account to it on
+    // every start, before the servers that use it.
     if new_passwords {
-        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
+        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD"] {
             env.set(key, &envfile::random_password(20).map_err(|e| e.to_string())?);
         }
     }
+    if fresh {
+        env.set("INTER_PASSWORD", &envfile::random_password(20).map_err(|e| e.to_string())?);
+    }
+    // A new admin account: whatever the last one's start said is old news.
+    env.set(notices::ADMIN_NOTICE, "");
     // A new install already builds this version's commit.
     if fresh {
         if let Some(update) = update::pending(env) {
@@ -536,6 +555,8 @@ struct TaskEvent {
 
 /// One step of a task, run in order until one fails.
 enum Step {
+    /// Warns players in game and waits, before a restart or stop.
+    Warn(announce::Going),
     Compose(std::process::Command),
     Backup(backup::Reason),
     /// A backup if there's none from the last day; never fails the task.
@@ -543,12 +564,16 @@ enum Step {
     Restore(String),
     /// Loads a backup into a throwaway database to check it would restore.
     TestRestore(String),
-    /// Moves `.env` to the update's commit.
-    Pin(update::ServerUpdate),
-    /// Moves `.env` back to the previous commit.
-    GoBack(update::Previous),
-    /// Pulls the prebuilt images, building any that aren't published with the command.
+    /// Gives the staged images the stack's names and moves `.env` to the
+    /// update's commit, in one step so a cancel can't come between them.
+    Pin(update::ServerUpdate, Vec<images::Image>),
+    /// The same, back to the previous commit.
+    GoBack(update::Previous, Vec<images::Image>),
+    /// Pulls the prebuilt images, building any that aren't published with
+    /// the command, under their staging names.
     Images(Vec<images::Image>, std::process::Command),
+    /// Gives the staged images the stack's names.
+    Promote(Vec<images::Image>),
     /// Pulls the prebuilt images that aren't here yet, before a start.
     FetchMissing(Vec<images::Image>),
     /// Checks that nothing else holds the ports the stack publishes.
@@ -608,29 +633,37 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             // `up` builds any that couldn't be downloaded, from the current build files.
             let missing = wanted.iter().filter(|i| !images::exists(&i.local)).cloned().collect();
             let fetch = Step::FetchMissing(wanted);
+            let mut steps = Vec::new();
+            // Everything but a start or a portal move restarts the map
+            // server, which drops everyone in game.
+            if !["start", "portal"].contains(&kind.as_str()) {
+                steps.push(Step::Warn(announce::Going::Restart));
+            }
             // A mod's database files can change items or monsters players
             // already have, so the database is backed up before they load.
-            if mods::new_databases(&app.mods_dir()).is_empty() {
-                vec![fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]
-            } else {
-                vec![Step::Backup(backup::Reason::Mods), fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]
+            if !mods::new_databases(&app.mods_dir()).is_empty() {
+                steps.push(Step::Backup(backup::Reason::Mods));
             }
+            steps.extend([fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]);
+            steps
         }
         "build" => {
             let env = app.env().ok_or("Finish setup first.")?;
             // A new build can upgrade the database on its next start.
-            vec![Step::Backup(backup::Reason::Rebuild), Step::Images(images::current(&app.dir, &env), cmd)]
+            let images = images::current(&app.dir, &env);
+            vec![Step::Backup(backup::Reason::Rebuild), Step::Images(images.clone(), cmd), Step::Promote(images)]
         }
         "update" => {
             let env = app.env().ok_or("Finish setup first.")?;
             let update = update::pending(&env).ok_or("The server is already on this version's rAthena.")?;
-            // The new commit goes into `.env` only once its image has built,
-            // so a failed or cancelled build leaves the update on offer.
+            // The new commit goes into `.env`, and its image gets the stack's
+            // name, only once every image is ready, so a failed or cancelled
+            // build leaves the old images and the update on offer.
             cmd.env("RATHENA_REPO", &update.repo).env("RATHENA_COMMIT", &update.offered);
             let images = images::wanted(&app.dir, &env, &update.repo, &update.offered);
             // A running server stays on the old image until "Restart on the
             // new version" (or the next Start); players aren't dropped by surprise.
-            vec![Step::Backup(backup::Reason::Update), Step::Images(images, cmd), Step::Pin(update)]
+            vec![Step::Backup(backup::Reason::Update), Step::Images(images.clone(), cmd), Step::Pin(update, images)]
         }
         "go-back" => {
             // An update the other way: the commit moves once its image is here,
@@ -639,17 +672,18 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             let previous = update::previous(&env).ok_or("There's no previous server version to go back to.")?;
             cmd.env("RATHENA_REPO", &previous.repo).env("RATHENA_COMMIT", &previous.commit);
             let images = images::wanted(&app.dir, &env, &previous.repo, &previous.commit);
-            vec![Step::Backup(backup::Reason::GoBack), Step::Images(images, cmd), Step::GoBack(previous)]
+            vec![Step::Backup(backup::Reason::GoBack), Step::Images(images.clone(), cmd), Step::GoBack(previous, images)]
         }
         "stop" => {
             cmd.arg("down");
-            vec![Step::Daily, Step::Compose(cmd)]
+            vec![Step::Warn(announce::Going::Stop), Step::Daily, Step::Compose(cmd)]
         }
         "backup" | "restore" | "test-restore" => {
             app.env().ok_or("Finish setup first.")?;
             match kind.as_str() {
                 "backup" => vec![Step::Backup(backup::Reason::Manual)],
-                "restore" => vec![Step::Restore(file.ok_or("Pick a backup to restore.")?)],
+                // Restoring stops the game servers while it loads.
+                "restore" => vec![Step::Warn(announce::Going::Restart), Step::Restore(file.ok_or("Pick a backup to restore.")?)],
                 _ => vec![Step::TestRestore(file.ok_or("Pick a backup to test.")?)],
             }
         }
@@ -660,6 +694,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         kind: kind.clone(),
         pid: None,
         cancelled: false,
+        skip_wait: false,
     });
     drop(slot);
     let _ = handle.emit(
@@ -677,8 +712,10 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         let result = steps.into_iter().try_for_each(|step| {
             ctx.check_cancelled()?;
             match step {
+                Step::Warn(going) => announce::warn(&ctx, going),
                 Step::Compose(cmd) => ctx.run(cmd),
-                Step::Images(wanted, build) => images::fetch_or_build(&ctx, &wanted, build),
+                Step::Images(wanted, build) => images::stage(&ctx, &wanted, build),
+                Step::Promote(wanted) => images::promote(&ctx.dir, &wanted),
                 Step::FetchMissing(wanted) => images::fetch_missing(&ctx, &wanted),
                 Step::Ports => stack::check_ports(&ctx.dir),
                 Step::Record(built) => {
@@ -692,13 +729,17 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
                 }
                 Step::Restore(file) => backup::restore(&ctx, &file),
                 Step::TestRestore(file) => backup::test_restore(&ctx, &file),
-                Step::Pin(update) => envfile::edit(&ctx.dir.join(".env"), |env| {
-                    update::pin(env, &update);
-                    Ok(())
+                Step::Pin(update, wanted) => images::promote(&ctx.dir, &wanted).and_then(|()| {
+                    envfile::edit(&ctx.dir.join(".env"), |env| {
+                        update::pin(env, &update);
+                        Ok(())
+                    })
                 }),
-                Step::GoBack(previous) => envfile::edit(&ctx.dir.join(".env"), |env| {
-                    update::go_back(env, &previous);
-                    Ok(())
+                Step::GoBack(previous, wanted) => images::promote(&ctx.dir, &wanted).and_then(|()| {
+                    envfile::edit(&ctx.dir.join(".env"), |env| {
+                        update::go_back(env, &previous);
+                        Ok(())
+                    })
                 }),
             }
         });
@@ -822,7 +863,9 @@ fn address_change(env: &EnvFile) -> Option<AddressChange> {
 }
 
 /// Once `db-init` has finished, the admin account exists and the password
-/// has no further use, so no plain-text copy is kept in `.env`.
+/// has no further use, so no plain-text copy is kept in `.env`. When the
+/// account already existed, `db-init` left its password as it was, and the
+/// dashboard says so.
 fn forget_admin_password(dir: &std::path::Path) {
     let path = dir.join(".env");
     let kept = EnvFile::load(&path).ok().and_then(|env| env.get("ADMIN_PASSWORD")).unwrap_or_default();
@@ -835,6 +878,7 @@ fn forget_admin_password(dir: &std::path::Path) {
         .any(|s| s.service == "db-init" && s.state == "exited" && s.exit_code == 0);
     if initialised {
         let _ = envfile::edit(&path, |env| {
+            notices::record_admin_outcome(dir, env);
             env.set("ADMIN_PASSWORD", "");
             Ok(())
         });
@@ -846,6 +890,28 @@ fn cancel_task(app: State<App>) {
     if let Some(running) = app.task.lock().unwrap().as_mut() {
         running.cancel();
     }
+}
+
+/// Ends the wait before a restart or stop early: players are told it's
+/// happening now.
+#[tauri::command]
+fn skip_wait(app: State<App>) {
+    if let Some(running) = app.task.lock().unwrap().as_mut() {
+        running.skip_wait = true;
+    }
+}
+
+/// Shows a message of the host's own to everyone in game, once the map
+/// server has shown it.
+#[tauri::command]
+async fn send_announcement(handle: AppHandle, message: String) -> Result<(), String> {
+    off_main(handle, move |_, app| {
+        if !app.env_path().exists() {
+            return Err("Finish setup first.".to_owned());
+        }
+        announce::send(&app.dir, &message)
+    })
+    .await?
 }
 
 /// The backups, newest first.
@@ -1077,6 +1143,9 @@ pub fn run() {
             skip_server_update,
             dismiss_address_change,
             dismiss_player_news,
+            notices::dismiss_admin_notice,
+            notices::dismiss_db_placeholders,
+            notices::change_inter_password,
             game_settings,
             save_game_settings,
             open_overrides,
@@ -1093,6 +1162,8 @@ pub fn run() {
             player_history,
             run_task,
             cancel_task,
+            skip_wait,
+            send_announcement,
             backups,
             open_backups,
             client_patch,
@@ -1152,6 +1223,8 @@ fn stop_and_exit(handle: AppHandle) {
     }
     if app.env_path().exists() {
         backup::daily(&app.ctx(&handle));
+        // No time for the usual warning, but players learn why they're dropped.
+        announce::now(&app.dir, announce::Going::Stop);
         let mut cmd = stack::compose(&app.dir);
         cmd.arg("down");
         let lines = handle.clone();
@@ -1240,21 +1313,37 @@ mod tests {
         write_setup(&path, || true, "admin", "secret_1", None).unwrap();
         let env = EnvFile::load(&path).unwrap();
         let example = EnvFile::parse(stack::ENV_EXAMPLE);
-        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
+        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD"] {
             assert_eq!(env.get(key), example.get(key));
         }
+        // db-init sets the server-to-server login's password on every start.
+        let inter = env.get("INTER_PASSWORD");
+        assert_ne!(inter, example.get("INTER_PASSWORD"));
 
         // Running setup again only changes the admin account and address.
         let key = env.get("PATCH_SIGNING_KEY");
         let mut edited = EnvFile::load(&path).unwrap();
         edited.set("DB_PASSWORD", "kept");
+        edited.set(notices::ADMIN_NOTICE, "password:admin");
         edited.save().unwrap();
         write_setup(&path, || panic!("not asked again"), "admin2", "secret_2", Some("192.168.0.5".into())).unwrap();
         let env = EnvFile::load(&path).unwrap();
         assert_eq!(env.get("DB_PASSWORD").as_deref(), Some("kept"));
+        assert_eq!(env.get("INTER_PASSWORD"), inter);
+        assert_eq!(notices::admin_notice(&env), None);
         assert_eq!(env.get("PATCH_SIGNING_KEY"), key);
         assert_eq!(env.get("ADMIN_USER").as_deref(), Some("admin2"));
         assert_eq!(env.get("PUBLIC_IP").as_deref(), Some("192.168.0.5"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn setup_refuses_the_server_login_s_name() {
+        let dir = temp_dir("setup-inter");
+        let path = dir.join(".env");
+        let err = write_setup(&path, || false, "Wrapper_Inter", "secret_1", None).unwrap_err();
+        assert!(err.contains("server's own login"), "{err}");
+        assert!(!path.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

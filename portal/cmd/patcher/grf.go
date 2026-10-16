@@ -46,12 +46,15 @@ type grfEntry struct {
 	Size       uint32
 	Flags      uint8
 	Offset     uint32 // after the header
+
+	removed bool // a tombstone, dropped from entries at the next commit
 }
 
 type grfFile struct {
 	f       *os.File
 	entries []grfEntry
-	index   map[string]int // grfKey(name) -> entries index
+	index   map[string]int // grfKey(name) -> entries index, live entries only
+	removed int            // tombstones in entries
 	end     int64          // where new data goes: the end of the file
 }
 
@@ -156,21 +159,40 @@ func (g *grfFile) add(name string, compressed io.Reader, compressedSize, size ui
 	return nil
 }
 
+// remove drops a file. The entry is only marked here and swept out at
+// the next commit, so removing many files costs one pass, not one per file.
 func (g *grfFile) remove(name string) {
-	i, ok := g.index[grfKey(name)]
+	k := grfKey(name)
+	i, ok := g.index[k]
 	if !ok {
 		return
 	}
-	g.entries = append(g.entries[:i], g.entries[i+1:]...)
-	g.index = map[string]int{}
-	for j, e := range g.entries {
-		g.index[grfKey(e.Name)] = j
+	g.entries[i].removed = true
+	g.removed++
+	delete(g.index, k)
+}
+
+// sweep drops removed entries, keeping the others in order.
+func (g *grfFile) sweep() {
+	if g.removed == 0 {
+		return
 	}
+	live := g.entries[:0]
+	for _, e := range g.entries {
+		if !e.removed {
+			g.index[grfKey(e.Name)] = len(live)
+			live = append(live, e)
+		}
+	}
+	clear(g.entries[len(live):])
+	g.entries = live
+	g.removed = 0
 }
 
 // commit writes the file table at the end and then the header that points
 // at it.
 func (g *grfFile) commit() error {
+	g.sweep()
 	var table bytes.Buffer
 	for _, e := range g.entries {
 		table.WriteString(e.Name)
@@ -219,6 +241,9 @@ func (g *grfFile) commit() error {
 func (g *grfFile) wasteful() bool {
 	var live int64
 	for _, e := range g.entries {
+		if e.removed {
+			continue
+		}
 		live += int64(e.Aligned)
 	}
 	dead := g.end - grfHeaderSize - live
@@ -240,6 +265,9 @@ func (g *grfFile) compact(path string) error {
 			return err
 		}
 		for _, e := range g.entries {
+			if e.removed {
+				continue
+			}
 			if _, err := io.Copy(out, io.NewSectionReader(g.f, int64(e.Offset)+grfHeaderSize, int64(e.Aligned))); err != nil {
 				return err
 			}
@@ -255,7 +283,11 @@ func (g *grfFile) compact(path string) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func (g *grfFile) close() error { return g.f.Close() }

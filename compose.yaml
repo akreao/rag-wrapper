@@ -18,8 +18,10 @@ x-logging: &logging
 # Every rAthena service runs the same image. Only db-init has `build:`,
 # so the image is built once (when missing, or with --build); the others
 # use it and never try to pull it from a registry.
+# RATHENA_IMAGE and PORTAL_IMAGE are for the desktop app: it builds a new
+# image under another name and renames it only once every image is ready.
 x-rathena: &rathena
-  image: rag-wrapper/rathena:${PACKETVER:-20250716}
+  image: ${RATHENA_IMAGE:-rag-wrapper/rathena:${PACKETVER:-20250716}}
   pull_policy: never
   restart: on-failure
   logging: *logging
@@ -39,8 +41,6 @@ x-rathena: &rathena
     PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
     # Matches the build; picks the item database for the portal's item names.
     PRERE: ${PRERE:-yes}
-    ADMIN_USER: ${ADMIN_USER:-}
-    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
 
 services:
   db:
@@ -69,12 +69,18 @@ services:
         RATHENA_COMMIT: ${RATHENA_COMMIT:-266a587f6a0901bbd9d6935f359c7ff0bf65b9aa}
         PACKETVER: ${PACKETVER:-20250716}
         PRERE: ${PRERE:-yes}
+        # Empty picks the compile job count from the memory available.
+        MAKE_JOBS: ${MAKE_JOBS:-}
     pull_policy: !reset null
     command: init
     # Only db-init gets root: it makes each game mode's characters database.
+    # It also creates the admin account, so only it gets the admin's
+    # password, which the desktop app blanks in .env after the first start.
     environment:
       <<: *rathena-env
       DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      ADMIN_USER: ${ADMIN_USER:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     restart: "no"
     depends_on:
       db:
@@ -117,7 +123,7 @@ services:
   # Account registration and management for players and admins.
   portal:
     build: portal
-    image: rag-wrapper/portal
+    image: ${PORTAL_IMAGE:-rag-wrapper/portal}
     restart: on-failure
     logging: *logging
     environment:

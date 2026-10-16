@@ -291,6 +291,10 @@ label[hidden] { display: none; }
   border-bottom: 1px solid var(--accent);
 }
 .update-bar[hidden] { display: none; }
+.warn-bar {
+  background: color-mix(in srgb, var(--bad) 12%, var(--card));
+  border-bottom-color: var(--bad);
+}
 .update-bar p { margin: 0; flex: 1; }
 .update-bar button { flex: none; }
 #ip-confirm button { margin: 6px 8px 0 0; }
