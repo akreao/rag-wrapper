@@ -1045,11 +1045,15 @@ $("publish").addEventListener("click", async () => {
 
 // ---- Mods: server-side scripts and database files, applied on restart ----
 
+let pendingZip = null; // the zip whose mod is already installed, while the screen asks to replace it
+
 // Any new action on the screen clears the last install's message too.
 function modsError(text) {
   $("mods-error").textContent = text || "";
   $("mods-error").hidden = !text;
   modsInstalled(null);
+  pendingZip = null;
+  $("mod-replace").hidden = true;
 }
 
 function modsInstalled(text) {
@@ -1310,17 +1314,25 @@ $("install-mod-zip").addEventListener("click", () => {
   $("mod-zip-file").click();
 });
 
-// Unpacked by the app into a new mod folder, switched off.
-$("mod-zip-file").addEventListener("change", async () => {
-  const file = $("mod-zip-file").files[0];
-  if (!file) return;
+// Unpacked by the app into a new mod folder, switched off. A zip for a mod
+// that's already there asks first, then replaces it in place.
+async function installZip(file, replace) {
   modsError(null);
   const button = $("install-mod-zip");
   button.disabled = true;
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const done = await invoke("install_mod_zip", bytes, { headers: { "File-Name": encodeURIComponent(file.name) } });
-    const lines = [`Installed ${done.name} (${done.files} file${done.files === 1 ? "" : "s"}). It's off: switch it on below.`];
+    const headers = { "File-Name": encodeURIComponent(file.name) };
+    if (replace) headers.Replace = "yes";
+    const done = await invoke("install_mod_zip", bytes, { headers });
+    if (done.exists) {
+      pendingZip = file;
+      $("mod-replace-text").textContent = `The mods folder already has ${done.name}. Replace it with this zip? Its files are deleted and the zip's put in their place; it stays on or off, in the same place in the load order.`;
+      $("mod-replace").hidden = false;
+      return;
+    }
+    const files = `${done.files} file${done.files === 1 ? "" : "s"}`;
+    const lines = [replace ? `Replaced ${done.name} (${files}).` : `Installed ${done.name} (${files}). It's off: switch it on below.`];
     if (done.skipped.length) lines.push("Left out:", ...done.skipped);
     modsInstalled(lines.join("\n"));
   } catch (err) {
@@ -1329,7 +1341,19 @@ $("mod-zip-file").addEventListener("change", async () => {
     button.disabled = false;
   }
   await refreshMods();
+}
+
+$("mod-zip-file").addEventListener("change", () => {
+  const file = $("mod-zip-file").files[0];
+  if (file) installZip(file, false);
 });
+
+$("mod-replace-yes").addEventListener("click", () => {
+  const file = pendingZip;
+  if (file) installZip(file, true);
+});
+
+$("mod-replace-no").addEventListener("click", () => modsError(null));
 
 $("new-item-mod").addEventListener("submit", async (e) => {
   e.preventDefault();

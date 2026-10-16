@@ -6,6 +6,10 @@
 //! letter) stops the install, links are left out, and the unpacked size is
 //! capped. It unpacks into a hidden folder first, which the Mods screen
 //! ignores, and only takes the mod's name once it's complete.
+//!
+//! A zip for a mod that's already installed, as when updating it, replaces
+//! the old folder only once the screen has asked. The mod keeps its place in
+//! `enabled.txt`, so it stays on or off and keeps its load order.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -34,6 +38,9 @@ pub struct Installed {
     pub files: usize,
     /// What was left out of the zip, and why.
     pub skipped: Vec<String>,
+    /// The mods folder already has this mod, and nothing was installed:
+    /// the screen asks before installing again with `replace`.
+    pub exists: bool,
 }
 
 /// One entry, with its path split into folder and file names.
@@ -47,8 +54,9 @@ struct Entry {
 /// Unpacks the zip `bytes`, sent as the file `file_name`, into a new mod
 /// folder in `mods_dir`. The mod's name is the zip's single top folder when
 /// everything is inside one, as when someone zips a mod's folder, and
-/// otherwise the zip's file name.
-pub fn install(mods_dir: &Path, file_name: &str, bytes: &[u8]) -> Result<Installed, String> {
+/// otherwise the zip's file name. With `replace`, the zip's files replace
+/// an installed mod of that name.
+pub fn install(mods_dir: &Path, file_name: &str, bytes: &[u8], replace: bool) -> Result<Installed, String> {
     let mut zip = ZipArchive::new(io::Cursor::new(bytes)).map_err(|e| format!("{file_name} isn't a zip file the app can read: {e}"))?;
     if zip.len() > MAX_ENTRIES {
         return Err(format!("{file_name} has more than {MAX_ENTRIES} files, too many for a mod."));
@@ -78,18 +86,38 @@ pub fn install(mods_dir: &Path, file_name: &str, bytes: &[u8]) -> Result<Install
         ));
     }
     let root = mods_dir.join(&name);
-    if root.exists() {
-        return Err(format!("The mods folder already has a {name} folder. Remove or rename it first, then install the zip again."));
+    let exists = fs::symlink_metadata(&root).is_ok();
+    if exists && !replace {
+        return Ok(Installed { name, files: 0, skipped: Vec::new(), exists: true });
+    }
+    if exists && !root.is_dir() {
+        return Err(format!("The mods folder has a file called {name} where the mod's folder would go. Move it, then install the zip again."));
     }
 
     fs::create_dir_all(mods_dir).map_err(|e| e.to_string())?;
     let temp = mods_dir.join(format!(".install-{name}"));
-    if temp.exists() {
+    if fs::symlink_metadata(&temp).is_ok() {
         fs::remove_dir_all(&temp).map_err(|e| format!("{}: {e}", temp.display()))?;
     }
     let result = unpack(&mut zip, &entries, strip, &temp).and_then(|(files, skipped)| {
-        fs::rename(&temp, &root).map_err(|e| format!("{}: {e}", root.display()))?;
-        Ok(Installed { name, files, skipped })
+        if exists {
+            // The old folder moves aside before the new one takes its name,
+            // so a failure leaves one of them in place.
+            let old = mods_dir.join(format!(".replaced-{name}"));
+            if fs::symlink_metadata(&old).is_ok() {
+                fs::remove_dir_all(&old).map_err(|e| format!("{}: {e}", old.display()))?;
+            }
+            fs::rename(&root, &old).map_err(|e| format!("{}: {e}", root.display()))?;
+            if let Err(e) = fs::rename(&temp, &root) {
+                let _ = fs::rename(&old, &root);
+                return Err(format!("{}: {e}", root.display()));
+            }
+            // A link is removed, never followed.
+            let _ = if fs::symlink_metadata(&old).is_ok_and(|m| m.is_dir()) { fs::remove_dir_all(&old) } else { fs::remove_file(&old) };
+        } else {
+            fs::rename(&temp, &root).map_err(|e| format!("{}: {e}", root.display()))?;
+        }
+        Ok(Installed { name, files, skipped, exists: false })
     });
     if result.is_err() {
         let _ = fs::remove_dir_all(&temp);
@@ -248,8 +276,8 @@ mod tests {
     fn a_zipped_mod_folder_takes_its_folder_s_name() {
         let dir = temp_dir("folder");
         let zip = zip_of(&[("eden-rework/", ""), ("eden-rework/npc/a.txt", "npc"), ("eden-rework/db/re/item_db.yml", "db"), ("__MACOSX/eden-rework/._a.txt", "x")]);
-        let installed = install(&dir, "eden-rework-v2.zip", &zip).unwrap();
-        assert_eq!(installed, Installed { name: "eden-rework".into(), files: 2, skipped: vec![] });
+        let installed = install(&dir, "eden-rework-v2.zip", &zip, false).unwrap();
+        assert_eq!(installed, Installed { name: "eden-rework".into(), files: 2, skipped: vec![], exists: false });
         assert_eq!(fs::read_to_string(dir.join("eden-rework/npc/a.txt")).unwrap(), "npc");
         assert_eq!(fs::read_to_string(dir.join("eden-rework/db/re/item_db.yml")).unwrap(), "db");
         assert!(!dir.join("__MACOSX").exists());
@@ -262,7 +290,7 @@ mod tests {
     fn a_zip_of_the_mod_s_folders_takes_the_zip_s_name() {
         let dir = temp_dir("loose");
         let zip = zip_of(&[("npc/warper.txt", "w"), ("client\\data\\sprite.spr", "s")]);
-        let installed = install(&dir, "My Warper (1).zip", &zip).unwrap();
+        let installed = install(&dir, "My Warper (1).zip", &zip, false).unwrap();
         assert_eq!(installed.name, "My-Warper--1");
         assert!(mods::valid_name(&installed.name));
         assert!(dir.join("My-Warper--1/client/data/sprite.spr").is_file());
@@ -273,7 +301,7 @@ mod tests {
         for bad in ["../evil.txt", "mod/../../evil.txt", "/etc/evil.txt", "C:/evil.txt", "mod\\..\\..\\evil.txt"] {
             let dir = temp_dir("escape");
             let zip = zip_of(&[("mod/npc/a.txt", "a"), (bad, "evil")]);
-            let err = install(&dir.join("mods"), "mod.zip", &zip).unwrap_err();
+            let err = install(&dir.join("mods"), "mod.zip", &zip, false).unwrap_err();
             assert!(err.contains("outside the mod's folder"), "{bad}: {err}");
             assert!(!dir.join("evil.txt").exists());
             assert!(!dir.join("mods").exists() || fs::read_dir(dir.join("mods")).unwrap().count() == 0, "{bad}");
@@ -284,7 +312,7 @@ mod tests {
     fn leaves_links_out() {
         let dir = temp_dir("links");
         let zip = zip_of(&[("mod/npc/a.txt", "a"), ("mod/client/secret", "->/etc/passwd"), ("mod/npc/up", "->../..")]);
-        let installed = install(&dir, "mod.zip", &zip).unwrap();
+        let installed = install(&dir, "mod.zip", &zip, false).unwrap();
         assert_eq!(installed.files, 1);
         assert_eq!(installed.skipped.len(), 2);
         assert!(fs::symlink_metadata(dir.join("mod/client/secret")).is_err());
@@ -292,22 +320,49 @@ mod tests {
     }
 
     #[test]
-    fn keeps_an_existing_mod() {
+    fn replaces_an_installed_mod_only_when_asked() {
         let dir = temp_dir("exists");
         fs::create_dir_all(dir.join("mod/npc")).unwrap();
         fs::write(dir.join("mod/npc/mine.txt"), "mine").unwrap();
-        let err = install(&dir, "mod.zip", &zip_of(&[("mod/npc/a.txt", "a")])).unwrap_err();
-        assert!(err.contains("already has a mod folder"), "{err}");
+        fs::write(dir.join(mods::ENABLED), "mod\n").unwrap();
+        let zip = zip_of(&[("mod/npc/a.txt", "a")]);
+        let asked = install(&dir, "mod.zip", &zip, false).unwrap();
+        assert!(asked.exists);
         assert_eq!(fs::read_to_string(dir.join("mod/npc/mine.txt")).unwrap(), "mine");
         assert!(!dir.join("mod/npc/a.txt").exists());
+
+        let replaced = install(&dir, "mod.zip", &zip, true).unwrap();
+        assert_eq!(replaced, Installed { name: "mod".into(), files: 1, skipped: vec![], exists: false });
+        assert!(!dir.join("mod/npc/mine.txt").exists());
+        assert_eq!(fs::read_to_string(dir.join("mod/npc/a.txt")).unwrap(), "a");
+        // Still on, and nothing hidden left behind.
+        assert_eq!(fs::read_to_string(dir.join(mods::ENABLED)).unwrap(), "mod\n");
+        let mut left: Vec<String> = fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, [mods::ENABLED, "mod"]);
+    }
+
+    #[test]
+    fn replacing_a_linked_mod_leaves_its_target_alone() {
+        let dir = temp_dir("linked");
+        let elsewhere = dir.join("elsewhere");
+        fs::create_dir_all(elsewhere.join("npc")).unwrap();
+        fs::write(elsewhere.join("npc/keep.txt"), "keep").unwrap();
+        let mods = dir.join("mods");
+        fs::create_dir_all(&mods).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, mods.join("mod")).unwrap();
+        install(&mods, "mod.zip", &zip_of(&[("mod/npc/a.txt", "a")]), true).unwrap();
+        assert_eq!(fs::read_to_string(elsewhere.join("npc/keep.txt")).unwrap(), "keep");
+        assert!(fs::symlink_metadata(mods.join("mod")).unwrap().is_dir());
+        assert!(fs::symlink_metadata(mods.join(".replaced-mod")).is_err());
     }
 
     #[test]
     fn refuses_what_isn_t_a_mod() {
         let dir = temp_dir("notmod");
-        let err = install(&dir, "pics.zip", &zip_of(&[("pics/a.png", "p")])).unwrap_err();
+        let err = install(&dir, "pics.zip", &zip_of(&[("pics/a.png", "p")]), false).unwrap_err();
         assert!(err.contains("no npc/, db/ or client/ folder in pics/"), "{err}");
-        let err = install(&dir, "junk.zip", b"not a zip").unwrap_err();
+        let err = install(&dir, "junk.zip", b"not a zip", false).unwrap_err();
         assert!(err.contains("isn't a zip file"), "{err}");
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
     }
@@ -316,7 +371,7 @@ mod tests {
     fn a_duplicate_file_keeps_the_first() {
         let dir = temp_dir("dup");
         let zip = zip_of(&[("npc/a.txt", "first"), ("npc/A.txt", "second")]);
-        let installed = install(&dir, "dup.zip", &zip).unwrap();
+        let installed = install(&dir, "dup.zip", &zip, false).unwrap();
         assert_eq!(installed.files, 1);
         assert_eq!(installed.skipped.len(), 1);
         assert_eq!(fs::read_to_string(dir.join("dup/npc/a.txt")).unwrap(), "first");

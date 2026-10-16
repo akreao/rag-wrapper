@@ -932,15 +932,17 @@ fn new_item_mod(app: State<App>, name: String) -> Result<(), String> {
 
 /// Installs a mod from a zip file the Mods screen sends as the request's
 /// body, with its file name in the `File-Name` header. It's switched off
-/// until the Mods screen switches it on.
+/// until the Mods screen switches it on. A `Replace: yes` header replaces an
+/// installed mod of the same name, once the screen has asked.
 #[tauri::command]
 async fn install_mod_zip(app: State<'_, App>, request: tauri::ipc::Request<'_>) -> Result<modzip::Installed, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("The zip didn't arrive.".into());
     };
     let name = request.headers().get("File-Name").and_then(|v| v.to_str().ok()).map(modzip::percent_decode).unwrap_or_default();
+    let replace = request.headers().get("Replace").is_some_and(|v| v == "yes");
     let (dir, bytes) = (app.mods_dir(), bytes.clone());
-    tauri::async_runtime::spawn_blocking(move || modzip::install(&dir, &name, &bytes))
+    tauri::async_runtime::spawn_blocking(move || modzip::install(&dir, &name, &bytes, replace))
         .await
         .map_err(|e| e.to_string())?
 }
