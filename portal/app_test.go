@@ -57,6 +57,18 @@ func TestChecks(t *testing.T) {
 	}
 }
 
+func TestDeleteCode(t *testing.T) {
+	for birthdate, want := range map[string]string{
+		"1995-12-31": "951231",
+		"2004-02-09": "040209",
+		"":           "",
+	} {
+		if got := deleteCode(birthdate); got != want {
+			t.Errorf("deleteCode(%q) = %q, want %q", birthdate, got, want)
+		}
+	}
+}
+
 func TestLimiter(t *testing.T) {
 	l := newLimiter(2, time.Minute)
 	if !l.take("1.2.3.4") || !l.take("1.2.3.4") {

@@ -148,11 +148,17 @@ CONF
 	# only on the main izlude. Set before the overrides folder's file, so a
 	# server can still choose its own start points there.
 	#
+	# Characters delete at once, with no 24-hour wait: the clients the stack
+	# serves send rAthena's immediate delete request, which has no step to
+	# queue a character first, so with a delay set every delete is refused
+	# (as a wrong e-mail address). Set before the overrides folder's file.
+	#
 	# No PIN code window before character select: accounts already have a
 	# portal password, and a forgotten PIN can only be reset in the database.
 	{
 		echo "start_point: iz_int,18,26"
 		echo "start_point_pre: new_1-1,53,111"
+		echo "char_del_delay: 0"
 		user_import char_conf.txt
 		cat <<CONF
 pincode_enabled: no

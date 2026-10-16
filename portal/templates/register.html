@@ -9,7 +9,7 @@
   <label>Password again <input type="password" name="password2" minlength="6" maxlength="23" autocomplete="new-password" required></label>
   <label>Email <input type="email" name="email" value="{{index .Form "email"}}" maxlength="39" autocomplete="email" required></label>
   <label>Birthdate <input type="date" name="birthdate" value="{{index .Form "birthdate"}}" required>
-    <small>The game asks for it when you delete a character.</small></label>
+    <small>The game asks for it when you delete a character, as six digits YYMMDD, so 31 December 1995 is 951231.</small></label>
   <fieldset>
     <legend>Sex</legend>
     <label class="choice"><input type="radio" name="sex" value="M"{{if eq (index .Form "sex") "M"}} checked{{end}}> Male</label>
