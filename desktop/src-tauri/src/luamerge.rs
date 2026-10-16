@@ -104,7 +104,11 @@ pub fn merge(base: &[u8], add: &[u8]) -> Option<(Vec<u8>, Vec<Entry>)> {
         let comma = bt.entries.last().is_some_and(|e| !e.separated);
         let own_line = line_start(base, bt.close);
         if let (true, Some(last)) = (comma, bt.entries.last()) {
-            edits.push((last.end, last.end, b",".to_vec()));
+            // Once, though a mod may assign the same table more than once.
+            let edit = (last.end, last.end, b",".to_vec());
+            if !edits.contains(&edit) {
+                edits.push(edit);
+            }
         }
         let mut text = Vec::new();
         if own_line.is_none() {
@@ -449,6 +453,12 @@ mod tests {
     }
 
     const ITEM_INFO: &str = "tbl = {\n\t[501] = {\n\t\tidentifiedDisplayName = \"Red Potion\",\n\t\tslotCount = 0\n\t},\n\t[502] = {\n\t\tidentifiedDisplayName = \"Orange Potion\"\n\t}\n}\n\nfunction main()\n\tfor ItemID, DESC in pairs(tbl) do\n\t\tlocal x = { 1 }\n\tend\n\treturn true\nend\n";
+
+    #[test]
+    fn a_table_assigned_twice_gets_one_comma() {
+        let (text, _) = merged("tbl = {\n\t[1] = { a = 1 }\n}\n", "tbl = { [2] = { b = 2 } }\ntbl = { [3] = { c = 3 } }\n");
+        assert_eq!(text, "tbl = {\n\t[1] = { a = 1 },\n\t[2] = { b = 2 },\n\t[3] = { c = 3 },\n}\n");
+    }
 
     #[test]
     fn entries_are_added_and_replaced_by_key() {

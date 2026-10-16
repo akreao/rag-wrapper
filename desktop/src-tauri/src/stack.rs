@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -95,16 +96,70 @@ pub fn compose(dir: &Path) -> Command {
     cmd
 }
 
+/// How long a quick Docker call (a status, an inspect, a config) may take
+/// before it's given up on, so a hung Docker daemon can't hang the app.
+pub const QUICK: Duration = Duration::from_secs(60);
+
 /// Runs a command to completion and returns stdout, or stderr as the error.
-pub fn output(mut cmd: Command) -> Result<String, String> {
-    let out = cmd.stdin(Stdio::null()).output().map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => "Docker isn't installed (no `docker` command found).".to_owned(),
-        _ => e.to_string(),
-    })?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+/// Gives up after [`QUICK`].
+pub fn output(cmd: Command) -> Result<String, String> {
+    output_within(cmd, QUICK)
+}
+
+/// [`output`] for a command that may take up to `limit`. One that takes
+/// longer is killed and reported as not answering.
+pub fn output_within(mut cmd: Command, limit: Duration) -> Result<String, String> {
+    let what = std::iter::once(cmd.get_program())
+        .chain(cmd.get_args().take(if cmd.get_program() == "docker" { 2 } else { 1 }))
+        .map(|a| a.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => "Docker isn't installed (no `docker` command found).".to_owned(),
+            _ => e.to_string(),
+        })?;
+    // Read from threads, so a full pipe can't stall the command.
+    let read = |stream: Option<Box<dyn Read + Send>>| {
+        thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut stream) = stream {
+                let _ = stream.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = read(child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let stderr = read(child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>));
+    let deadline = Instant::now() + limit;
+    let mut pause = Duration::from_millis(1);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(pause);
+                pause = (pause * 2).min(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                // The readers are left behind: a process the command
+                // started may still hold the pipes open.
+                return Err(format!("`{what}` didn't answer within {} seconds. Is Docker stuck?", limit.as_secs()));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    let stdout = stdout.join().unwrap_or_default();
+    let stderr = stderr.join().unwrap_or_default();
+    if status.success() {
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+        Err(String::from_utf8_lossy(&stderr).trim().to_owned())
     }
 }
 
@@ -129,13 +184,79 @@ pub fn check_docker() -> Result<String, String> {
 }
 
 pub fn volume_exists(name: &str) -> bool {
-    host::command("docker")
-        .args(["volume", "inspect", &format!("{PROJECT}_{name}")])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    let mut inspect = host::command("docker");
+    inspect.args(["volume", "inspect", &format!("{PROJECT}_{name}")]);
+    output(inspect).is_ok()
+}
+
+/// The running map server's log since its container last started, kept
+/// between reads so each read only fetches the lines added since the last.
+#[derive(Default)]
+pub struct MapLog {
+    /// The container and when it started, which the text belongs to.
+    run: String,
+    /// The newest line's timestamp, which the next read starts from.
+    last: String,
+    text: String,
+}
+
+/// The running map server's log since it last started, or `None` when it
+/// isn't running. The Mods screen reads it every few seconds, so only new
+/// lines are fetched.
+pub fn map_log(dir: &Path, cache: &std::sync::Mutex<MapLog>) -> Option<String> {
+    let mut ps = compose(dir);
+    ps.args(["ps", "--quiet", "map"]);
+    let container = output(ps).ok()?.trim().to_owned();
+    if container.is_empty() {
+        return None;
+    }
+    let mut inspect = host::command("docker");
+    inspect.args(["inspect", "--format", "{{.State.Running}} {{.State.StartedAt}}", &container]);
+    let state = output(inspect).ok()?;
+    let started = state.trim().strip_prefix("true ")?.to_owned();
+    let run = format!("{container} {started}");
+
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.run != run {
+        *cache = MapLog { run, last: started.clone(), text: String::new() };
+    }
+    let mut logs = compose(dir);
+    logs.args(["logs", "--no-log-prefix", "--timestamps", "--since", &cache.last, "map"]);
+    // On a failed read, what was read before still stands.
+    if let Ok(new) = output(logs) {
+        let MapLog { last, text, .. } = &mut *cache;
+        append_log(&new, last, text);
+    }
+    Some(cache.text.clone())
+}
+
+/// Adds the lines of `new`, a timestamped `logs` read, that are newer than
+/// `last` to `text`, without their timestamps, and moves `last` to the
+/// newest. `--since` includes the line at `last`, which was already added.
+/// Stdout and stderr lines can come slightly out of time order, so only
+/// `last` from the read before decides what's new.
+fn append_log(new: &str, last: &mut String, text: &mut String) {
+    let parse = |t: &str| chrono::DateTime::parse_from_rfc3339(t).ok();
+    let after = parse(last);
+    let mut newest = after;
+    for line in new.lines() {
+        let (stamp, rest) = line.split_once(' ').unwrap_or((line, ""));
+        let Some(at) = parse(stamp) else {
+            // Not a timestamp: part of the line before.
+            text.push_str(line);
+            text.push('\n');
+            continue;
+        };
+        if after.is_some_and(|after| at <= after) {
+            continue;
+        }
+        if newest.is_none_or(|newest| at > newest) {
+            newest = Some(at);
+            stamp.clone_into(last);
+        }
+        text.push_str(rest);
+        text.push('\n');
+    }
 }
 
 /// Whether the running map server is on an older rAthena image than the
@@ -469,6 +590,39 @@ mod tests {
         fs::write(dir.join(".env"), "PRERE=no\n").unwrap();
         assert_eq!(chars_db(&dir), "ragnarok_re");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reads_only_new_log_lines() {
+        let (mut last, mut text) = ("2026-10-16T10:00:00.000000000Z".to_owned(), String::new());
+        // Docker's own order: a stderr line can be stamped before the stdout line above it.
+        append_log(
+            "2026-10-16T10:00:01.634490356Z Mods enabled: a\n2026-10-16T10:00:01.634458660Z [Warning]: early\n2026-10-16T10:00:02Z [Error]: bad\n",
+            &mut last,
+            &mut text,
+        );
+        assert_eq!(text, "Mods enabled: a\n[Warning]: early\n[Error]: bad\n");
+        assert_eq!(last, "2026-10-16T10:00:02Z");
+        // The next read starts at the last line, which is already there.
+        append_log("2026-10-16T10:00:02.000000000Z [Error]: bad\n2026-10-16T10:00:03.1Z ok\n", &mut last, &mut text);
+        assert_eq!(text, "Mods enabled: a\n[Warning]: early\n[Error]: bad\nok\n");
+    }
+
+    #[test]
+    fn gives_up_on_a_command_that_doesn_t_answer() {
+        let mut sleep = Command::new("sleep");
+        sleep.arg("5");
+        let started = Instant::now();
+        let err = output_within(sleep, Duration::from_millis(200)).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(2), "{err}");
+        assert!(err.contains("`sleep 5` didn't answer"), "{err}");
+
+        let mut echo = Command::new("sh");
+        echo.args(["-c", "echo out; echo err >&2"]);
+        assert_eq!(output(echo).unwrap(), "out\n");
+        let mut fail = Command::new("sh");
+        fail.args(["-c", "echo out; echo err >&2; exit 1"]);
+        assert_eq!(output(fail).unwrap_err(), "err");
     }
 
     #[test]

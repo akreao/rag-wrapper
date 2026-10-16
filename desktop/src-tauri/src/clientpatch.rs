@@ -387,7 +387,13 @@ fn layout(root: &Path, mods: &[(String, PathBuf)], renewal: bool) -> Result<Layo
         }
         let mut files = BTreeMap::new();
         let mut problems = Vec::new();
-        collect(&dir, renewal, &mut files, &mut problems)?;
+        // A mod is someone else's work: a link in it may only point at a
+        // file in the mod itself, never at a file elsewhere on this computer.
+        let inside = match name {
+            None => None,
+            Some(_) => Some(fs::canonicalize(&dir).map_err(|e| format!("{}: {e}", dir.display()))?),
+        };
+        collect(&dir, renewal, inside.as_deref(), &mut files, &mut problems)?;
         let (label, prefix) = match name {
             None => (CLIENT_FILES.to_owned(), String::new()),
             Some(n) => (format!("mods/{n}"), format!("mods/{n}/client/")),
@@ -481,15 +487,22 @@ fn resolve(path: &str, found: &[(String, PathBuf)], clashes: &mut Vec<Clash>) ->
 /// Adds the files players get in this mode from one layer's folder to
 /// `files`: the shared ones plus the mode's folder, whose files replace
 /// shared ones of the same path.
-fn collect(root: &Path, renewal: bool, files: &mut BTreeMap<String, PathBuf>, problems: &mut Vec<String>) -> Result<(), String> {
-    walk(root, true, files, problems)?;
+/// `inside`, when set, is the folder links must stay in.
+fn collect(
+    root: &Path,
+    renewal: bool,
+    inside: Option<&Path>,
+    files: &mut BTreeMap<String, PathBuf>,
+    problems: &mut Vec<String>,
+) -> Result<(), String> {
+    walk(root, true, inside, files, problems)?;
     // A mode folder's name may differ in case, as Windows folders often do.
     let entries = fs::read_dir(root).map_err(|e| format!("{}: {e}", root.display()))?;
     for entry in entries.flatten() {
         let name = entry.file_name();
         if name.to_str().is_some_and(|n| n.eq_ignore_ascii_case(mode_name(renewal))) && entry.path().is_dir() {
             let mut mode_problems = Vec::new();
-            walk(&entry.path(), false, files, &mut mode_problems)?;
+            walk(&entry.path(), false, inside, files, &mut mode_problems)?;
             let folder = name.to_string_lossy();
             problems.extend(mode_problems.into_iter().map(|p| format!("{folder}/{p}")));
         }
@@ -498,8 +511,15 @@ fn collect(root: &Path, renewal: bool, files: &mut BTreeMap<String, PathBuf>, pr
 }
 
 /// Adds the files under `root` to `files`, replacing any of the same path.
-/// `skip_modes` leaves out the mode folders at the top.
-fn walk(root: &Path, skip_modes: bool, files: &mut BTreeMap<String, PathBuf>, problems: &mut Vec<String>) -> Result<(), String> {
+/// `skip_modes` leaves out the mode folders at the top. With `inside`, a
+/// link to a file outside that folder is left out as a problem.
+fn walk(
+    root: &Path,
+    skip_modes: bool,
+    inside: Option<&Path>,
+    files: &mut BTreeMap<String, PathBuf>,
+    problems: &mut Vec<String>,
+) -> Result<(), String> {
     let mut dirs = vec![PathBuf::new()];
     while let Some(rel) = dirs.pop() {
         let entries = fs::read_dir(root.join(&rel)).map_err(|e| format!("{}: {e}", root.join(&rel).display()))?;
@@ -516,12 +536,19 @@ fn walk(root: &Path, skip_modes: bool, files: &mut BTreeMap<String, PathBuf>, pr
             let path = rel.join(name);
             // Follows a link to a file, but not to a folder, which could loop.
             let meta = fs::metadata(entry.path()).map_err(|e| format!("{}: {e}", path.display()))?;
+            let link = entry.file_type().map_err(|e| e.to_string())?.is_symlink();
+            if let (true, false, Some(inside)) = (link, meta.is_dir(), inside) {
+                if !fs::canonicalize(entry.path()).is_ok_and(|target| target.starts_with(inside)) {
+                    problems.push(format!("{}: a link to a file outside the mod's client folder, which isn't handed out. Copy the file in instead.", path.display()));
+                    continue;
+                }
+            }
             if meta.is_dir() {
                 let mode_folder = MODES.iter().any(|m| m.eq_ignore_ascii_case(name));
                 if skip_modes && rel.as_os_str().is_empty() && mode_folder {
                     continue;
                 }
-                if !entry.file_type().map_err(|e| e.to_string())?.is_symlink() {
+                if !link {
                     dirs.push(path);
                 }
                 continue;
@@ -815,6 +842,31 @@ mod tests {
         assert_eq!(s.changes.removed, ["data/sprite/a.spr"]);
         assert_eq!(s.changes.changed, ["System/itemInfo.lua"]);
         assert!(status(&d.files(), &[], &d.patches(), false, "rAthena").unwrap().clashes.is_empty());
+    }
+
+    #[test]
+    fn a_mod_s_links_stay_in_the_mod() {
+        let d = Dirs::new("links");
+        d.put(EXE, b"MZ");
+        let secret = d.root.join("secret.txt");
+        fs::write(&secret, b"not for players").unwrap();
+        let client = d.root.join("mods/a/client");
+        fs::create_dir_all(client.join("System")).unwrap();
+        fs::write(client.join("System/real.txt"), b"mod file").unwrap();
+        std::os::unix::fs::symlink(&secret, client.join("System/x.lua")).unwrap();
+        std::os::unix::fs::symlink(client.join("System/real.txt"), client.join("System/copy.txt")).unwrap();
+        // The client files folder is the admin's own, so its links are followed.
+        std::os::unix::fs::symlink(&secret, d.files().join("mine.txt")).unwrap();
+        let layers = vec![("a".to_owned(), client)];
+
+        let s = status(&d.files(), &layers, &d.patches(), false, "rAthena").unwrap();
+        assert_eq!(
+            s.problems,
+            ["mods/a/client/System/x.lua: a link to a file outside the mod's client folder, which isn't handed out. Copy the file in instead."]
+        );
+        assert!(s.changes.added.iter().any(|f| f == "System/copy.txt"), "{:?}", s.changes.added);
+        assert!(s.changes.added.iter().any(|f| f == "mine.txt"), "{:?}", s.changes.added);
+        assert!(!s.changes.added.iter().any(|f| f == "System/x.lua"));
     }
 
     #[test]

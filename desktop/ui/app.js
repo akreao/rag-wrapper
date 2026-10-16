@@ -123,12 +123,18 @@ function renderServices(list) {
   if (portal) $("portal-link").dataset.url = `http://${overview.public_ip}:${portal.ports[0]}/`;
 }
 
+// A slow Docker answer mustn't pile up polls behind it.
+let servicesBusy = false;
+
 async function refreshServices() {
-  if (!overview?.configured || overview.docker_error) return;
+  if (!overview?.configured || overview.docker_error || servicesBusy) return;
+  servicesBusy = true;
   try {
     renderServices(await invoke("services"));
   } catch (e) {
     banner(`Couldn't read the server's status: ${e}`);
+  } finally {
+    servicesBusy = false;
   }
 }
 
