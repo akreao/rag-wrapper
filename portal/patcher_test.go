@@ -346,3 +346,39 @@ func TestSignedPatcherInfo(t *testing.T) {
 		t.Error("an empty PATCH_SIGNING_KEY made a key")
 	}
 }
+
+// A download slower than the server's WriteTimeout still finishes.
+func TestSlowPatchDownloadFinishes(t *testing.T) {
+	h, dir := patcherSetup(t, "1 0003_big.thor\n")
+	const size = 32 << 20
+	if err := os.WriteFile(filepath.Join(dir, "patches", "0003_big.thor"), bytes.Repeat([]byte{'x'}, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(h)
+	srv.Config.WriteTimeout = 300 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/patcher/data/0003_big.thor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	// About 1.5 s in all: five times the WriteTimeout.
+	buf := make([]byte, 256<<10)
+	n := 0
+	for {
+		m, err := resp.Body.Read(buf)
+		n += m
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read %d of %d bytes: %v", n, size, err)
+		}
+		time.Sleep(12 * time.Millisecond)
+	}
+	if n != size {
+		t.Fatalf("read %d of %d bytes", n, size)
+	}
+}

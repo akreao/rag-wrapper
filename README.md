@@ -38,6 +38,8 @@ The first build compiles rAthena and takes several minutes. The desktop app down
 Settings in `.env`:
 - `PUBLIC_IP` is the address the client is sent for the char and map servers. Keep `127.0.0.1` when the client runs on this machine; use the machine's LAN IP for other computers.
 - `PACKETVER` must match your client's date. Changing it needs a rebuild (`docker compose build`).
+- `PRERE` picks Pre-Renewal (`yes`) or Renewal (`no`). It's compiled in, so changing it needs a rebuild too; the servers refuse to start on an image built for the other mode.
+- `BIND_IP`, when set to one of this machine's IPv4 addresses (its LAN or VPN address), makes the ports listen on that address only. Empty listens on all of them. Docker's port rules go around ufw and firewalld, so this, not the host firewall, is what keeps the server off other networks.
 - `RATHENA_COMMIT` is the rAthena commit to build, from the `rag-wrapper` branch of `akreao/rathena`. Change it to pick up server changes, then rebuild. A new app version that moves the pin in `.env.example` offers the new commit as a server update; the desktop app applies it when asked, and Settings can go back to the previous one. `RATHENA_COMMIT_PREVIOUS` is the commit the app's previous release came with: when you move `RATHENA_COMMIT`, set it to the old value. `RATHENA_REPO` points at a different fork.
 
 Gameplay settings (rates, server name, message of the day and anything else in rAthena's configs) go in [`overrides/`](overrides/README.md) as rAthena `conf/import`-style files; restart the game servers (`docker compose up -d --force-recreate login char map`) to apply them. The desktop app's Settings screen writes the common ones for you.

@@ -26,9 +26,15 @@ type app struct {
 	conn       connectInfo
 	// The client patcher's own window, outside the site's layout.
 	patcherPageTmpl *template.Template
-	loginFails      *limiter
-	signups         *limiter
+	loginFails      *limiter // failed logins per IP
+	signups         *limiter // new accounts per IP
+	passwordTries   *limiter // wrong current passwords per account
 }
+
+// dbTimeout bounds each page's database work. Requests are only cancelled
+// when the browser goes away, so without it a stalled database (a backup
+// lock, a long restore) would pile requests up behind the connection pool.
+const dbTimeout = 5 * time.Second
 
 // groups are the account groups in rAthena's stock conf/groups.yml.
 var groups = []struct {
@@ -77,7 +83,7 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &app{
+	a := &app{
 		patcherPageTmpl: patcherPage,
 		store:           st,
 		sessions:        newSessions(),
@@ -86,7 +92,16 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 		conn:            conn,
 		loginFails:      newLimiter(10, 15*time.Minute),
 		signups:         newLimiter(5, time.Hour),
-	}, nil
+		passwordTries:   newLimiter(10, 15*time.Minute),
+	}
+	go func() {
+		for range time.Tick(10 * time.Minute) {
+			a.loginFails.prune()
+			a.signups.prune()
+			a.passwordTries.prune()
+		}
+	}()
+	return a, nil
 }
 
 func (a *app) routes() http.Handler {
@@ -164,14 +179,19 @@ type view struct {
 // page wraps a handler with the session, CSRF check and account lookup.
 func (a *app) page(h func(*request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		req := &request{w: w, r: r, sess: a.sessions.get(w, r)}
+		ctx, cancel := context.WithTimeout(r.Context(), dbTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+		req := &request{w: w, r: r, sess: a.sessions.get(r)}
 		if r.Method == http.MethodPost {
 			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 			if err := r.ParseForm(); err != nil {
 				http.Error(w, "bad form", http.StatusBadRequest)
 				return
 			}
-			if subtle.ConstantTimeCompare([]byte(r.PostFormValue("csrf")), []byte(req.sess.csrf)) != 1 {
+			// A visitor's blank session has no token, and an empty form
+			// value mustn't match it.
+			if !req.sess.kept() || subtle.ConstantTimeCompare([]byte(r.PostFormValue("csrf")), []byte(req.sess.csrf)) != 1 {
 				a.render(req, http.StatusForbidden, "error", view{Title: "Expired form",
 					Error: "That form had expired. Go back, reload the page and try again."})
 				return
@@ -238,10 +258,19 @@ func (a *app) fail(req *request, err error) {
 		Error: "The portal couldn't reach the game database. Try again in a moment."})
 }
 
+// keepSession stores a session for a visitor who doesn't have one yet,
+// for a page with a form (its CSRF token) or a message for the next page.
+func (a *app) keepSession(req *request) {
+	if !req.sess.kept() {
+		req.sess = a.sessions.start(req.w, 0, anonTTL)
+	}
+}
+
 // redirect sends the browser on after a successful POST, with a message
 // for the next page.
 func (a *app) redirect(req *request, to, flash string) error {
 	if flash != "" {
+		a.keepSession(req)
 		a.sessions.setFlash(req.sess, flash)
 	}
 	http.Redirect(req.w, req.r, to, http.StatusSeeOther)
@@ -273,6 +302,7 @@ func (a *app) loginForm(req *request) error {
 	if req.account != nil {
 		return a.redirect(req, "/account", "")
 	}
+	a.keepSession(req)
 	a.render(req, http.StatusOK, "login", view{Title: "Log in"})
 	return nil
 }
@@ -287,17 +317,21 @@ func (a *app) login(req *request) error {
 		return nil
 	}
 
-	if !a.loginFails.allowed(ip) {
+	// Every attempt counts until it turns out to be right, so parallel
+	// requests can't get more guesses than the limit.
+	if !a.loginFails.take(ip) {
+		log.Printf("login from %s refused: too many failed logins", ip)
 		return fail("Too many failed logins from this computer. Wait a few minutes and try again.")
 	}
 	acc, err := a.store.accountByUserID(req.r.Context(), userID)
 	if err != nil {
+		a.loginFails.release(ip)
 		return err
 	}
 	if acc == nil || !passwordMatches(acc.passHash, password) {
-		a.loginFails.add(ip)
 		return fail("Wrong username or password.")
 	}
+	a.loginFails.release(ip)
 	if acc.Blocked() {
 		return fail("This account is blocked. Ask an admin if you think that's a mistake.")
 	}
@@ -324,6 +358,7 @@ func (a *app) registerForm(req *request) error {
 	if req.account != nil {
 		return a.redirect(req, "/account", "")
 	}
+	a.keepSession(req)
 	a.render(req, http.StatusOK, "register", view{Title: "Create an account", Form: map[string]string{"sex": "M"}})
 	return nil
 }
@@ -342,9 +377,6 @@ func (a *app) register(req *request) error {
 	}
 
 	ip := clientIP(req.r)
-	if !a.signups.allowed(ip) {
-		return fail("Too many accounts created from this computer recently. Try again later.")
-	}
 	if !userIDPattern.MatchString(form["userid"]) {
 		return fail("Usernames are 4 to 23 letters, digits or _.")
 	}
@@ -361,15 +393,23 @@ func (a *app) register(req *request) error {
 		return fail(msg)
 	}
 
+	// Taken just before creating the account, so a form with a typo in it
+	// doesn't use up a sign-up, and given back if no account was made.
+	if !a.signups.take(ip) {
+		log.Printf("sign-up from %s refused: too many accounts created", ip)
+		return fail("Too many accounts created from this computer recently. Try again later.")
+	}
 	id, err := a.store.createAccount(req.r.Context(), form["userid"], hashPassword(f("password")),
 		form["sex"], form["email"], form["birthdate"])
+	if err != nil {
+		a.signups.release(ip)
+	}
 	if errors.Is(err, errUserIDTaken) {
 		return fail("That username is already taken.")
 	}
 	if err != nil {
 		return err
 	}
-	a.signups.add(ip)
 	log.Printf("registered account %d %q from %s", id, form["userid"], ip)
 
 	a.sessions.end(req.w, req.sess)
@@ -412,9 +452,16 @@ func (a *app) accountError(req *request, msg string) error {
 
 func (a *app) changePassword(req *request) error {
 	f := req.r.PostFormValue
+	// Someone at a PC left logged in could otherwise guess the password
+	// here as fast as they like.
+	key := strconv.Itoa(req.account.ID)
+	if !a.passwordTries.take(key) {
+		return a.accountError(req, "Too many wrong passwords. Wait a few minutes and try again.")
+	}
 	if !passwordMatches(req.account.passHash, f("current")) {
 		return a.accountError(req, "Your current password is wrong.")
 	}
+	a.passwordTries.release(key)
 	if msg := checkPassword(f("password"), f("password2")); msg != "" {
 		return a.accountError(req, msg)
 	}

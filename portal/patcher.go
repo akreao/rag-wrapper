@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Players download a client patcher with a config that points at this
@@ -218,6 +219,7 @@ func (a *app) servePatcherZip(w http.ResponseWriter, r *http.Request, zipName, e
 		http.Error(w, "couldn't build the patcher download", http.StatusInternalServerError)
 		return
 	}
+	w = download(w)
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+zipName+`"`)
 	w.Header().Set("Cache-Control", "no-store")
@@ -263,6 +265,7 @@ func (a *app) newPatcherExe(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	w = download(w)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, a.conn.Patcher.NewExe)
@@ -298,9 +301,54 @@ func (a *app) patchFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	w = download(w)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, filepath.Join(a.conn.Patcher.Dir, name))
 }
+
+// downloadStall is how long a download may go without the player taking
+// any of it before it's dropped.
+var downloadStall = 30 * time.Second
+
+// download lifts the server's WriteTimeout for a file download. That
+// timeout covers the whole response, so a patch that takes more than 30
+// seconds over Wi-Fi or a VPN was cut off partway, every time. Instead
+// each write gets downloadStall to go through, so a slow download
+// finishes and only a stalled one is dropped.
+func download(w http.ResponseWriter) http.ResponseWriter {
+	dw := &downloadWriter{ResponseWriter: w, rc: http.NewResponseController(w)}
+	dw.extend()
+	return dw
+}
+
+type downloadWriter struct {
+	http.ResponseWriter
+	rc *http.ResponseController
+}
+
+func (d *downloadWriter) extend() {
+	// Fails only on writers without a connection, such as test recorders.
+	d.rc.SetWriteDeadline(time.Now().Add(downloadStall))
+}
+
+func (d *downloadWriter) Write(b []byte) (int, error) {
+	// Large writes go in pieces, so each piece gets its own deadline.
+	const chunk = 64 << 10
+	n := 0
+	for len(b) > 0 {
+		d.extend()
+		m, err := d.ResponseWriter.Write(b[:min(len(b), chunk)])
+		n += m
+		if err != nil {
+			return n, err
+		}
+		b = b[m:]
+	}
+	return n, nil
+}
+
+// Unwrap lets http.ResponseController reach the connection.
+func (d *downloadWriter) Unwrap() http.ResponseWriter { return d.ResponseWriter }
 
 // patcherPage is the patcher's window. rpatchur shows it with Windows'
 // old IE engine, so the page and its script stay plain (no CSS variables,

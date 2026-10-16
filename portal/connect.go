@@ -195,6 +195,8 @@ func (a *app) gmAccounts(ctx context.Context) []int {
 	if a.store == nil {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
+	defer cancel()
 	ids, err := a.store.accountsInGroup(ctx, a.adminGroup)
 	if err != nil {
 		log.Printf("clientinfo.xml: listing admin accounts: %v", err)

@@ -46,3 +46,38 @@ cat newer.log
 grep -q "upgraded by a newer server version" newer.log
 root_sql "DELETE FROM wrapper_sql_upgrades WHERE file='upgrade_99991231.sql'"
 docker compose run --rm --no-deps db-init
+
+# An upgrade file that fails partway stops db-init, and later starts stop
+# too, naming the file, rather than running it again.
+upgrade=sql-files/upgrades/upgrade_99990101.sql
+broken() { docker compose run --rm --no-deps -v "${PWD}/.github/smoke/upgrade_broken.sql:/rathena/${upgrade}:ro" db-init > broken.log 2>&1; }
+for attempt in first again; do
+	if broken; then
+		cat broken.log
+		echo "db-init carried on after a failed upgrade (${attempt} run)" >&2
+		exit 1
+	fi
+	cat broken.log
+	grep -q "upgrade upgrade_99990101.sql didn't finish in the ragnarok database" broken.log
+done
+# The second run didn't apply the file again: its first statement would
+# have failed with "already exists" before the check.
+if grep -q "already exists" broken.log; then
+	echo "db-init ran the failed upgrade again" >&2
+	exit 1
+fi
+root_sql "DROP TABLE smoke_partial_upgrade; DELETE FROM wrapper_sql_upgrades WHERE file='upgrade_99990101.sql'"
+docker compose run --rm --no-deps db-init
+
+# An image built for the other game mode doesn't start.
+other=no
+if [ "${PRERE:-yes}" = "no" ]; then
+	other=yes
+fi
+if docker compose run --rm --no-deps -e PRERE="${other}" db-init > mode.log 2>&1; then
+	cat mode.log
+	echo "db-init started with an image built for the other game mode" >&2
+	exit 1
+fi
+cat mode.log
+grep -q "This server was built for" mode.log
