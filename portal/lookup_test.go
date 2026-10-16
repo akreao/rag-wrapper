@@ -103,3 +103,22 @@ func TestLookupPagesRender(t *testing.T) {
 		}
 	}
 }
+
+// The Market page links its items and their cards to the item pages.
+func TestMarketLinksToItemPages(t *testing.T) {
+	a, err := newApp(nil, 99, connectInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	offer := Offer{Item: Item{ItemID: 1101, Name: "Sword", Refine: 7, Identified: true, cards: [4]int{4001, 0, 4002, 0},
+		CardNames: []string{"Poring Card", "Fabre Card"}}, Price: 1000, Shop: "Swords", Seller: "Bob", Map: "prontera"}
+	var buf bytes.Buffer
+	if err := a.pages["market"].ExecuteTemplate(&buf, "layout", view{Title: "Market", Data: marketData{Shops: marketSelling, Offers: []Offer{offer}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []string{`<a href="/items/1101">&#43;7 Sword</a>`, `<a href="/items/4001">Poring Card</a>, <a href="/items/4002">Fabre Card</a>`} {
+		if !strings.Contains(buf.String(), w) {
+			t.Errorf("market page has no %q:\n%s", w, buf.String())
+		}
+	}
+}

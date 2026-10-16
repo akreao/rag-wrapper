@@ -49,6 +49,25 @@ func (i Item) cardIDs() []int {
 	return ids
 }
 
+// Card is a card in an item, with its name, for linking to its page.
+type Card struct {
+	ID   int
+	Name string
+}
+
+// Cards pairs CardNames with the cards' numbers (0 where unknown).
+func (i Item) Cards() []Card {
+	ids := i.cardIDs()
+	cards := make([]Card, len(i.CardNames))
+	for n, name := range i.CardNames {
+		cards[n].Name = name
+		if n < len(ids) {
+			cards[n].ID = ids[n]
+		}
+	}
+	return cards
+}
+
 // inventory lists what a character carries, equipped items first.
 func (s *store) inventory(ctx context.Context, charID int) ([]Item, error) {
 	return s.items(ctx, "SELECT "+itemColumns+" FROM "+s.chars+"`inventory` WHERE `char_id` = ? ORDER BY `equip` = 0, `nameid`, `id`", charID)
