@@ -6,10 +6,11 @@
 //! image from before the script.
 
 use std::path::Path;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::stack;
 use crate::task::Ctx;
@@ -23,6 +24,10 @@ const WARNING: u64 = 5 * 60;
 
 /// When the second warning goes out.
 const LAST_WARNING: u64 = 60;
+
+/// What players are told before a daily backup that couldn't wait for an
+/// empty server: the dump locks the tables, so the game stands still.
+pub const BACKING_UP: &str = "Saving a backup of the server. The game may pause for a minute.";
 
 /// The script looks every 2 seconds; this leaves room for a busy map server.
 const PICKED_UP: Duration = Duration::from_secs(10);
@@ -105,7 +110,7 @@ pub fn map_running(dir: &Path) -> bool {
 }
 
 /// How many characters are online, or `None` when that can't be read.
-fn online(dir: &Path) -> Option<u64> {
+pub fn online(dir: &Path) -> Option<u64> {
     sql(dir, "SELECT COUNT(*) FROM `char` WHERE online = 1").ok()?.trim().parse().ok()
 }
 
@@ -158,10 +163,16 @@ pub fn send(dir: &Path, message: &str) -> Result<(), String> {
 /// Tells players the server goes down now, without waiting, as the window
 /// closes. Gives the map server a few seconds to show it.
 pub fn now(dir: &Path, going: Going) {
+    tell(dir, &warning(going, 0));
+}
+
+/// Tells anyone in game `message`, without waiting more than a few seconds
+/// for it to show. Nothing goes out when nobody's online.
+pub fn tell(dir: &Path, message: &str) {
     if !map_running(dir) || online(dir).unwrap_or(0) == 0 {
         return;
     }
-    if let Ok(id) = queue(dir, &warning(going, 0)) {
+    if let Ok(id) = queue(dir, message) {
         wait_shown(dir, id, Duration::from_secs(4));
     }
 }
@@ -171,7 +182,8 @@ pub fn now(dir: &Path, going: Going) {
 /// happening now. Skipped when the map server is down or nobody's online,
 /// and cut short when everyone logs off or the host skips the wait
 /// (`warning` events carry the seconds left to the window). A cancel tells
-/// players it's off. Only a cancel fails it: a warning that can't go out
+/// players it's off, unless it's the app quitting, which says the server
+/// goes down now instead (`lib.rs`'s `stop_and_exit`). Only a cancel fails it: a warning that can't go out
 /// never holds up the restart.
 pub fn warn(ctx: &Ctx, going: Going) -> Result<(), String> {
     let dir = &ctx.dir;
@@ -213,10 +225,12 @@ pub fn warn(ctx: &Ctx, going: Going) -> Result<(), String> {
         let left = WARNING.saturating_sub(start.elapsed().as_secs());
         let _ = ctx.handle.emit("warning", Some(left));
         if let Err(e) = ctx.check_cancelled() {
-            if let Ok(id) = queue(dir, going.cancelled()) {
-                wait_shown(dir, id, Duration::from_secs(4));
+            if !ctx.handle.state::<crate::App>().closing.load(Ordering::SeqCst) {
+                if let Ok(id) = queue(dir, going.cancelled()) {
+                    wait_shown(dir, id, Duration::from_secs(4));
+                }
+                ctx.line("Players were told it's cancelled.");
             }
-            ctx.line("Players were told it's cancelled.");
             break Err(e);
         }
         if left == 0 {
@@ -268,6 +282,7 @@ mod tests {
         assert!(check("two\nlines").is_err());
         assert!(check(&"a".repeat(MAX_LEN)).is_ok());
         assert!(check(&"a".repeat(MAX_LEN + 1)).is_err());
+        assert_eq!(check(BACKING_UP).unwrap(), BACKING_UP);
     }
 
     #[test]

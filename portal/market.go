@@ -30,15 +30,23 @@ type Offer struct {
 	X, Y   int
 }
 
-// Matches says whether the offer is for what the search names: an item
-// number, or part of the item's or one of its cards' names.
+// Matches says whether the offer is for what the search names: the item's
+// or one of its cards' numbers, or part of the item's or a card's name.
 func (o Offer) Matches(q string) bool {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return true
 	}
 	if id, err := strconv.Atoi(q); err == nil {
-		return o.ItemID == id
+		if o.ItemID == id {
+			return true
+		}
+		for _, c := range o.cardIDs() {
+			if c == id {
+				return true
+			}
+		}
+		return false
 	}
 	q = strings.ToLower(q)
 	if strings.Contains(strings.ToLower(o.Name), q) {

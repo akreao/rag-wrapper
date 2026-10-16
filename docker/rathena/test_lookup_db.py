@@ -226,6 +226,8 @@ FILES = {
         prt_fild09,0,0\tmonster\tPoring\t1002,10
         */
         prt_fild10,0,0\tmonster\tNobody\t9999,10
+        //prt_fild12,0,0\tmonster\tPoring\t1002,10
+        \t// prt_fild13,0,0\tboss_monster\tOsiris\t1038,1
         -\tscript\tSpawner\t-1,{
         \tmonster "prt_fild01",0,0,"Poring",1002,1;
         }
@@ -259,10 +261,10 @@ class LookupDbTest(unittest.TestCase):
         with open(rel, "w", encoding="utf-8") as f:
             f.write(textwrap.dedent(text).lstrip("\n"))
 
-    def collect(self, mode="pre-re"):
+    def collect(self, mode="pre-re", inputs=""):
         warnings = io.StringIO()
         with contextlib.redirect_stderr(warnings):
-            tables = lookup_db.collect(mode)
+            tables = lookup_db.collect(mode, inputs)
         self.warnings = warnings.getvalue()
         return tables
 
@@ -330,6 +332,9 @@ class LookupDbTest(unittest.TestCase):
         self.assertEqual(mobs[3000]["source"], "eden")
         info = dict(self.collect()["wrapper_lookup_info"])
         self.assertEqual((info["base_exp_rate"], info["item_rate_card"], info["mode"]), ("300", "50", "pre-re"))
+        self.assertNotIn("inputs", info)
+        # entrypoint.sh's fingerprint of the inputs is kept with the tables.
+        self.assertEqual(dict(self.collect(inputs="abc123")["wrapper_lookup_info"])["inputs"], "abc123")
 
     def test_spawns_come_from_the_loaded_npc_files(self):
         spawns = [(r["mob_id"], r["map"], r["amount"], r["delay1"], r["delay2"], r["boss"])
@@ -338,9 +343,61 @@ class LookupDbTest(unittest.TestCase):
             (1002, "prt_fild08", 70, 5000, 0, False),
             (1002, "prt_fild08", 5, 5000, 0, False),
             (1038, "moc_pryd04", 1, 3600000, 600000, True),
+            # Commented-out lines (prt_fild12 and 13) aren't spawns.
             # A mod's script, naming the monster by AegisName.
             (3000, "prontera", 3, 5000, 0, False),
         ])
+
+    def test_modes_race_groups_and_locations_change_key_by_key(self):
+        self.write("mods/eden/db/mob_db.yml", """
+            Body:
+              - Id: 1038
+                Modes:
+                  Aggressive: true
+              - Id: 1324
+                RaceGroups:
+                  Goblin: true
+              - Id: 1002
+                Modes:
+                  Detector: true
+              - Id: 1002
+                Modes:
+                  Detector: false
+                  Looter: true
+        """)
+        self.write("mods/eden/db/item_db.yml", """
+            Body:
+              - Id: 1101
+                Locations:
+                  Right_Hand: false
+                  Both_Hand: true
+                Jobs:
+                  Thief: true
+        """)
+        tables = self.collect()
+        mobs = {r["id"]: r for r in self.rows(tables, "wrapper_mobs")}
+        # Osiris stays an MVP, with its prize priced as one.
+        self.assertEqual((mobs[1038]["mvp"], mobs[1038]["modes"]), (True, "Mvp, Aggressive"))
+        self.assertEqual(self.drops(tables, 1038)[0], (501, 4000, 4000, True))
+        # Still a treasure chest: item_rate_treasure 300.
+        self.assertEqual(self.drops(tables, 1324), [(909, 1000, 3000, False)])
+        # A mode set to false is taken off again.
+        self.assertEqual(mobs[1002]["modes"], "Looter")
+        sword = self.items(tables)[1101]
+        self.assertEqual(sword["locations"], "Both_Hand")
+        # Jobs is replaced whole, as rAthena resets it.
+        self.assertEqual(sword["jobs"], "Thief")
+
+    def test_ai_resets_the_modes(self):
+        self.write("mods/eden/db/mob_db.yml", """
+            Body:
+              - Id: 1038
+                Ai: 21
+                Modes:
+                  Detector: true
+        """)
+        mobs = {r["id"]: r for r in self.rows(self.collect(), "wrapper_mobs")}
+        self.assertEqual((mobs[1038]["mvp"], mobs[1038]["modes"]), (False, "Detector"))
 
     def test_sql_swaps_the_tables_in_at_the_end(self):
         out = io.StringIO()

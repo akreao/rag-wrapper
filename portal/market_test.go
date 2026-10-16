@@ -12,6 +12,7 @@ func offer(id int, name string, price int64, seller string, cards ...string) Off
 
 func TestOfferMatches(t *testing.T) {
 	o := offer(1101, "Sword", 100, "Ann", "Hydra Card")
+	o.cards = [4]int{4035}
 	for q, want := range map[string]bool{
 		"":       true,
 		"  ":     true,
@@ -19,6 +20,8 @@ func TestOfferMatches(t *testing.T) {
 		"SWO":    true,
 		"hydra":  true,
 		"1101":   true,
+		"4035":   true, // the Hydra Card in it
+		"4036":   false,
 		"110":    false,
 		"knife":  false,
 		" 1101 ": true,

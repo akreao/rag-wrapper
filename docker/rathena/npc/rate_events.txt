@@ -66,7 +66,10 @@ L_Check:
 	.@text$ = "";
 	.@end$ = "";
 	.@started = 1;
-	query_sql("SELECT id, exp_rate, drop_rate, start_text, end_text, started FROM wrapper_rate_events WHERE starts_at <= UNIX_TIMESTAMP() AND ends_at > UNIX_TIMESTAMP() ORDER BY starts_at DESC, id DESC LIMIT 1", .@id, .@exp, .@drop, .@text$, .@end$, .@started);
+	// A failed query (the database restarting, say) returns -1 and would
+	// read as no event: keep what's set and try again next time.
+	if (query_sql("SELECT id, exp_rate, drop_rate, start_text, end_text, started FROM wrapper_rate_events WHERE starts_at <= UNIX_TIMESTAMP() AND ends_at > UNIX_TIMESTAMP() ORDER BY starts_at DESC, id DESC LIMIT 1", .@id, .@exp, .@drop, .@text$, .@end$, .@started) < 0)
+		return;
 
 	// The event this script last applied ended, or was deleted or
 	// replaced while it was on.
