@@ -1715,7 +1715,9 @@ listen("task", async ({ payload }) => {
     if (page === "mods") refreshMods();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
-      if (payload.ok) await runTask("start");
+      // A restart, not a start, so players are warned first; the new image
+      // gets the same full `up`.
+      if (payload.ok) await runTask("restart");
     }
   }
 });

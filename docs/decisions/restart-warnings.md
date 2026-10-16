@@ -9,3 +9,5 @@ Roadmap feature 25: before a Restart, Stop or anything else that restarts the ma
 - **Messages are plain ASCII, up to 200 characters.** The client shows other characters in its own code page, so "é" would arrive garbled. The app sends them to the database as a hex literal, so nothing in them needs quoting.
 - **Closing the window doesn't wait.** It still says "Server shutting down now." to anyone online, since the window is closing anyway; roadmap feature 30 (keep the server running when the window closes) changes that.
 - **Messages waiting when the map server starts are dropped.** A "restarting in 5 minutes" from before the restart would be wrong once it's back, so the script marks those skipped at start-up.
+- **The warning stays at 5 minutes, not a setting** (Steven, 2026-10-16). Go ahead now covers the times the host is in a hurry, so a small LAN server doesn't need another setting.
+- **Saving a new client date or game mode warns too.** When the server was running, the restart after the rebuild used to be a plain Start; it's now a Restart, which does the same full `up` on the new image after the warning.
