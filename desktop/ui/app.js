@@ -302,6 +302,8 @@ async function refreshOverview() {
     if (!buildFormDirty) fillBuildForm();
   }
   renderAddressChange(overview.configured && overview.address_change);
+  renderAdminNotice(overview.configured && overview.admin_notice);
+  renderPlaceholders(overview.configured && overview.placeholder_passwords);
   renderUpdate(overview.configured && overview.server_update);
   // One bar at a time, in the order they're dealt with: update, rebuild, restart.
   const rebuild = overview.configured && !overview.server_update && overview.rebuild;
@@ -414,6 +416,90 @@ $("address-copy").addEventListener("click", async () => {
 $("address-dismiss").addEventListener("click", async () => {
   try {
     await invoke("dismiss_address_change");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
+// ---- Admin account: setup asked for one the last start didn't make ----
+
+function renderAdminNotice(notice) {
+  $("admin-bar").hidden = !notice;
+  if (!notice) return;
+  const user = notice.user;
+  const [title, why] = {
+    password: [
+      `The admin account ${user} already existed, so its password wasn't changed.`,
+      "Log in with the password it had. To change it, log in on the portal and use your account page. If nobody knows it, another admin can set a new one on the portal's Admin page.",
+    ],
+    player: [
+      `${user} already existed as a player account, so it wasn't made an admin.`,
+      "Its password wasn't changed either. Another admin can put it in the Admin group on the portal's Admin page.",
+    ],
+    inter: [
+      `No admin account was made: ${user} is the name the game servers log in to each other with.`,
+      "Set another ADMIN_USER and ADMIN_PASSWORD in .env, then start the server again.",
+    ],
+  }[notice.why] || [`The admin account ${user} wasn't made.`, "See the Database setup log."];
+  $("admin-title").textContent = title;
+  $("admin-why").textContent = why;
+}
+
+$("admin-dismiss").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_admin_notice");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
+// ---- Example passwords: the public ones from .env.example ----
+
+function renderPlaceholders(found) {
+  $("placeholder-bar").hidden = !found;
+  if (!found) return;
+  $("placeholder-inter").hidden = !found.inter;
+  $("placeholder-db").hidden = !found.database;
+  const confirming = !$("placeholder-fix-yes").hidden;
+  $("placeholder-fix").hidden = !found.inter || confirming;
+  // Only the database part has nothing to fix, so only it can be hidden.
+  $("placeholder-dismiss").hidden = found.inter || confirming;
+}
+
+function placeholderConfirm(on) {
+  $("placeholder-confirm").hidden = !on;
+  $("placeholder-fix-yes").hidden = !on;
+  $("placeholder-fix-no").hidden = !on;
+  renderPlaceholders(overview.configured && overview.placeholder_passwords);
+}
+
+async function changeInterPassword() {
+  placeholderConfirm(false);
+  const restarting = serverRunning();
+  if (restarting) {
+    activity.length = 0;
+    clearProgress();
+    await showView("activity");
+  }
+  try {
+    const restarted = await invoke("change_inter_password");
+    if (!restarted) banner("INTER_PASSWORD changed. The server uses it from its next start.");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+}
+
+// A running server restarts in full, so every part has the new password.
+$("placeholder-fix").addEventListener("click", () => (serverRunning() ? placeholderConfirm(true) : changeInterPassword()));
+$("placeholder-fix-yes").addEventListener("click", changeInterPassword);
+$("placeholder-fix-no").addEventListener("click", () => placeholderConfirm(false));
+
+$("placeholder-dismiss").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_db_placeholders");
   } catch (err) {
     banner(String(err));
   }

@@ -13,6 +13,7 @@ mod menu;
 mod mods;
 mod net;
 mod news;
+mod notices;
 mod settings;
 mod stack;
 mod task;
@@ -125,6 +126,10 @@ struct Overview {
     address_change: Option<AddressChange>,
     /// A draft News post for players about this app version, not yet saved or skipped.
     player_news: Option<whatsnew::PlayerNews>,
+    /// Server passwords still on `.env.example`'s public values.
+    placeholder_passwords: Option<notices::Placeholders>,
+    /// The admin account setup asked for that the last start didn't make or change.
+    admin_notice: Option<notices::AdminNotice>,
     task: Option<String>,
 }
 
@@ -183,6 +188,8 @@ fn read_overview(app: &App) -> Overview {
             .and_then(|env| images::rebuild(&app.dir, env)),
         address_change: env.as_ref().and_then(address_change),
         player_news: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(whatsnew::pending),
+        placeholder_passwords: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(notices::placeholders),
+        admin_notice: env.as_ref().and_then(notices::admin_notice),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -229,13 +236,24 @@ fn change_setup(
     admin_password: &str,
     public_ip: Option<String>,
 ) -> Result<(), String> {
+    // db-init would leave that name to the server-to-server login.
+    if admin_user.eq_ignore_ascii_case(&env.get("INTER_USER").unwrap_or_default()) {
+        return Err("That name is taken by the server's own login. Pick another.".into());
+    }
     // Replace the example's placeholder passwords, unless a database made
     // with them already exists and would stop accepting new ones.
+    // INTER_PASSWORD can always change: db-init sets the account to it on
+    // every start, before the servers that use it.
     if new_passwords {
-        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
+        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD"] {
             env.set(key, &envfile::random_password(20).map_err(|e| e.to_string())?);
         }
     }
+    if fresh {
+        env.set("INTER_PASSWORD", &envfile::random_password(20).map_err(|e| e.to_string())?);
+    }
+    // A new admin account: whatever the last one's start said is old news.
+    env.set(notices::ADMIN_NOTICE, "");
     // A new install already builds this version's commit.
     if fresh {
         if let Some(update) = update::pending(env) {
@@ -770,7 +788,9 @@ fn address_change(env: &EnvFile) -> Option<AddressChange> {
 }
 
 /// Once `db-init` has finished, the admin account exists and the password
-/// has no further use, so no plain-text copy is kept in `.env`.
+/// has no further use, so no plain-text copy is kept in `.env`. When the
+/// account already existed, `db-init` left its password as it was, and the
+/// dashboard says so.
 fn forget_admin_password(dir: &std::path::Path) {
     let path = dir.join(".env");
     let kept = EnvFile::load(&path).ok().and_then(|env| env.get("ADMIN_PASSWORD")).unwrap_or_default();
@@ -783,6 +803,7 @@ fn forget_admin_password(dir: &std::path::Path) {
         .any(|s| s.service == "db-init" && s.state == "exited" && s.exit_code == 0);
     if initialised {
         let _ = envfile::edit(&path, |env| {
+            notices::record_admin_outcome(dir, env);
             env.set("ADMIN_PASSWORD", "");
             Ok(())
         });
@@ -1022,6 +1043,9 @@ pub fn run() {
             skip_server_update,
             dismiss_address_change,
             dismiss_player_news,
+            notices::dismiss_admin_notice,
+            notices::dismiss_db_placeholders,
+            notices::change_inter_password,
             game_settings,
             save_game_settings,
             open_overrides,
@@ -1181,21 +1205,37 @@ mod tests {
         write_setup(&path, || true, "admin", "secret_1", None).unwrap();
         let env = EnvFile::load(&path).unwrap();
         let example = EnvFile::parse(stack::ENV_EXAMPLE);
-        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
+        for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD"] {
             assert_eq!(env.get(key), example.get(key));
         }
+        // db-init sets the server-to-server login's password on every start.
+        let inter = env.get("INTER_PASSWORD");
+        assert_ne!(inter, example.get("INTER_PASSWORD"));
 
         // Running setup again only changes the admin account and address.
         let key = env.get("PATCH_SIGNING_KEY");
         let mut edited = EnvFile::load(&path).unwrap();
         edited.set("DB_PASSWORD", "kept");
+        edited.set(notices::ADMIN_NOTICE, "password:admin");
         edited.save().unwrap();
         write_setup(&path, || panic!("not asked again"), "admin2", "secret_2", Some("192.168.0.5".into())).unwrap();
         let env = EnvFile::load(&path).unwrap();
         assert_eq!(env.get("DB_PASSWORD").as_deref(), Some("kept"));
+        assert_eq!(env.get("INTER_PASSWORD"), inter);
+        assert_eq!(notices::admin_notice(&env), None);
         assert_eq!(env.get("PATCH_SIGNING_KEY"), key);
         assert_eq!(env.get("ADMIN_USER").as_deref(), Some("admin2"));
         assert_eq!(env.get("PUBLIC_IP").as_deref(), Some("192.168.0.5"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn setup_refuses_the_server_login_s_name() {
+        let dir = temp_dir("setup-inter");
+        let path = dir.join(".env");
+        let err = write_setup(&path, || false, "Wrapper_Inter", "secret_1", None).unwrap_err();
+        assert!(err.contains("server's own login"), "{err}");
+        assert!(!path.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

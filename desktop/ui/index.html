@@ -35,6 +35,25 @@
     <button id="address-copy" class="primary">Copy the link</button>
     <button id="address-dismiss" title="Hide this until the address changes again">Players know</button>
   </div>
+  <div id="admin-bar" class="update-bar warn-bar" hidden>
+    <p>
+      <strong id="admin-title"></strong>
+      <span id="admin-why"></span>
+    </p>
+    <button id="admin-dismiss">Got it</button>
+  </div>
+  <div id="placeholder-bar" class="update-bar warn-bar" hidden>
+    <p>
+      <strong>Some server passwords are still the examples everyone can look up.</strong>
+      <span id="placeholder-inter">The char and map servers log in to the login server with <code>INTER_PASSWORD</code>. Anyone who knows it can connect a fake char server from your network while the real one is down or restarting: players would see it in the server list, and it could change accounts. Changing it is safe: the server sets the new one on its next start.</span>
+      <span id="placeholder-db">The database passwords (<code>DB_PASSWORD</code>, <code>DB_ROOT_PASSWORD</code>) matter less, because the database can't be reached from other computers. They can't be changed here: editing them in <code>.env</code> alone stops the server from starting, since the database keeps the passwords it was made with.</span>
+      <span id="placeholder-confirm" hidden><br><strong>This restarts the server, which disconnects everyone in game.</strong></span>
+    </p>
+    <button id="placeholder-fix" class="primary">Change INTER_PASSWORD</button>
+    <button id="placeholder-fix-yes" class="primary" hidden>Change and restart</button>
+    <button id="placeholder-fix-no" hidden>Cancel</button>
+    <button id="placeholder-dismiss" title="Hide the database passwords' warning">Got it</button>
+  </div>
   <div id="update-bar" class="update-bar" hidden>
     <p>
       <strong>Server update available.</strong>
