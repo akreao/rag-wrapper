@@ -495,14 +495,11 @@ fn player_history(app: State<App>) -> PlayerHistory {
 }
 
 /// Counts the players online every few minutes for as long as the app
-/// runs, while the server is up, starting a minute in.
+/// process runs, window or not, while the server is up, starting a minute in.
 fn count_players(handle: AppHandle) {
     std::thread::sleep(std::time::Duration::from_secs(60));
     loop {
         let app = handle.state::<App>();
-        if app.closing.load(Ordering::SeqCst) {
-            return;
-        }
         if app.env_path().exists() {
             history::sample(&app.dir, &app.history);
         }
