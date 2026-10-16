@@ -48,7 +48,7 @@ COPY --from=build /src/rathena/conf ./conf
 COPY --from=build /src/rathena/db ./db
 COPY --from=build /src/rathena/npc ./npc
 COPY --from=build /src/rathena/sql-files ./sql-files
-COPY entrypoint.sh merge_mods.py /usr/local/bin/
+COPY entrypoint.sh merge_mods.py lookup_db.py /usr/local/bin/
 # The stack's own NPC scripts, such as the desktop app's in-game
 # announcements; entrypoint.sh loads every one after rAthena's own.
 COPY npc/ npc/wrapper/
@@ -59,7 +59,7 @@ ARG PRERE=yes
 RUN mkdir -p log save \
  && echo "${PRERE}" > BUILD_PRERE \
  && chown -R rathena:rathena /rathena \
- && chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/merge_mods.py
+ && chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/merge_mods.py /usr/local/bin/lookup_db.py
 
 USER rathena
 ENTRYPOINT ["entrypoint.sh"]

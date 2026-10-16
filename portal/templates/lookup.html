@@ -1,0 +1,15 @@
+{{define "lookupTabs"}}<nav class="tabs">
+  <a href="/items"{{if eq . "items"}} class="current"{{end}}>Items</a>
+  <a href="/monsters"{{if eq . "monsters"}} class="current"{{end}}>Monsters</a>
+</nav>{{end}}
+
+{{define "lookupNote"}}<p class="note">From this server's own {{if .Renewal}}Renewal{{else}}Pre-Renewal{{end}} database, with its mods and custom items, as the map server loaded it {{date .Info.LoadedAt}}.
+Drop chances and exp are this server's{{with .Info.RatesChanged}} ({{range $i, $r := .}}{{if $i}}, {{end}}{{$r}}{{end}}){{end}}{{if .Renewal}}, before Renewal's level penalty: they're lower when your level is far from the monster's{{end}}.</p>{{end}}
+
+{{define "lookupPager"}}{{if or .HasNext (gt .Page 0)}}<p class="pager">
+  {{if gt .Page 0}}<a href="{{.PageURL .PrevPage}}">Previous</a>{{end}}
+  {{if .HasNext}}<a href="{{.PageURL .NextPage}}">Next</a>{{end}}
+</p>{{end}}{{end}}
+
+{{define "itemLink"}}<a href="/items/{{.ItemID}}">{{.ItemName}}</a>{{end}}
+{{define "mobLink"}}<a href="/monsters/{{.MobID}}">{{.MobName}}</a>{{end}}

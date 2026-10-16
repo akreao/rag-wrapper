@@ -1,0 +1,64 @@
+{{define "content"}}{{with .Data}}{{with .Mob}}<h1>{{.Name}}{{if .MVP}} <span class="tag bad">MVP</span>{{else if .Boss}} <span class="tag">Boss</span>{{end}}</h1>
+<p><a href="/monsters">All monsters</a></p>
+<div class="grid stats">
+<div class="card">
+<dl class="facts">
+  <dt>Number</dt><dd>{{.ID}} <small class="note">{{.Aegis}}</small></dd>
+  {{with .Custom}}<dt>Added by</dt><dd>{{.}}</dd>{{end}}
+  <dt>Level</dt><dd>{{.Level}}</dd>
+  <dt>HP</dt><dd>{{thousands .HP}}</dd>
+  <dt>SP</dt><dd>{{thousands .SP}}</dd>
+  <dt>Base exp</dt><dd>{{thousands .BaseExp}}</dd>
+  <dt>Job exp</dt><dd>{{thousands .JobExp}}</dd>
+  {{if .MvpExp}}<dt>MVP exp</dt><dd>{{thousands .MvpExp}}</dd>{{end}}
+  <dt>Race</dt><dd>{{.Race}}</dd>
+  <dt>Element</dt><dd>{{.Element}} {{.ElementLevel}}</dd>
+  <dt>Size</dt><dd>{{.Size}}</dd>
+</dl>
+</div>
+<div class="card">
+<dl class="facts">
+  <dt>Attack</dt><dd>{{if $.Data.Renewal}}{{.Attack}}, magic {{.Attack2}}{{else}}{{.Attack}} to {{.Attack2}}{{end}}</dd>
+  <dt>Defense</dt><dd>{{.Defense}}</dd>
+  <dt>Magic defense</dt><dd>{{.MagicDefense}}</dd>
+  {{if or .Resistance .MagicResistance}}<dt>Resistance</dt><dd>{{.Resistance}}, magic {{.MagicResistance}}</dd>{{end}}
+  <dt>Stats</dt><dd>Str {{.Str}}, Agi {{.Agi}}, Vit {{.Vit}}<br>Int {{.Int}}, Dex {{.Dex}}, Luk {{.Luk}}</dd>
+  <dt>Attack range</dt><dd>{{.AttackRange}}</dd>
+  <dt>Walk speed</dt><dd>{{.WalkSpeed}}</dd>
+  {{with .Modes}}<dt>Behaviour</dt><dd>{{.}}</dd>{{end}}
+</dl>
+</div>
+</div>
+{{end}}
+<section>
+<h2>Drops</h2>
+{{with .Drops}}
+<table>
+  <thead><tr><th>Item</th><th>Type</th><th>Chance</th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td>{{template "itemLink" .}}</td>
+    <td>{{.ItemType}}</td>
+    <td>{{.Chance}}{{if .MVP}} <span class="tag bad">MVP prize</span>{{end}}{{if .StealProtected}} <span class="tag">Can't be stolen</span>{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>This monster drops nothing.</p>
+{{end}}
+</section>
+<section>
+<h2>Where it spawns</h2>
+{{with .Spawns}}
+<table>
+  <thead><tr><th>Map</th><th>How many</th><th>Respawn</th></tr></thead>
+  <tbody>
+  {{range .}}<tr><td>{{.Map}}</td><td>{{.Amount}}</td><td>{{.Respawn}}</td></tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>It doesn't spawn on any map by itself. It may come from a quest, an event, a summon or a box.</p>
+{{end}}
+</section>
+{{template "lookupNote" .}}
+{{end}}{{end}}

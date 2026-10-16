@@ -13,8 +13,8 @@
   <thead><tr><th>Item</th><th>Cards</th><th>{{if eq $.Data.Shops "buying"}}Pays{{else}}Price{{end}}</th><th>{{if eq $.Data.Shops "buying"}}Wants{{else}}Amount{{end}}</th><th>Shop</th><th>{{if eq $.Data.Shops "buying"}}Buyer{{else}}Seller{{end}}</th><th>Where</th></tr></thead>
   <tbody>
   {{range .}}<tr>
-    <td>{{.Label}} <small class="note">#{{.ItemID}}</small>{{if not .Identified}} <span class="tag">Unidentified</span>{{end}}{{if .Broken}} <span class="tag bad">Broken</span>{{end}}</td>
-    <td>{{range $i, $n := .CardNames}}{{if $i}}, {{end}}{{$n}}{{end}}</td>
+    <td><a href="/items/{{.ItemID}}">{{.Label}}</a> <small class="note">#{{.ItemID}}</small>{{if not .Identified}} <span class="tag">Unidentified</span>{{end}}{{if .Broken}} <span class="tag bad">Broken</span>{{end}}</td>
+    <td>{{range $i, $c := .Cards}}{{if $i}}, {{end}}{{if $c.ID}}<a href="/items/{{$c.ID}}">{{$c.Name}}</a>{{else}}{{$c.Name}}{{end}}{{end}}</td>
     <td>{{thousands .Price}} z</td>
     <td>{{.Amount}}</td>
     <td>{{.Shop}}</td>
