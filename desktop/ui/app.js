@@ -1715,9 +1715,10 @@ listen("task", async ({ payload }) => {
     if (page === "mods") refreshMods();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
-      // A restart, not a start, so players are warned first; the new image
-      // gets the same full `up`.
-      if (payload.ok) await runTask("restart");
+      // A restart while the map server still runs, so players are warned
+      // first; the new image gets the same full `up` as a start.
+      const mapUp = lastServices.some((s) => s.service === "map" && s.state === "running");
+      if (payload.ok) await runTask(mapUp ? "restart" : "start");
     }
   }
 });
