@@ -142,19 +142,43 @@ class EntrypointTest(unittest.TestCase):
         )
 
     def test_other_files_come_from_the_template_or_the_overrides(self):
-        self.write("conf/user/log_conf.txt", "log_chat: 1\n")
         self.write("conf/user/groups.yml", HEADER + "Body:\n  - Id: 99\n")
         self.run_entrypoint()
 
         self.assertEqual(self.read("conf/import/packet_conf.txt"), STOCK["conf/import-tmpl/packet_conf.txt"])
-        self.assertEqual(self.read("conf/import/log_conf.txt"), "import: conf/user/log_conf.txt\n")
         # YAML has no import line, so the overrides folder's file is copied.
         self.assertEqual(self.read("conf/import/groups.yml"), HEADER + "Body:\n  - Id: 99\n")
 
         # Taking a file out of the overrides folder goes back to the template.
-        os.remove(self.path("conf/user/log_conf.txt"))
+        self.write("conf/user/packet_conf.txt", "debug_packet: yes\n")
         self.run_entrypoint()
-        self.assertEqual(self.read("conf/import/log_conf.txt"), STOCK["conf/import-tmpl/log_conf.txt"])
+        self.assertEqual(self.read("conf/import/packet_conf.txt"), "import: conf/user/packet_conf.txt\n")
+        os.remove(self.path("conf/user/packet_conf.txt"))
+        self.run_entrypoint()
+        self.assertEqual(self.read("conf/import/packet_conf.txt"), STOCK["conf/import-tmpl/packet_conf.txt"])
+
+    def test_item_logs_leave_out_drops_loot_and_consumables_unless_overridden(self):
+        self.run_entrypoint()
+        # Every log type except (P) 0x4, (L) 0x8 and (C) 0x80.
+        self.assertEqual(self.read("conf/import/log_conf.txt"), "enable_logs: 0xFFFFFF73\n")
+
+        self.write("conf/user/log_conf.txt", "enable_logs: 0xFFFFFFFF\n")
+        self.run_entrypoint()
+        self.assertEqual(
+            self.read("conf/import/log_conf.txt").splitlines(),
+            ["enable_logs: 0xFFFFFF73", "import: conf/user/log_conf.txt"],
+        )
+
+    def test_image_built_for_the_other_mode_stops(self):
+        self.write("BUILD_PRERE", "yes\n")
+        self.run_entrypoint(PRERE="yes")
+        result = self.run_entrypoint(PRERE="no", code=66)
+        self.assertIn("This server was built for Pre-Renewal, but the settings ask for Renewal (PRERE=no).", result.stderr)
+
+        self.write("BUILD_PRERE", "no\n")
+        self.run_entrypoint(PRERE="no")
+        result = self.run_entrypoint(code=66)
+        self.assertIn("built for Renewal, but the settings ask for Pre-Renewal", result.stderr)
 
     def test_accounts_and_characters_have_a_database_per_mode(self):
         self.write("conf/user/inter_conf.txt", "char_server_db: other\n")
