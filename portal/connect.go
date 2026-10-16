@@ -243,3 +243,22 @@ func (a *app) externalSettingsFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(a.conn.externalSettings())
 }
+
+// linuxLauncher is the script the How to connect page offers players on
+// Linux: it sets up Wine with DXVK and starts the patcher. It's the same
+// for every server, so it's served as it is.
+//
+//go:embed clientfiles/play-on-linux.sh
+var linuxLauncher []byte
+
+const linuxLauncherName = "play-on-linux.sh"
+
+// LinuxLauncher names the launcher download.
+func (c connectInfo) LinuxLauncher() string { return linuxLauncherName }
+
+// linuxLauncherFile serves the Linux launcher script as a download.
+func (a *app) linuxLauncherFile(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+linuxLauncherName+`"`)
+	w.Write(linuxLauncher)
+}

@@ -129,7 +129,8 @@ func TestPatcherRoutes(t *testing.T) {
 
 	rec = get(h, "/connect")
 	if body := rec.Body.String(); !strings.Contains(body, "Download the patcher") || !strings.Contains(body, "<em>LANG</em>") ||
-		strings.Contains(body, "WARP0716") || !strings.Contains(body, `href="/connect/`+newPatcherZip+`"`) {
+		strings.Contains(body, "WARP0716") || !strings.Contains(body, `href="/connect/`+newPatcherZip+`"`) ||
+		!strings.Contains(body, "run WARPGATE.exe") || !strings.Contains(body, "the one that has been checked under Wine") {
 		t.Fatalf("connect with a patch published:\n%s", body)
 	}
 }
