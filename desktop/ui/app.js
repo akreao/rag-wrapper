@@ -199,6 +199,7 @@ function renderLive(live) {
 async function refreshLive() {
   if (!overview?.configured || overview.docker_error || page !== "live" || document.hidden || liveBusy) return;
   liveBusy = true;
+  refreshHistory();
   try {
     renderLive(await invoke("live"));
   } catch (e) {
@@ -207,6 +208,155 @@ async function refreshLive() {
     liveBusy = false;
   }
 }
+
+// ---- Players over time: the app's counts from the last day or week ----
+
+const HOUR = 3600;
+const DAY = 24 * HOUR;
+const SVG = "http://www.w3.org/2000/svg";
+let historyRange = DAY;
+let playerHistory = null;
+let historyAt = 0;
+
+const playerCount = (n) => (n === 1 ? "1 player" : `${n} players`);
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const weekday = (t) => new Date(t * 1000).toLocaleDateString([], { weekday: "short" });
+const when = (t) => (historyRange === DAY ? clock(t) : `${weekday(t)} ${clock(t)}`);
+
+// The week shows each hour's highest count, so a busy evening isn't
+// averaged away. Returns points and the longest step that still joins two.
+function historyPoints(h, now) {
+  const from = now - historyRange;
+  const samples = h.samples.filter((s) => s.at > from);
+  if (historyRange === DAY) return { points: samples, step: h.every * 2.5 };
+  const hours = new Map();
+  for (const s of samples) {
+    const at = Math.floor(s.at / HOUR) * HOUR + HOUR / 2;
+    hours.set(at, Math.max(hours.get(at) ?? 0, s.players));
+  }
+  return { points: [...hours].map(([at, players]) => ({ at, players })), step: HOUR * 1.5 };
+}
+
+function svgEl(name, attrs, text) {
+  const el = document.createElementNS(SVG, name);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function renderHistory() {
+  const now = Date.now() / 1000;
+  const { points, step } = playerHistory ? historyPoints(playerHistory, now) : { points: [], step: 0 };
+  const every = Math.round((playerHistory?.every ?? 300) / 60);
+  $("history-hint").textContent =
+    `The app counts players every ${every} minutes while the server runs. Gaps are when it was off.` +
+    (historyRange === DAY ? "" : " Each hour shows its highest count.");
+  $("history-chart").hidden = points.length === 0;
+  $("no-history").hidden = points.length > 0;
+  $("no-history").textContent =
+    historyRange === DAY ? "No counts from the last day yet." : "No counts from the last week yet.";
+  if (!points.length) {
+    $("history-summary").textContent = "";
+    return;
+  }
+  const peak = points.reduce((a, p) => (p.players > a.players ? p : a));
+  $("history-summary").textContent = peak.players
+    ? `Peak ${playerCount(peak.players)}, ${when(peak.at)}`
+    : "Nobody played";
+
+  const svg = $("history-svg");
+  const W = svg.clientWidth || 720;
+  const H = 170;
+  const left = 28;
+  const top = 26;
+  const bottom = H - 20;
+  const most = Math.max(2, peak.players + (peak.players % 2));
+  const from = now - historyRange;
+  const x = (t) => left + ((t - from) / historyRange) * (W - left);
+  const y = (n) => bottom - (n / most) * (bottom - top);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const parts = [];
+
+  for (const n of [0, most / 2, most]) {
+    parts.push(svgEl("line", { class: "grid", x1: left, x2: W, y1: y(n), y2: y(n) }));
+    parts.push(svgEl("text", { class: "axis", x: left - 6, y: y(n) + 4, "text-anchor": "end" }, n));
+  }
+  // Day: every 6 hours on the clock. Week: each midnight.
+  const d = new Date(from * 1000);
+  d.setMinutes(0, 0, 0);
+  d.setHours(historyRange === DAY ? Math.ceil((d.getHours() + 1) / 6) * 6 : 24);
+  for (; d.getTime() / 1000 < now; historyRange === DAY ? d.setHours(d.getHours() + 6) : d.setDate(d.getDate() + 1)) {
+    const t = d.getTime() / 1000;
+    const label = historyRange === DAY ? clock(t) : weekday(t);
+    parts.push(svgEl("text", { class: "axis", x: x(t), y: H - 4, "text-anchor": "middle" }, label));
+  }
+
+  // One run per stretch the server was up, so a gap shows when it was off.
+  const runs = [];
+  for (const p of points) {
+    const run = runs.at(-1);
+    if (run && p.at - run.at(-1).at <= step) run.push(p);
+    else runs.push([p]);
+  }
+  for (const run of runs) {
+    if (run.length === 1) {
+      parts.push(svgEl("circle", { class: "dot", cx: x(run[0].at), cy: y(run[0].players), r: 3 }));
+      continue;
+    }
+    const line = run.map((p) => `${x(p.at).toFixed(1)},${y(p.players).toFixed(1)}`).join(" L");
+    const area = `M${x(run[0].at).toFixed(1)},${bottom} L${line} L${x(run.at(-1).at).toFixed(1)},${bottom} Z`;
+    parts.push(svgEl("path", { class: "area", d: area }));
+    parts.push(svgEl("path", { class: "line", d: `M${line}` }));
+  }
+
+  const cross = svgEl("line", { class: "cross", y1: top, y2: bottom, visibility: "hidden" });
+  const dot = svgEl("circle", { class: "dot", r: 4, visibility: "hidden" });
+  parts.push(cross, dot);
+  svg.replaceChildren(...parts);
+
+  // Hovering shows the nearest count.
+  svg.onmousemove = (e) => {
+    const box = svg.getBoundingClientRect();
+    const px = ((e.clientX - box.left) / box.width) * W;
+    const p = points.reduce((a, b) => (Math.abs(x(b.at) - px) < Math.abs(x(a.at) - px) ? b : a));
+    for (const [el, k, v] of [[cross, "x1", x(p.at)], [cross, "x2", x(p.at)], [dot, "cx", x(p.at)], [dot, "cy", y(p.players)]])
+      el.setAttribute(k, v);
+    cross.setAttribute("visibility", "visible");
+    dot.setAttribute("visibility", "visible");
+    const tip = $("history-tip");
+    tip.textContent = `${when(p.at)} · ${playerCount(p.players)}`;
+    tip.style.left = `${Math.min(Math.max((x(p.at) / W) * box.width, 70), box.width - 70)}px`;
+    tip.hidden = false;
+  };
+  svg.onmouseleave = () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.setAttribute("visibility", "hidden");
+    $("history-tip").hidden = true;
+  };
+}
+
+// The file changes every few minutes, so once a minute is plenty.
+async function refreshHistory(force) {
+  if (!force && Date.now() - historyAt < 60_000) return;
+  historyAt = Date.now();
+  try {
+    playerHistory = await invoke("player_history");
+  } catch (e) {
+    $("history-summary").textContent = `Couldn't read the player history: ${e}`;
+    return;
+  }
+  renderHistory();
+}
+
+for (const [id, range] of [["history-day", DAY], ["history-week", 7 * DAY]]) {
+  $(id).addEventListener("click", () => {
+    historyRange = range;
+    $("history-day").setAttribute("aria-pressed", range === DAY);
+    $("history-week").setAttribute("aria-pressed", range !== DAY);
+    renderHistory();
+  });
+}
+window.addEventListener("resize", () => page === "live" && playerHistory && renderHistory());
 
 // ---- Overview, setup and settings ----
 
@@ -526,7 +676,10 @@ function showPage(next) {
   $("nav-mods").textContent = page === "mods" ? "Back to server" : "Mods";
   $("nav-news").textContent = page === "news" ? "Back to server" : "News";
   renderPlayerNews();
-  if (next === "live") refreshLive();
+  if (next === "live") {
+    refreshHistory(true);
+    refreshLive();
+  }
 }
 
 $("nav").addEventListener("click", async () => {
