@@ -4,6 +4,7 @@ mod battleconf;
 mod clientpatch;
 mod customnpcs;
 mod envfile;
+mod history;
 mod host;
 mod images;
 mod itemkit;
@@ -38,6 +39,8 @@ struct App {
     backups: PathBuf,
     /// The files players get through the patcher, as they sit in the client folder.
     client_files: PathBuf,
+    /// How many players were online over the last week.
+    history: PathBuf,
     /// Held while a client patch is being built, so two can't take the same number.
     publishing: Arc<Mutex<()>>,
     /// The running start, stop, build, backup, restore or restore test, if any. Only one at a time.
@@ -476,6 +479,35 @@ async fn live(app: State<'_, App>) -> Result<live::Live, String> {
     tauri::async_runtime::spawn_blocking(move || live::read(&dir))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Players online over the last week, for the Dashboard's chart, along
+/// with how often they're counted.
+#[derive(Serialize)]
+struct PlayerHistory {
+    samples: Vec<history::Sample>,
+    every: u64,
+}
+
+#[tauri::command]
+fn player_history(app: State<App>) -> PlayerHistory {
+    PlayerHistory {
+        samples: history::read(&app.history, chrono::Utc::now().timestamp()),
+        every: history::EVERY.as_secs(),
+    }
+}
+
+/// Counts the players online every few minutes for as long as the app
+/// process runs, window or not, while the server is up, starting a minute in.
+fn count_players(handle: AppHandle) {
+    std::thread::sleep(std::time::Duration::from_secs(60));
+    loop {
+        let app = handle.state::<App>();
+        if app.env_path().exists() {
+            history::sample(&app.dir, &app.history);
+        }
+        std::thread::sleep(history::EVERY);
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -1011,6 +1043,7 @@ pub fn run() {
                 dir,
                 backups: data.join("backups"),
                 client_files: data.join("client-files"),
+                history: data.join(history::FILE),
                 publishing: Arc::new(Mutex::new(())),
                 task: Arc::new(Mutex::new(None)),
                 logs: Mutex::new(None),
@@ -1020,6 +1053,8 @@ pub fn run() {
                 clash_check: Arc::new(Mutex::new(None)),
                 map_log: Arc::default(),
             });
+            let handle = app.handle().clone();
+            std::thread::spawn(move || count_players(handle));
             let handle = app.handle().clone();
             std::thread::spawn(move || daily_backups(handle));
             Ok(())
@@ -1045,6 +1080,7 @@ pub fn run() {
             save_news,
             services,
             live,
+            player_history,
             run_task,
             cancel_task,
             backups,
