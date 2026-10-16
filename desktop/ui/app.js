@@ -304,6 +304,7 @@ async function refreshOverview() {
   $("restart-server").hidden = !overview.restart_pending;
   $("restart-portal").hidden = overview.restart_pending;
   $("restart-new").textContent = overview.restart_pending ? "Restart on the new version" : "Restart the portal";
+  renderPlayerNews();
   updateButtons();
 }
 
@@ -436,6 +437,7 @@ function showPage(next) {
   $("nav-patch").textContent = page === "patch" ? "Back to server" : "Client patch";
   $("nav-mods").textContent = page === "mods" ? "Back to server" : "Mods";
   $("nav-news").textContent = page === "news" ? "Back to server" : "News";
+  renderPlayerNews();
   if (next === "live") refreshLive();
 }
 
@@ -1325,14 +1327,48 @@ $("news-page").addEventListener("input", (e) => {
   if (e.target.matches("input, textarea")) setNewsDirty(true);
 });
 
-$("news-add").addEventListener("click", () => {
-  // The date in italics on the first line, so players can tell how old a post is.
+// A new card on top. Its text starts with the date in italics, so players
+// can tell how old a post is.
+function addNewsCard(title, text) {
   const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  const card = newsCard({ title: "", body: `*${today}*\n\n` });
+  const card = newsCard({ title, body: `*${today}*\n\n${text}` });
   $("news-posts").prepend(card);
   renumberNews();
   setNewsDirty(true);
-  card.querySelector(".title").focus();
+  return card;
+}
+
+$("news-add").addEventListener("click", () => addNewsCard("", "").querySelector(".title").focus());
+
+// ---- What's new for players: a draft post from the release notes ----
+
+let playerNewsCard = null; // the draft on the News screen, until it's saved or deleted
+
+// Last of all the bars, once the server runs this version: the post tells
+// players about changes that are live by then. Not on the News screen,
+// where the draft is being written.
+function renderPlayerNews() {
+  const o = overview;
+  const waiting = !o?.configured || o.server_update || o.rebuild || o.restart_pending || o.portal_restart_pending;
+  $("player-news-bar").hidden = !o?.player_news || !!waiting || page === "news";
+}
+
+$("player-news-write").addEventListener("click", async () => {
+  if (!newsDirty) await loadNews();
+  if (!playerNewsCard?.isConnected) {
+    playerNewsCard = addNewsCard("What's new", `${overview.player_news.text}\n`);
+  }
+  showPage("news");
+  playerNewsCard.querySelector(".body").focus();
+});
+
+$("player-news-skip").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_player_news");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
 });
 
 $("news-save").addEventListener("click", async () => {
@@ -1340,9 +1376,16 @@ $("news-save").addEventListener("click", async () => {
     title: card.querySelector(".title").value,
     body: card.querySelector(".body").value,
   }));
+  const withDraft = !!playerNewsCard?.isConnected;
   try {
     showNews(await invoke("save_news", { news: { intro: $("news-intro").value, posts, text: newsText } }));
     newsMessage(null, true);
+    // Saved with the draft in it: players have been told.
+    if (withDraft) {
+      playerNewsCard = null;
+      await invoke("dismiss_player_news");
+      await refreshOverview();
+    }
   } catch (err) {
     newsMessage(String(err), false);
   }
