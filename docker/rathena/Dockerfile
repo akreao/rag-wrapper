@@ -42,6 +42,8 @@ COPY --from=build /src/rathena/db ./db
 COPY --from=build /src/rathena/npc ./npc
 COPY --from=build /src/rathena/sql-files ./sql-files
 COPY entrypoint.sh merge_mods.py /usr/local/bin/
+# The stack's own NPC scripts; entrypoint.sh loads every one.
+COPY npc/ ./npc/wrapper/
 
 # The game mode is compiled in, so entrypoint.sh compares it with PRERE at
 # start-up and stops when they differ.

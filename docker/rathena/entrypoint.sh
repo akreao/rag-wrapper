@@ -147,6 +147,15 @@ CONF
 	} > conf/import/map_conf.txt
 }
 
+# The stack's own scripts (npc/wrapper/ in the image, from this folder's
+# npc/) load after rAthena's, before the custom NPCs and the mods.
+apply_wrapper_npcs() {
+	if ! grep -qx 'import: npc/wrapper.conf' npc/scripts_custom.conf; then
+		printf '\nimport: npc/wrapper.conf\n' >> npc/scripts_custom.conf
+	fi
+	find npc/wrapper -type f -name '*.txt' 2>/dev/null | LC_ALL=C sort | sed 's/^/npc: /' > npc/wrapper.conf
+}
+
 # rAthena ships custom NPCs (npc/custom/) that npc/scripts_custom.conf
 # lists switched off. conf/user/custom_npcs.txt, which the desktop app's
 # Mods screen writes, names the ones to load, one script per line. A line
@@ -574,11 +583,26 @@ init_db() {
 			echo "Created admin account ${ADMIN_USER}"
 		fi
 	fi
+	# The desktop app's Events screen writes EXP and drop events here;
+	# npc/rate_events.txt applies them and sets started once announced.
+	# Times are Unix seconds, rates percent of the server's own.
+	char_cmd -e "CREATE TABLE IF NOT EXISTS wrapper_rate_events (
+		id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		title varchar(100) NOT NULL,
+		starts_at bigint NOT NULL,
+		ends_at bigint NOT NULL,
+		exp_rate int unsigned NOT NULL DEFAULT 100,
+		drop_rate int unsigned NOT NULL DEFAULT 100,
+		start_text varchar(255) NOT NULL DEFAULT '',
+		end_text varchar(255) NOT NULL DEFAULT '',
+		started tinyint(1) NOT NULL DEFAULT 0,
+		KEY starts_at (starts_at))"
 	load_item_names
 	echo "Database ready"
 }
 
 write_imports
+apply_wrapper_npcs
 apply_custom_npcs
 apply_mods
 

@@ -2,7 +2,8 @@
 """Checks a running stack the way a player uses it: registers an account on
 the portal and opens its player pages, then logs in to the login server as
 the game client does and enters the char server. Also checks the
-smoke-test mod and rAthena's custom NPCs loaded.
+smoke-test mod and rAthena's custom NPCs loaded, and that an EXP and drop
+event changes the map server's rates without a restart.
 
 Run by run.sh once the stack is up. Standard library only.
 """
@@ -82,6 +83,17 @@ def problem_blocks(log):
         elif block is not None:
             block.append(line)
     return ["\n".join(b) for b in blocks]
+
+
+def chars_sql(sql):
+    """Runs SQL in this mode's characters database as the database's own
+    account, as the desktop app's Events screen does."""
+    db = "ragnarok_re" if os.environ.get("PRERE") == "no" else "ragnarok_prere"
+    subprocess.run(
+        ["docker", "compose", "exec", "-T", "db", "sh", "-c",
+         'MYSQL_PWD="$MARIADB_PASSWORD" exec mariadb --user="$MARIADB_USER" "$1" -e "$2"', "sh", db, sql],
+        check=True,
+    )
 
 
 def compose_state(service):
@@ -230,6 +242,21 @@ def main():
     if problems:
         fail("the map server reported problems in rAthena's custom NPCs:\n" + "\n\n".join(problems))
     print(f"{len(expected)} of the {len(wanted)} custom NPC scripts loaded in {mode}")
+
+    step("EXP and drop event")
+    chars_sql("INSERT INTO wrapper_rate_events (title, starts_at, ends_at, exp_rate, drop_rate, start_text, end_text) "
+              "VALUES ('Smoke', UNIX_TIMESTAMP() - 1, UNIX_TIMESTAMP() + 3600, 200, 150, 'Smoke event on', 'Smoke event over')")
+    # The script checks every 30 seconds.
+    log = wait_for("the event to start", lambda: next((t for t in [logs("map")] if "exp 200%, drops 150%" in t), None), timeout=90)
+    for flag, value in (("base_exp_rate", 200), ("job_exp_rate", 200), ("item_rate_common", 150), ("item_rate_card_mvp", 150)):
+        if f"battle_config flag '{flag}' is now set to '{value}'" not in log:
+            fail(f"the event didn't set {flag} to {value}")
+    chars_sql("DELETE FROM wrapper_rate_events")
+    wait_for("the event to end", lambda: "exp 100%, drops 100%" in logs("map") or None, timeout=90)
+    problems = [block for block in problem_blocks(logs("map")) if "rate_events" in block or "setbattleflag" in block]
+    if problems:
+        fail("the map server reported problems in the events script:\n" + "\n\n".join(problems))
+    print("an event set the rates and put them back")
     print("Smoke test passed")
 
 

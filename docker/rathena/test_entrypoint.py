@@ -338,6 +338,17 @@ class EntrypointTest(unittest.TestCase):
         self.assertEqual(self.read("npc/custom/barters.yml"), STOCK["npc/custom/barters.yml"])
 
 
+    # The stack's own scripts
+
+    def test_wrapper_scripts_all_load(self):
+        self.write("npc/wrapper/rate_events.txt", "// events\n")
+        self.write("npc/wrapper/b/other.txt", "// other\n")
+        self.write("npc/wrapper/notes.md", "not a script\n")
+        self.run_entrypoint()
+        self.run_entrypoint()
+        self.assertEqual(self.read("npc/wrapper.conf"), "npc: npc/wrapper/b/other.txt\nnpc: npc/wrapper/rate_events.txt\n")
+        self.assertEqual(self.read("npc/scripts_custom.conf").count("import: npc/wrapper.conf"), 1)
+
     # rAthena's custom NPCs
 
     def test_custom_npcs_load_before_the_mods(self):
@@ -354,7 +365,7 @@ class EntrypointTest(unittest.TestCase):
         self.assertIn("Custom NPCs on: npc/custom/warper.txt npc/custom/healer.txt\n", result.stdout)
         self.assertEqual(self.read("npc/custom_npcs.conf").splitlines(), ["npc: npc/custom/warper.txt", "npc: npc/custom/healer.txt"])
         imports = [line for line in self.read("npc/scripts_custom.conf").splitlines() if line.startswith("import:")]
-        self.assertEqual(imports, ["import: npc/custom_npcs.conf", "import: npc/mods.conf"])
+        self.assertEqual(imports, ["import: npc/wrapper.conf", "import: npc/custom_npcs.conf", "import: npc/mods.conf"])
 
     def test_custom_npcs_for_one_mode(self):
         self.write("conf/user/custom_npcs.txt", "re: npc/custom/official/GeffenMagicTournament.txt\npre-re: npc/custom/healer.txt\n")

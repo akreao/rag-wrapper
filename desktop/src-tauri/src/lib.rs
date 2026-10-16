@@ -3,6 +3,7 @@ mod battleconf;
 mod clientpatch;
 mod customnpcs;
 mod envfile;
+mod events;
 mod host;
 mod images;
 mod itemkit;
@@ -368,6 +369,25 @@ fn news(app: State<App>) -> news::News {
 #[tauri::command]
 fn save_news(app: State<App>, news: news::News) -> Result<news::News, String> {
     news::save(&app.overrides_dir(), &news)
+}
+
+/// The Events screen's EXP and drop events, from the server's database.
+#[tauri::command]
+async fn rate_events(handle: AppHandle) -> Result<Vec<events::Event>, String> {
+    off_main(handle, |_, app| events::list(&app.dir)).await?
+}
+
+/// Plans an event (and a News post about it when asked). The map server
+/// picks it up within 30 seconds of its start, with no restart.
+#[tauri::command]
+async fn add_rate_event(handle: AppHandle, event: events::NewEvent) -> Result<Vec<events::Event>, String> {
+    off_main(handle, move |_, app| events::add(&app.dir, &app.overrides_dir(), &event)).await?
+}
+
+/// Deletes an event; one that's on ends within 30 seconds.
+#[tauri::command]
+async fn delete_rate_event(handle: AppHandle, id: u64) -> Result<Vec<events::Event>, String> {
+    off_main(handle, move |_, app| events::delete(&app.dir, id)).await?
 }
 
 /// Opens the overrides folder in the file manager, for settings the
@@ -1030,6 +1050,9 @@ pub fn run() {
             open_battle_conf,
             news,
             save_news,
+            rate_events,
+            add_rate_event,
+            delete_rate_event,
             services,
             live,
             run_task,

@@ -18,6 +18,7 @@
       <button id="nav-patch" hidden>Client patch</button>
       <button id="nav-mods" hidden>Mods</button>
       <button id="nav-news" hidden>News</button>
+      <button id="nav-events" hidden>Events</button>
       <button id="start" class="primary">Start server</button>
       <button id="stop">Stop</button>
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
@@ -366,6 +367,48 @@
     </details>
     <div id="news-posts"></div>
     <p id="no-news" class="hint" hidden>No posts yet.</p>
+  </main>
+
+  <main id="events-page" hidden>
+    <form id="event-form" class="card">
+      <h2>Plan an EXP or drop event</h2>
+      <p>The server switches the rates at the start and back at the end, without a restart, and announces both in game. Players who log in during the event are told it's on. Rates are a share of the server's own: 200% doubles them.</p>
+      <label>Name
+        <input id="event-title" required maxlength="60" placeholder="Double EXP weekend">
+      </label>
+      <div class="event-fields">
+        <label>Starts
+          <input id="event-start" type="datetime-local" required>
+        </label>
+        <label>Ends
+          <input id="event-end" type="datetime-local" required>
+        </label>
+        <label>EXP
+          <span class="percent"><input id="event-exp" type="number" min="10" max="10000" step="10" value="200" required> %</span>
+        </label>
+        <label>Drops
+          <span class="percent"><input id="event-drop" type="number" min="10" max="10000" step="10" value="100" required> %</span>
+        </label>
+      </div>
+      <label class="check">
+        <input id="event-news" type="checkbox" checked>
+        Also post it on the News page
+      </label>
+      <p id="event-error" class="error" hidden></p>
+      <div class="row">
+        <button id="event-add" class="primary" type="submit">Plan event</button>
+      </div>
+      <p class="hint">Events are kept in the server's database, so this screen works while the server runs. One event at a time; the map server checks every 30 seconds, so an event starts and ends within half a minute of its time.</p>
+    </form>
+    <section class="card">
+      <h2>Events</h2>
+      <table id="events" class="table" hidden>
+        <thead><tr><th>Name</th><th>When</th><th>Rates</th><th></th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="no-events" class="hint" hidden>No events planned.</p>
+      <p id="events-error" class="error" hidden></p>
+    </section>
   </main>
 </body>
 </html>
