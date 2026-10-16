@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"hash/crc32"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -51,7 +53,8 @@ func client(t *testing.T, srv *httptest.Server) string {
 	return dir
 }
 
-func runUpdate(t *testing.T, dir string) {
+// runUpdate runs an update and returns its last progress text.
+func runUpdate(t *testing.T, dir string) string {
 	t.Helper()
 	cfg, err := loadConfig(dir)
 	if err != nil {
@@ -65,11 +68,12 @@ func runUpdate(t *testing.T, dir string) {
 		t.Fatalf("info: %+v", info)
 	}
 	var last float64
+	var lastText string
 	err = update(context.Background(), dir, info, func(text string, f float64) {
 		if f < last || f > 1 {
 			t.Errorf("progress went from %v to %v (%s)", last, f, text)
 		}
-		last = f
+		last, lastText = f, text
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +81,7 @@ func runUpdate(t *testing.T, dir string) {
 	if last != 1 {
 		t.Errorf("progress ended at %v", last)
 	}
+	return lastText
 }
 
 // grfFiles reads every file in a GRF.
@@ -199,7 +204,7 @@ func TestDamagedPatchIsNotApplied(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.thor")
 	os.WriteFile(path, b, 0o644)
-	if err := applyFile(dir, path); err == nil {
+	if _, err := applyFile(dir, path); err == nil {
 		t.Fatal("applied a damaged patch")
 	}
 	if exists(filepath.Join(dir, defaultGRF)) {
@@ -290,7 +295,7 @@ func TestClientPath(t *testing.T) {
 func TestGRFTargets(t *testing.T) {
 	for _, target := range []string{"data.grf", "DATA.GRF", `..\x.grf`, "x.txt"} {
 		a := &thorArchive{GRFMerging: true, GRF: target}
-		if err := applyToGRF(t.TempDir(), a); err == nil {
+		if _, err := applyToGRF(t.TempDir(), a); err == nil {
 			t.Errorf("%q was allowed", target)
 		}
 	}
@@ -344,5 +349,168 @@ func TestGRFCompacts(t *testing.T) {
 	}
 	if exists(path + ".tmp") {
 		t.Error("the temporary file is left behind")
+	}
+}
+
+// wastefulGRF makes a GRF at path that's all dead space: a large file
+// added, then removed.
+func wastefulGRF(t *testing.T, path string) {
+	t.Helper()
+	g, err := openGRF(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := make([]byte, 3<<20)
+	rand.New(rand.NewSource(1)).Read(content)
+	z := deflate(t, content)
+	if err := g.add(`data\big.bin`, bytes.NewReader(z), uint32(len(z)), uint32(len(content))); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.commit(); err != nil {
+		t.Fatal(err)
+	}
+	g.remove(`data\big.bin`)
+	if err := g.commit(); err != nil {
+		t.Fatal(err)
+	}
+	if !g.wasteful() {
+		t.Fatal("the GRF isn't wasteful")
+	}
+	g.close()
+}
+
+// A GRF patch that applied counts as applied even when the GRF can't be
+// shrunk afterwards, so it isn't applied (and appended) again next run.
+func TestFailedCompactionKeepsThePatch(t *testing.T) {
+	srv := portal(t, "1 0001_client.thor\n2 0002_data.thor\n")
+	dir := client(t, srv)
+	grf := filepath.Join(dir, defaultGRF)
+	wastefulGRF(t, grf)
+	// A folder where compaction writes its temporary file makes it fail.
+	if err := os.MkdirAll(filepath.Join(grf+".tmp", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	text := runUpdate(t, dir)
+	if !strings.HasPrefix(text, "Ready to play. Couldn't shrink "+defaultGRF) {
+		t.Errorf("last progress: %q", text)
+	}
+	if s := loadState(dir); s.Applied != 2 {
+		t.Fatalf("state after a failed compaction: %+v", s)
+	}
+	files := grfFiles(t, grf)
+	if len(files) != 4 || files[`data\texture\custom.bmp`] != strings.Repeat("\x07", 5000) {
+		t.Fatalf("GRF: %d files", len(files))
+	}
+	before := read(t, grf)
+	if text := runUpdate(t, dir); text != "Ready to play." {
+		t.Errorf("second run: %q", text)
+	}
+	if read(t, grf) != before {
+		t.Error("the second run changed the GRF: the patch applied again")
+	}
+
+	// Once compaction can work, the next GRF patch shrinks the GRF.
+	os.RemoveAll(grf + ".tmp")
+	srv2 := portal(t, "1 0001_client.thor\n2 0002_data.thor\n3 0003_data.thor\n")
+	os.WriteFile(filepath.Join(dir, configName), []byte(`{"portal": "`+srv2.URL+`"}`), 0o644)
+	if text := runUpdate(t, dir); text != "Ready to play." {
+		t.Errorf("third run: %q", text)
+	}
+	if st, _ := os.Stat(grf); st.Size() > 1<<20 {
+		t.Errorf("GRF is %d bytes after compacting", st.Size())
+	}
+	if files := grfFiles(t, grf); len(files) != 3 || files[`data\texture\custom.bmp`] != "changed" {
+		t.Errorf("GRF after the third patch: %q", files)
+	}
+}
+
+// Removing many files keeps the others, in order, with their content, and
+// a removed name can be added again.
+func TestGRFRemovesMany(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.grf")
+	g, err := openGRF(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 2000
+	name := func(i int) string { return fmt.Sprintf(`data\file%04d.txt`, i) }
+	for i := 0; i < n; i++ {
+		z := deflate(t, []byte(name(i)))
+		if err := g.add(name(i), bytes.NewReader(z), uint32(len(z)), uint32(len(name(i)))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := g.commit(); err != nil {
+		t.Fatal(err)
+	}
+	g.close()
+
+	g, err = openGRF(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < n; i += 2 {
+		g.remove(strings.ToUpper(name(i))) // names match in any case
+	}
+	g.remove(`data\missing.txt`)
+	g.remove(name(0)) // already removed
+	// Replace a kept file and add a removed one back, between removals.
+	z := deflate(t, []byte("new"))
+	g.add(name(1), bytes.NewReader(z), uint32(len(z)), 3)
+	g.add(name(4), bytes.NewReader(z), uint32(len(z)), 3)
+	g.remove(name(n - 1))
+	if err := g.commit(); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range g.entries {
+		got = append(got, e.Name)
+	}
+	g.close()
+
+	var want []string
+	for i := 1; i < n-1; i += 2 {
+		want = append(want, name(i))
+	}
+	want = append(want, name(4))
+	if !slices.Equal(got, want) {
+		t.Fatalf("entries after removing: %d, want %d", len(got), len(want))
+	}
+	files := grfFiles(t, path) // reopens: checks the header's count
+	if len(files) != len(want) || files[name(1)] != "new" || files[name(4)] != "new" || files[name(3)] != name(3) {
+		t.Errorf("GRF after removing: %d files", len(files))
+	}
+}
+
+// A file whose content doesn't match its stated size is refused, and a
+// folder file is written whole or not at all.
+func TestStreamedApplyChecksSize(t *testing.T) {
+	content := bytes.Repeat([]byte("abc"), 100000)
+	z := deflate(t, content)
+	for _, size := range []uint32{uint32(len(content)) - 1, uint32(len(content)) + 1} {
+		a := &thorArchive{r: bytes.NewReader(z), Entries: []thorEntry{{Path: "big.bin", Compressed: uint32(len(z)), Size: size}}}
+		if err := a.inflateTo(crc32.NewIEEE(), a.Entries[0]); err == nil {
+			t.Errorf("size %d: accepted %d bytes", size, len(content))
+		}
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "big.bin"), []byte("old"), 0o644)
+		if err := applyToFolder(dir, a); err == nil {
+			t.Errorf("size %d: applied", size)
+		}
+		if got := read(t, filepath.Join(dir, "big.bin")); got != "old" {
+			t.Errorf("size %d: the file was replaced", size)
+		}
+		if exists(filepath.Join(dir, "big.bin.rwp-tmp")) {
+			t.Error("the temporary file is left behind")
+		}
+	}
+	a := &thorArchive{r: bytes.NewReader(z), Entries: []thorEntry{{Path: `sub\big.bin`, Compressed: uint32(len(z)), Size: uint32(len(content))}}}
+	dir := t.TempDir()
+	if err := applyToFolder(dir, a); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(dir, "sub", "big.bin")); got != string(content) {
+		t.Errorf("wrote %d bytes", len(got))
 	}
 }
