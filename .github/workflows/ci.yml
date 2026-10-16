@@ -43,7 +43,7 @@ jobs:
           cp .env.example .env
           docker compose config --quiet
       - name: shellcheck
-        run: shellcheck --severity=warning docker/rathena/entrypoint.sh .github/smoke/*.sh
+        run: shellcheck --severity=warning docker/rathena/entrypoint.sh .github/smoke/*.sh portal/clientfiles/play-on-linux.sh
       - name: merge_mods.py tests
         run: |
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
