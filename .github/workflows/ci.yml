@@ -21,8 +21,8 @@ jobs:
       run:
         working-directory: portal
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: portal/go.mod
           cache-dependency-path: portal/go.sum
@@ -37,7 +37,7 @@ jobs:
     name: Compose stack
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: compose.yaml and .env.example
         run: |
           cp .env.example .env
@@ -60,7 +60,7 @@ jobs:
     name: Stack smoke test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Images
         run: .github/smoke/images.sh
       - name: Start the stack and log in
@@ -76,7 +76,7 @@ jobs:
     env:
       PRERE: 'no'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Images
         run: .github/smoke/images.sh
       - name: Start the stack and log in
@@ -95,8 +95,8 @@ jobs:
       rathena: ${{ steps.filter.outputs.rathena }}
       portal: ${{ steps.filter.outputs.portal }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
         id: filter
         with:
           filters: |
@@ -117,7 +117,7 @@ jobs:
     if: needs.rathena-changes.outputs.rathena == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build the image at the version in .env.example
         run: |
           cp .env.example .env
@@ -131,7 +131,7 @@ jobs:
     if: needs.rathena-changes.outputs.portal == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build the portal image
         run: docker build -t rag-wrapper/portal portal
       - name: The image holds the Windows patcher
@@ -151,15 +151,16 @@ jobs:
       run:
         working-directory: desktop/src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Tauri's system libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
         with:
+          toolchain: stable
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: desktop/src-tauri
       - run: cargo clippy --all-targets --locked -- -D warnings
