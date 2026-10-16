@@ -62,18 +62,20 @@ func groupName(id int) string {
 
 func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 	funcs := template.FuncMap{
-		"groupName":    groupName,
-		"groups":       func() any { return groups },
-		"date":         func(t time.Time) string { return t.Format("2006-01-02 15:04 MST") },
-		"town":         func() string { return townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + ")" },
-		"jobName":      jobName,
-		"inc":          func(i int) int { return i + 1 },
-		"thousands":    thousands,
-		"rankingLimit": func() int { return rankingLimit },
+		"groupName":     groupName,
+		"groups":        func() any { return groups },
+		"date":          func(t time.Time) string { return t.Format("2006-01-02 15:04 MST") },
+		"town":          func() string { return townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + ")" },
+		"jobName":       jobName,
+		"inc":           func(i int) int { return i + 1 },
+		"thousands":     thousands,
+		"rankingLimit":  func() int { return rankingLimit },
+		"lookupMissing": func() string { return lookupMissingText },
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "online", "rankings", "news", "error"} {
-		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/items.html", "templates/"+name+".html")
+	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "online", "rankings", "market", "news", "error",
+		"lookup_items", "lookup_item", "lookup_monsters", "lookup_monster"} {
+		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/items.html", "templates/lookup.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
 		}
@@ -113,7 +115,12 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /connect", a.page(a.connect))
 	mux.HandleFunc("GET /online", a.page(a.online))
 	mux.HandleFunc("GET /rankings", a.page(a.rankings))
+	mux.HandleFunc("GET /market", a.page(a.market))
 	mux.HandleFunc("GET /news", a.page(a.newsPage))
+	mux.HandleFunc("GET /items", a.page(a.itemsPage))
+	mux.HandleFunc("GET /items/{id}", a.page(a.itemPage))
+	mux.HandleFunc("GET /monsters", a.page(a.monstersPage))
+	mux.HandleFunc("GET /monsters/{id}", a.page(a.monsterPage))
 	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile)
 	mux.HandleFunc("GET /connect/ExternalSettings_kr.lub", a.externalSettingsFile)
 	mux.HandleFunc("GET /connect/"+linuxLauncherName, a.linuxLauncherFile)

@@ -15,8 +15,9 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "restore" or "test-restore" while one runs
+let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "daily-backup", "restore" or "test-restore" while one runs
 let view = "activity"; // or a service name
+let warningLeft = null; // seconds until the restart or stop while players are being warned
 let logGeneration = 0;
 const activity = [];
 let serviceLines = [];
@@ -198,6 +199,7 @@ function renderLive(live) {
 async function refreshLive() {
   if (!overview?.configured || overview.docker_error || page !== "live" || document.hidden || liveBusy) return;
   liveBusy = true;
+  refreshHistory();
   try {
     renderLive(await invoke("live"));
   } catch (e) {
@@ -206,6 +208,155 @@ async function refreshLive() {
     liveBusy = false;
   }
 }
+
+// ---- Players over time: the app's counts from the last day or week ----
+
+const HOUR = 3600;
+const DAY = 24 * HOUR;
+const SVG = "http://www.w3.org/2000/svg";
+let historyRange = DAY;
+let playerHistory = null;
+let historyAt = 0;
+
+const playerCount = (n) => (n === 1 ? "1 player" : `${n} players`);
+const clock = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const weekday = (t) => new Date(t * 1000).toLocaleDateString([], { weekday: "short" });
+const when = (t) => (historyRange === DAY ? clock(t) : `${weekday(t)} ${clock(t)}`);
+
+// The week shows each hour's highest count, so a busy evening isn't
+// averaged away. Returns points and the longest step that still joins two.
+function historyPoints(h, now) {
+  const from = now - historyRange;
+  const samples = h.samples.filter((s) => s.at > from);
+  if (historyRange === DAY) return { points: samples, step: h.every * 2.5 };
+  const hours = new Map();
+  for (const s of samples) {
+    const at = Math.floor(s.at / HOUR) * HOUR + HOUR / 2;
+    hours.set(at, Math.max(hours.get(at) ?? 0, s.players));
+  }
+  return { points: [...hours].map(([at, players]) => ({ at, players })), step: HOUR * 1.5 };
+}
+
+function svgEl(name, attrs, text) {
+  const el = document.createElementNS(SVG, name);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function renderHistory() {
+  const now = Date.now() / 1000;
+  const { points, step } = playerHistory ? historyPoints(playerHistory, now) : { points: [], step: 0 };
+  const every = Math.round((playerHistory?.every ?? 300) / 60);
+  $("history-hint").textContent =
+    `The app counts players every ${every} minutes while the server runs. Gaps are when it was off.` +
+    (historyRange === DAY ? "" : " Each hour shows its highest count.");
+  $("history-chart").hidden = points.length === 0;
+  $("no-history").hidden = points.length > 0;
+  $("no-history").textContent =
+    historyRange === DAY ? "No counts from the last day yet." : "No counts from the last week yet.";
+  if (!points.length) {
+    $("history-summary").textContent = "";
+    return;
+  }
+  const peak = points.reduce((a, p) => (p.players > a.players ? p : a));
+  $("history-summary").textContent = peak.players
+    ? `Peak ${playerCount(peak.players)}, ${when(peak.at)}`
+    : "Nobody played";
+
+  const svg = $("history-svg");
+  const W = svg.clientWidth || 720;
+  const H = 170;
+  const left = 28;
+  const top = 26;
+  const bottom = H - 20;
+  const most = Math.max(2, peak.players + (peak.players % 2));
+  const from = now - historyRange;
+  const x = (t) => left + ((t - from) / historyRange) * (W - left);
+  const y = (n) => bottom - (n / most) * (bottom - top);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const parts = [];
+
+  for (const n of [0, most / 2, most]) {
+    parts.push(svgEl("line", { class: "grid", x1: left, x2: W, y1: y(n), y2: y(n) }));
+    parts.push(svgEl("text", { class: "axis", x: left - 6, y: y(n) + 4, "text-anchor": "end" }, n));
+  }
+  // Day: every 6 hours on the clock. Week: each midnight.
+  const d = new Date(from * 1000);
+  d.setMinutes(0, 0, 0);
+  d.setHours(historyRange === DAY ? Math.ceil((d.getHours() + 1) / 6) * 6 : 24);
+  for (; d.getTime() / 1000 < now; historyRange === DAY ? d.setHours(d.getHours() + 6) : d.setDate(d.getDate() + 1)) {
+    const t = d.getTime() / 1000;
+    const label = historyRange === DAY ? clock(t) : weekday(t);
+    parts.push(svgEl("text", { class: "axis", x: x(t), y: H - 4, "text-anchor": "middle" }, label));
+  }
+
+  // One run per stretch the server was up, so a gap shows when it was off.
+  const runs = [];
+  for (const p of points) {
+    const run = runs.at(-1);
+    if (run && p.at - run.at(-1).at <= step) run.push(p);
+    else runs.push([p]);
+  }
+  for (const run of runs) {
+    if (run.length === 1) {
+      parts.push(svgEl("circle", { class: "dot", cx: x(run[0].at), cy: y(run[0].players), r: 3 }));
+      continue;
+    }
+    const line = run.map((p) => `${x(p.at).toFixed(1)},${y(p.players).toFixed(1)}`).join(" L");
+    const area = `M${x(run[0].at).toFixed(1)},${bottom} L${line} L${x(run.at(-1).at).toFixed(1)},${bottom} Z`;
+    parts.push(svgEl("path", { class: "area", d: area }));
+    parts.push(svgEl("path", { class: "line", d: `M${line}` }));
+  }
+
+  const cross = svgEl("line", { class: "cross", y1: top, y2: bottom, visibility: "hidden" });
+  const dot = svgEl("circle", { class: "dot", r: 4, visibility: "hidden" });
+  parts.push(cross, dot);
+  svg.replaceChildren(...parts);
+
+  // Hovering shows the nearest count.
+  svg.onmousemove = (e) => {
+    const box = svg.getBoundingClientRect();
+    const px = ((e.clientX - box.left) / box.width) * W;
+    const p = points.reduce((a, b) => (Math.abs(x(b.at) - px) < Math.abs(x(a.at) - px) ? b : a));
+    for (const [el, k, v] of [[cross, "x1", x(p.at)], [cross, "x2", x(p.at)], [dot, "cx", x(p.at)], [dot, "cy", y(p.players)]])
+      el.setAttribute(k, v);
+    cross.setAttribute("visibility", "visible");
+    dot.setAttribute("visibility", "visible");
+    const tip = $("history-tip");
+    tip.textContent = `${when(p.at)} · ${playerCount(p.players)}`;
+    tip.style.left = `${Math.min(Math.max((x(p.at) / W) * box.width, 70), box.width - 70)}px`;
+    tip.hidden = false;
+  };
+  svg.onmouseleave = () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.setAttribute("visibility", "hidden");
+    $("history-tip").hidden = true;
+  };
+}
+
+// The file changes every few minutes, so once a minute is plenty.
+async function refreshHistory(force) {
+  if (!force && Date.now() - historyAt < 60_000) return;
+  historyAt = Date.now();
+  try {
+    playerHistory = await invoke("player_history");
+  } catch (e) {
+    $("history-summary").textContent = `Couldn't read the player history: ${e}`;
+    return;
+  }
+  renderHistory();
+}
+
+for (const [id, range] of [["history-day", DAY], ["history-week", 7 * DAY]]) {
+  $(id).addEventListener("click", () => {
+    historyRange = range;
+    $("history-day").setAttribute("aria-pressed", range === DAY);
+    $("history-week").setAttribute("aria-pressed", range !== DAY);
+    renderHistory();
+  });
+}
+window.addEventListener("resize", () => page === "live" && playerHistory && renderHistory());
 
 // ---- Overview, setup and settings ----
 
@@ -302,6 +453,8 @@ async function refreshOverview() {
     if (!buildFormDirty) fillBuildForm();
   }
   renderAddressChange(overview.configured && overview.address_change);
+  renderAdminNotice(overview.configured && overview.admin_notice);
+  renderPlaceholders(overview.configured && overview.placeholder_passwords);
   renderUpdate(overview.configured && overview.server_update);
   // One bar at a time, in the order they're dealt with: update, rebuild, restart.
   const rebuild = overview.configured && !overview.server_update && overview.rebuild;
@@ -420,6 +573,90 @@ $("address-dismiss").addEventListener("click", async () => {
   await refreshOverview();
 });
 
+// ---- Admin account: setup asked for one the last start didn't make ----
+
+function renderAdminNotice(notice) {
+  $("admin-bar").hidden = !notice;
+  if (!notice) return;
+  const user = notice.user;
+  const [title, why] = {
+    password: [
+      `The admin account ${user} already existed, so its password wasn't changed.`,
+      "Log in with the password it had. To change it, log in on the portal and use your account page. If nobody knows it, another admin can set a new one on the portal's Admin page.",
+    ],
+    player: [
+      `${user} already existed as a player account, so it wasn't made an admin.`,
+      "Its password wasn't changed either. Another admin can put it in the Admin group on the portal's Admin page.",
+    ],
+    inter: [
+      `No admin account was made: ${user} is the name the game servers log in to each other with.`,
+      "Set another ADMIN_USER and ADMIN_PASSWORD in .env, then start the server again.",
+    ],
+  }[notice.why] || [`The admin account ${user} wasn't made.`, "See the Database setup log."];
+  $("admin-title").textContent = title;
+  $("admin-why").textContent = why;
+}
+
+$("admin-dismiss").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_admin_notice");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
+// ---- Example passwords: the public ones from .env.example ----
+
+function renderPlaceholders(found) {
+  $("placeholder-bar").hidden = !found;
+  if (!found) return;
+  $("placeholder-inter").hidden = !found.inter;
+  $("placeholder-db").hidden = !found.database;
+  const confirming = !$("placeholder-fix-yes").hidden;
+  $("placeholder-fix").hidden = !found.inter || confirming;
+  // Only the database part has nothing to fix, so only it can be hidden.
+  $("placeholder-dismiss").hidden = found.inter || confirming;
+}
+
+function placeholderConfirm(on) {
+  $("placeholder-confirm").hidden = !on;
+  $("placeholder-fix-yes").hidden = !on;
+  $("placeholder-fix-no").hidden = !on;
+  renderPlaceholders(overview.configured && overview.placeholder_passwords);
+}
+
+async function changeInterPassword() {
+  placeholderConfirm(false);
+  const restarting = serverRunning();
+  if (restarting) {
+    activity.length = 0;
+    clearProgress();
+    await showView("activity");
+  }
+  try {
+    const restarted = await invoke("change_inter_password");
+    if (!restarted) banner("INTER_PASSWORD changed. The server uses it from its next start.");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+}
+
+// A running server restarts in full, so every part has the new password.
+$("placeholder-fix").addEventListener("click", () => (serverRunning() ? placeholderConfirm(true) : changeInterPassword()));
+$("placeholder-fix-yes").addEventListener("click", changeInterPassword);
+$("placeholder-fix-no").addEventListener("click", () => placeholderConfirm(false));
+
+$("placeholder-dismiss").addEventListener("click", async () => {
+  try {
+    await invoke("dismiss_db_placeholders");
+  } catch (err) {
+    banner(String(err));
+  }
+  await refreshOverview();
+});
+
 // ---- Server update: the rAthena commit this app version comes with ----
 
 const short = (sha) => (sha ? sha.slice(0, 7) : "none");
@@ -463,8 +700,47 @@ function updateButtons() {
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task);
+  // Stop and restore can be called off only while players are being warned.
+  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task) && warningLeft == null;
+  $("skip-wait").hidden = warningLeft == null;
+  $("announce-send").disabled = !ready;
 }
+
+// ---- Warning players before a restart or stop, and messages of the host's own ----
+
+listen("warning", ({ payload }) => {
+  warningLeft = payload;
+  if (payload != null) {
+    const m = Math.floor(payload / 60);
+    const s = String(payload % 60).padStart(2, "0");
+    $("skip-wait").textContent = `Go ahead now (${m}:${s} left)`;
+  }
+  updateButtons();
+});
+$("skip-wait").addEventListener("click", () => invoke("skip_wait"));
+
+async function sendAnnouncement() {
+  const text = $("announce-text").value.trim();
+  if (!text) return;
+  $("announce-error").hidden = true;
+  $("announce-sent").hidden = true;
+  $("announce-send").disabled = true;
+  try {
+    await invoke("send_announcement", { message: text });
+    $("announce-sent").textContent = `Sent: "${text}"`;
+    $("announce-sent").hidden = false;
+    $("announce-text").value = "";
+  } catch (e) {
+    $("announce-error").textContent = String(e);
+    $("announce-error").hidden = false;
+  } finally {
+    updateButtons();
+  }
+}
+$("announce-send").addEventListener("click", sendAnnouncement);
+$("announce-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendAnnouncement();
+});
 
 // ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods and News ----
 
@@ -486,7 +762,10 @@ function showPage(next) {
   $("nav-mods").textContent = page === "mods" ? "Back to server" : "Mods";
   $("nav-news").textContent = page === "news" ? "Back to server" : "News";
   renderPlayerNews();
-  if (next === "live") refreshLive();
+  if (next === "live") {
+    refreshHistory(true);
+    refreshLive();
+  }
 }
 
 $("nav").addEventListener("click", async () => {
@@ -494,8 +773,77 @@ $("nav").addEventListener("click", async () => {
   $("game-saved").hidden = true;
   $("game-error").hidden = true;
   await loadGameSettings();
+  await loadBackgroundSettings();
   showPage("settings");
 });
+
+// ---- Running in the background ----
+
+async function loadBackgroundSettings() {
+  const settings = await invoke("background_settings");
+  $("keep-running").checked = settings.keep_running;
+  $("start-at-login").checked = settings.start_at_login;
+  $("background-error").hidden = true;
+}
+
+for (const [box, command] of [
+  ["keep-running", "set_keep_running"],
+  ["start-at-login", "set_start_at_login"],
+]) {
+  $(box).addEventListener("change", async () => {
+    $("background-error").hidden = true;
+    try {
+      await invoke(command, { on: $(box).checked });
+    } catch (err) {
+      $(box).checked = !$(box).checked;
+      $("background-error").textContent = String(err);
+      $("background-error").hidden = false;
+    }
+  });
+}
+
+// A start or stop from the tray, or the start at login, runs while the
+// window may be hidden; it opens the window if it fails.
+let backgroundTask = null;
+
+async function runInBackground(kind) {
+  backgroundTask = kind;
+  if (!(await runTask(kind))) {
+    backgroundTask = null;
+    invoke("show_window");
+  }
+}
+
+listen("tray-task", ({ payload }) => runInBackground(payload));
+listen("tray-quit", quitApp);
+
+// Quitting with the server up runs Stop first, so players in game get its
+// warning, and exits once it's done; a failed or cancelled stop keeps the
+// app open. While another task runs, quitting cancels it as before.
+let quitAfterStop = false;
+
+async function quitApp() {
+  invoke("show_window");
+  if (task === "stop") {
+    quitAfterStop = true;
+    return;
+  }
+  const running = !task && (await invoke("services").catch(() => [])).some((s) => s.state === "running");
+  if (!running) return invoke("quit_app");
+  quitAfterStop = true;
+  if (!(await runTask("stop"))) quitAfterStop = false;
+}
+
+async function startAtLogin() {
+  if (!(await invoke("launched_at_login"))) return;
+  // Docker may still be starting when the desktop does.
+  for (let i = 0; i < 24 && overview?.configured && overview.docker_error; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await refreshOverview();
+  }
+  if (!overview?.configured || overview.docker_error || task) return invoke("show_window");
+  await runInBackground("start");
+}
 
 $("nav-live").addEventListener("click", () => showPage(page === "live" ? "dashboard" : "live"));
 
@@ -1543,9 +1891,11 @@ async function runTask(kind, file) {
   await showView("activity");
   try {
     await invoke("run_task", { kind, file: file ?? null });
+    return true;
   } catch (err) {
     push(activity, String(err));
     render();
+    return false;
   }
 }
 
@@ -1553,6 +1903,7 @@ $("start").addEventListener("click", () => runTask("start"));
 $("stop").addEventListener("click", () => runTask("stop"));
 $("build").addEventListener("click", () => runTask("build"));
 $("cancel").addEventListener("click", () => invoke("cancel_task"));
+$("quit").addEventListener("click", quitApp);
 $("tab-activity").addEventListener("click", () => showView("activity"));
 
 listen("task-line", ({ payload }) => {
@@ -1563,14 +1914,23 @@ listen("task-line", ({ payload }) => {
 
 listen("task", async ({ payload }) => {
   task = payload.running ? payload.kind : null;
+  if (!payload.running) warningLeft = null;
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", rebind: "Network change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
+    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", rebind: "Network change", stop: "Stop", "daily-backup": "Daily backup", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);
     if (view === "activity") render();
+    if (payload.kind === "stop" && quitAfterStop) {
+      quitAfterStop = false;
+      if (payload.ok) return invoke("quit_app");
+    }
+    if (payload.kind === backgroundTask) {
+      backgroundTask = null;
+      if (!payload.ok) invoke("show_window");
+    }
     await refreshOverview();
     await refreshServices();
     await refreshBackups();
@@ -1578,7 +1938,10 @@ listen("task", async ({ payload }) => {
     if (page === "mods") refreshMods();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
-      if (payload.ok) await runTask("start");
+      // A restart while the map server still runs, so players are warned
+      // first; the new image gets the same full `up` as a start.
+      const mapUp = lastServices.some((s) => s.service === "map" && s.state === "running");
+      if (payload.ok) await runTask(mapUp ? "restart" : "start");
     }
   }
 });
@@ -1595,17 +1958,21 @@ listen("log-line", ({ payload }) => {
   queueRender();
 });
 
-// Closing the window stops the server first; show its output meanwhile.
+// Quitting stops the server first; show its output meanwhile.
 listen("closing", async () => {
   task = "stop";
   updateButtons();
-  banner("Stopping the server before closing…");
+  banner("Stopping the server before quitting…");
   showPage("dashboard");
   activity.length = 0;
   await showView("activity");
 });
 
-refreshOverview().then(refreshServices).then(refreshBackups).then(refreshLive);
+refreshOverview()
+  .then(refreshServices)
+  .then(refreshBackups)
+  .then(refreshLive)
+  .finally(() => startAtLogin().catch(() => invoke("show_window")));
 setInterval(refreshServices, 3000);
 setInterval(refreshLive, 5000);
 // Clashes between mods show soon after their files change.

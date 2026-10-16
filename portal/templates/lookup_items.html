@@ -1,0 +1,30 @@
+{{define "content"}}{{with .Data}}<h1>Items</h1>
+{{template "lookupTabs" "items"}}
+{{if .Missing}}<p class="error">{{lookupMissing}}</p>{{else}}
+<form method="get" action="/items" class="search">
+  <input name="q" value="{{.Q}}" placeholder="Name or number" aria-label="Item name or number">
+  <select name="type" aria-label="Type">
+    <option value="">Every type</option>
+    {{range .Types}}<option{{if eq . $.Data.Type}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  <button>Search</button>
+</form>
+{{with .Items}}
+<table>
+  <thead><tr><th>Item</th><th>Type</th><th>Weight</th><th>Slots</th><th>Dropped by</th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td><a href="/items/{{.ID}}">{{.Name}}</a> <small class="note">#{{.ID}}</small>{{with .Custom}} <span class="tag">{{.}}</span>{{end}}</td>
+    <td>{{.TypeText}}</td>
+    <td>{{.WeightText}}</td>
+    <td>{{if .Slots}}{{.Slots}}{{end}}</td>
+    <td>{{if .DroppedBy}}{{.DroppedBy}} {{if eq .DroppedBy 1}}monster{{else}}monsters{{end}}{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No items found.</p>
+{{end}}
+{{template "lookupPager" .}}
+{{template "lookupNote" .}}
+{{end}}{{end}}{{end}}

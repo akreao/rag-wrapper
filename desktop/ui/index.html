@@ -21,7 +21,9 @@
       <button id="start" class="primary">Start server</button>
       <button id="stop">Stop</button>
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
+      <button id="skip-wait" hidden title="Tell players it's happening now and go ahead">Go ahead now</button>
       <button id="cancel" hidden>Cancel</button>
+      <button id="quit" title="Stop the server and close rag-wrapper">Quit</button>
     </div>
   </header>
 
@@ -34,6 +36,25 @@
     </p>
     <button id="address-copy" class="primary">Copy the link</button>
     <button id="address-dismiss" title="Hide this until the address changes again">Players know</button>
+  </div>
+  <div id="admin-bar" class="update-bar warn-bar" hidden>
+    <p>
+      <strong id="admin-title"></strong>
+      <span id="admin-why"></span>
+    </p>
+    <button id="admin-dismiss">Got it</button>
+  </div>
+  <div id="placeholder-bar" class="update-bar warn-bar" hidden>
+    <p>
+      <strong>Some server passwords are still the examples everyone can look up.</strong>
+      <span id="placeholder-inter">The char and map servers log in to the login server with <code>INTER_PASSWORD</code>. Anyone who knows it can connect a fake char server from your network while the real one is down or restarting: players would see it in the server list, and it could change accounts. Changing it is safe: the server sets the new one on its next start.</span>
+      <span id="placeholder-db">The database passwords (<code>DB_PASSWORD</code>, <code>DB_ROOT_PASSWORD</code>) matter less, because the database can't be reached from other computers. They can't be changed here: editing them in <code>.env</code> alone stops the server from starting, since the database keeps the passwords it was made with.</span>
+      <span id="placeholder-confirm" hidden><br><strong>This restarts the server, which disconnects everyone in game.</strong></span>
+    </p>
+    <button id="placeholder-fix" class="primary">Change INTER_PASSWORD</button>
+    <button id="placeholder-fix-yes" class="primary" hidden>Change and restart</button>
+    <button id="placeholder-fix-no" hidden>Cancel</button>
+    <button id="placeholder-dismiss" title="Hide the database passwords' warning">Got it</button>
   </div>
   <div id="update-bar" class="update-bar" hidden>
     <p>
@@ -218,6 +239,21 @@
       <p id="no-previous" class="hint" hidden>There's no previous version to go back to yet.</p>
       <p class="hint">Use this when a server update breaks something, without waiting for a new app version. Going back again returns to the newer version.</p>
     </section>
+
+    <section class="card">
+      <h2>Running in the background</h2>
+      <label class="check">
+        <input id="keep-running" type="checkbox">
+        Keep the server running when this window is closed
+      </label>
+      <p class="hint">rag-wrapper stays in the system tray, where you can open it again, start or stop the server, or quit, which stops the server. Opening rag-wrapper from the applications menu also brings the window back. When the server is off, closing the window quits. On GNOME the tray needs the AppIndicator extension.</p>
+      <label class="check">
+        <input id="start-at-login" type="checkbox">
+        Start the server when I log in
+      </label>
+      <p class="hint">rag-wrapper starts in the tray, without its window, and starts the server. The window opens if the server can't start.</p>
+      <p id="background-error" class="error" hidden></p>
+    </section>
   </main>
 
   <main id="live-page" hidden>
@@ -231,6 +267,32 @@
         <tbody></tbody>
       </table>
       <p id="no-players" class="hint">The server is off.</p>
+    </section>
+    <section class="card">
+      <h2>Message everyone</h2>
+      <div class="row">
+        <input id="announce-text" maxlength="200" placeholder="such as: Double EXP starts at 8!" aria-label="Message">
+        <button id="announce-send">Send</button>
+      </div>
+      <p id="announce-error" class="error" hidden></p>
+      <p id="announce-sent" class="notice" hidden></p>
+      <p class="hint">Shows in yellow in every player's chat window. Up to 200 plain letters, digits and punctuation. Restart, Stop and the other changes that restart the game servers also warn players 5 minutes ahead, and again at 1 minute, unless nobody's online.</p>
+    </section>
+    <section class="card">
+      <div class="online-head">
+        <h2>Players over time</h2>
+        <span id="history-summary" class="muted"></span>
+        <span class="range" role="group" aria-label="Time range">
+          <button id="history-day" aria-pressed="true">Last day</button>
+          <button id="history-week" aria-pressed="false">Last week</button>
+        </span>
+      </div>
+      <div id="history-chart" class="chart" hidden>
+        <svg id="history-svg" role="img" aria-labelledby="history-summary"></svg>
+        <div id="history-tip" class="chart-tip" hidden></div>
+      </div>
+      <p id="no-history" class="hint">No counts yet.</p>
+      <p id="history-hint" class="hint"></p>
     </section>
     <section class="card">
       <h2>Resources</h2>

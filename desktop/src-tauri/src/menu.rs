@@ -27,7 +27,7 @@ pub fn install(data: &Path) -> std::io::Result<()> {
         .map_or_else(|| Path::new(&home).join(".local/share"), Into::into)
         .join("applications");
     fs::create_dir_all(&applications)?;
-    let entry = desktop_entry(Path::new(&appimage), &icon);
+    let entry = desktop_entry(Path::new(&appimage), Some(&icon), "");
     let file = applications.join(ENTRY);
     if fs::read_to_string(&file).ok().as_deref() != Some(entry.as_str()) {
         fs::write(file, entry)?;
@@ -35,19 +35,25 @@ pub fn install(data: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn desktop_entry(appimage: &Path, icon: &Path) -> String {
+/// A desktop entry that runs `program`, followed by `args` (already quoted).
+pub fn desktop_entry(program: &Path, icon: Option<&Path>, args: &str) -> String {
+    let mut exec = exec_arg(&program.to_string_lossy());
+    if !args.is_empty() {
+        exec = format!("{exec} {args}");
+    }
+    let icon = icon.map_or_else(String::new, |icon| {
+        format!("Icon={}\n", icon.to_string_lossy().replace('\\', "\\\\"))
+    });
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=rag-wrapper\n\
          Comment=Runs a private rAthena server and its database\n\
-         Exec={}\n\
-         Icon={}\n\
+         Exec={exec}\n\
+         {icon}\
          Terminal=false\n\
          Categories=Game;\n\
          StartupWMClass=rag-wrapper\n",
-        exec_arg(&appimage.to_string_lossy()),
-        icon.to_string_lossy().replace('\\', "\\\\"),
     )
 }
 
@@ -77,7 +83,8 @@ mod tests {
     fn points_the_menu_at_the_appimage() {
         let entry = desktop_entry(
             Path::new("/home/steven/Apps/rag-wrapper-0.2.0-x86_64.AppImage"),
-            Path::new("/home/steven/.local/share/app.ragwrapper.desktop/rag-wrapper.png"),
+            Some(Path::new("/home/steven/.local/share/app.ragwrapper.desktop/rag-wrapper.png")),
+            "",
         );
         assert!(entry.contains("\nExec=\"/home/steven/Apps/rag-wrapper-0.2.0-x86_64.AppImage\"\n"));
         assert!(entry.contains("\nIcon=/home/steven/.local/share/app.ragwrapper.desktop/rag-wrapper.png\n"));
