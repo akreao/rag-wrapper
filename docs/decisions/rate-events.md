@@ -11,4 +11,5 @@ Roadmap feature 28: pick EXP and drop rates and a time window in the desktop app
 - **Announced in game** with `announce` when it starts (once, even across restarts: the script marks it `started`) and when it ends or is deleted early. Players who log in during one get the start line in their chat. The lines are written by the app in local time ("Double EXP weekend: EXP x2 until Sun 18 Oct 23:59."), since the server's clock in Docker is UTC.
 - **Names are plain ASCII**: the game client shows announcements in its own code page, so accented letters would come out garbled. Up to 60 characters.
 - **An optional News post** (on by default) goes on top of the News page, dated like the News screen's own posts.
+- **Events stack on rAthena's Floating Rates NPC** (Steven, 2026-10-16): with that custom NPC on, an event multiplies whatever rates it last set, so double EXP over a floating 130% gives 260%. The script treats a rate another script changed as the server's own, so after Floating Rates' hourly change the event applies on top within 30 seconds.
 - **Restart warnings (feature 25) are separate**: that feature's announcements don't depend on this one.
