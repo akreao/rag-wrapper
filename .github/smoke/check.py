@@ -248,9 +248,18 @@ def main():
               "VALUES ('Smoke', UNIX_TIMESTAMP() - 1, UNIX_TIMESTAMP() + 3600, 200, 150, 'Smoke event on', 'Smoke event over')")
     # The script checks every 30 seconds.
     log = wait_for("the event to start", lambda: next((t for t in [logs("map")] if "exp 200%, drops 150%" in t), None), timeout=90)
-    for flag, value in (("base_exp_rate", 200), ("job_exp_rate", 200), ("item_rate_common", 150), ("item_rate_card_mvp", 150)):
-        if f"battle_config flag '{flag}' is now set to '{value}'" not in log:
-            fail(f"the event didn't set {flag} to {value}")
+    # The event's lines end with its debug line, after its base_exp_rate
+    # line. It starts from the rates before that: the stock 100, or what
+    # another script set (rAthena's Floating Rates custom NPC does).
+    upto = log[:log.index("exp 200%, drops 150%")]
+    block_start = upto.rindex("battle_config flag 'base_exp_rate'")
+    def last_set(text, flag):
+        found = re.findall(rf"battle_config flag '{flag}' is now set to '(\d+)'", text)
+        return int(found[-1]) if found else None
+    for flag, percent in (("base_exp_rate", 200), ("job_exp_rate", 200), ("item_rate_common", 150), ("item_rate_card_mvp", 150)):
+        own = last_set(upto[:block_start], flag) or 100
+        if last_set(upto[block_start:], flag) != own * percent // 100:
+            fail(f"the event didn't set {flag} to {percent}% of {own}")
     chars_sql("DELETE FROM wrapper_rate_events")
     wait_for("the event to end", lambda: "exp 100%, drops 100%" in logs("map") or None, timeout=90)
     problems = [block for block in problem_blocks(logs("map")) if "rate_events" in block or "setbattleflag" in block]
