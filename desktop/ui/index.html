@@ -55,14 +55,14 @@
   </div>
   <div id="restart-bar" class="update-bar" hidden>
     <p id="restart-server">
-      <strong>A new server version is built.</strong>
+      <strong>A new server build is ready.</strong>
       Players stay on the old one until the game servers restart, which disconnects everyone. Database upgrades run first.
     </p>
     <p id="restart-portal" hidden>
       <strong>A new account portal is built.</strong>
       The running portal stays on the old one until it restarts. Nobody in game is disconnected.
     </p>
-    <button id="restart-new" class="primary">Restart on the new version</button>
+    <button id="restart-new" class="primary">Restart on the new build</button>
   </div>
 
   <main id="setup" hidden>
@@ -186,6 +186,21 @@
       <p id="build-error" class="error" hidden></p>
       <button id="build-save" type="submit">Save and rebuild</button>
     </form>
+
+    <section class="card">
+      <h2>Server version</h2>
+      <p>rAthena <code id="version-current"></code><span id="version-previous" hidden>; before that, <code id="version-previous-commit"></code></span>.
+        <a href="#" id="version-changes" hidden>What going back undoes</a></p>
+      <p id="go-back-confirm" class="notice" hidden>
+        Go back to <code id="go-back-to"></code>? The database is backed up first, then the older version is downloaded, or built here, which takes 5 to 10 minutes. A running server moves to it when you restart it, which disconnects everyone.
+        If the newer version changed the database, the older one won't start on it; then go forward again, or restore the backup made before the server update.
+        <button id="go-back-yes" type="button" class="primary">Go back</button>
+        <button id="go-back-no" type="button">Keep this version</button>
+      </p>
+      <button id="go-back" type="button" hidden>Go back to the previous version</button>
+      <p id="no-previous" class="hint" hidden>There's no previous version to go back to yet.</p>
+      <p class="hint">Use this when a server update breaks something, without waiting for a new app version. Going back again returns to the newer version.</p>
+    </section>
   </main>
 
   <main id="live-page" hidden>

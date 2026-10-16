@@ -76,6 +76,8 @@ pub enum Reason {
     Rebuild,
     /// Before a server update moves the rAthena commit.
     Update,
+    /// Before going back to the previous rAthena commit.
+    GoBack,
     BeforeRestore,
     /// Before the game servers first load a mod's database files.
     Mods,
@@ -89,6 +91,7 @@ impl Reason {
             Reason::Manual => "manual",
             Reason::Rebuild => "rebuild",
             Reason::Update => "update",
+            Reason::GoBack => "go-back",
             Reason::BeforeRestore => "before-restore",
             Reason::Mods => "mods",
             Reason::Daily => "daily",
@@ -101,7 +104,7 @@ pub struct Backup {
     pub file: String,
     /// Local time, "YYYY-MM-DD HH:MM:SS".
     pub created: String,
-    /// manual, rebuild, update, before-restore, mods or daily; anything else a later version wrote.
+    /// manual, rebuild, update, go-back, before-restore, mods or daily; anything else a later version wrote.
     pub reason: String,
     pub size: u64,
     /// The last restore test of this backup, if it had one.

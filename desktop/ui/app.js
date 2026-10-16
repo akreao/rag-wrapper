@@ -303,9 +303,50 @@ async function refreshOverview() {
   $("restart-bar").hidden = !overview.configured || !restart || !!overview.server_update || !!rebuild;
   $("restart-server").hidden = !overview.restart_pending;
   $("restart-portal").hidden = overview.restart_pending;
-  $("restart-new").textContent = overview.restart_pending ? "Restart on the new version" : "Restart the portal";
+  $("restart-new").textContent = overview.restart_pending ? "Restart on the new build" : "Restart the portal";
+  renderVersion(overview.configured && overview.server_version);
   updateButtons();
 }
+
+// ---- Server version: going back to the rAthena commit before this one ----
+
+function renderVersion(version) {
+  if (!version) return;
+  const previous = version.previous;
+  $("version-current").textContent = short(version.current);
+  $("version-previous").hidden = !previous;
+  $("version-changes").hidden = !previous?.changes_url;
+  $("version-changes").dataset.url = previous?.changes_url || "";
+  $("go-back").hidden = !previous || !$("go-back-confirm").hidden;
+  $("no-previous").hidden = !!previous;
+  if (!previous) $("go-back-confirm").hidden = true;
+  else {
+    $("version-previous-commit").textContent = short(previous.commit);
+    $("go-back").textContent = `Go back to ${short(previous.commit)}`;
+    $("go-back-to").textContent = short(previous.commit);
+  }
+}
+
+$("version-changes").addEventListener("click", (e) => {
+  e.preventDefault();
+  invoke("open_url", { url: e.target.dataset.url });
+});
+
+$("go-back").addEventListener("click", () => {
+  $("go-back-confirm").hidden = false;
+  $("go-back").hidden = true;
+});
+
+$("go-back-no").addEventListener("click", () => {
+  $("go-back-confirm").hidden = true;
+  $("go-back").hidden = false;
+});
+
+$("go-back-yes").addEventListener("click", () => {
+  $("go-back-confirm").hidden = true;
+  showPage("dashboard");
+  runTask("go-back");
+});
 
 // ---- Rebuild notice: images here that Start won't bring up to date ----
 
@@ -410,11 +451,11 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "ip-yes", "portal-port-use"])
+  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "go-back", "go-back-yes", "ip-yes", "portal-port-use"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "update", "start", "restart", "readdress", "portal"].includes(task);
+  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal"].includes(task);
 }
 
 // ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods and News ----
@@ -723,6 +764,7 @@ const REASONS = {
   manual: "Backed up by hand",
   rebuild: "Before a rebuild",
   update: "Before a server update",
+  "go-back": "Before going back to the previous server version",
   "before-restore": "Before a restore",
   mods: "Before loading a mod's database files",
   daily: "Daily, on stop or close",
@@ -1228,7 +1270,7 @@ $("new-item-mod").addEventListener("submit", async (e) => {
   await refreshMods();
 });
 
-// A rebuild backs up first; the "Restart on the new version" bar then appears.
+// A rebuild backs up first; the "Restart on the new build" bar then appears.
 $("mods-rebuild-button").addEventListener("click", () => {
   showPage("dashboard");
   runTask("build");
