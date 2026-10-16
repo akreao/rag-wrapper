@@ -41,8 +41,6 @@ x-rathena: &rathena
     PUBLIC_IP: ${PUBLIC_IP:-127.0.0.1}
     # Matches the build; picks the item database for the portal's item names.
     PRERE: ${PRERE:-yes}
-    ADMIN_USER: ${ADMIN_USER:-}
-    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
 
 services:
   db:
@@ -74,9 +72,13 @@ services:
     pull_policy: !reset null
     command: init
     # Only db-init gets root: it makes each game mode's characters database.
+    # It also creates the admin account, so only it gets the admin's
+    # password, which the desktop app blanks in .env after the first start.
     environment:
       <<: *rathena-env
       DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      ADMIN_USER: ${ADMIN_USER:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     restart: "no"
     depends_on:
       db:
