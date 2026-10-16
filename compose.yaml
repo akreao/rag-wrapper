@@ -18,8 +18,10 @@ x-logging: &logging
 # Every rAthena service runs the same image. Only db-init has `build:`,
 # so the image is built once (when missing, or with --build); the others
 # use it and never try to pull it from a registry.
+# RATHENA_IMAGE and PORTAL_IMAGE are for the desktop app: it builds a new
+# image under another name and renames it only once every image is ready.
 x-rathena: &rathena
-  image: rag-wrapper/rathena:${PACKETVER:-20250716}
+  image: ${RATHENA_IMAGE:-rag-wrapper/rathena:${PACKETVER:-20250716}}
   pull_policy: never
   restart: on-failure
   logging: *logging
@@ -117,7 +119,7 @@ services:
   # Account registration and management for players and admins.
   portal:
     build: portal
-    image: rag-wrapper/portal
+    image: ${PORTAL_IMAGE:-rag-wrapper/portal}
     restart: on-failure
     logging: *logging
     environment:

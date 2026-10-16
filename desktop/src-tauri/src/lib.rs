@@ -491,12 +491,16 @@ enum Step {
     Restore(String),
     /// Loads a backup into a throwaway database to check it would restore.
     TestRestore(String),
-    /// Moves `.env` to the update's commit.
-    Pin(update::ServerUpdate),
-    /// Moves `.env` back to the previous commit.
-    GoBack(update::Previous),
-    /// Pulls the prebuilt images, building any that aren't published with the command.
+    /// Gives the staged images the stack's names and moves `.env` to the
+    /// update's commit, in one step so a cancel can't come between them.
+    Pin(update::ServerUpdate, Vec<images::Image>),
+    /// The same, back to the previous commit.
+    GoBack(update::Previous, Vec<images::Image>),
+    /// Pulls the prebuilt images, building any that aren't published with
+    /// the command, under their staging names.
     Images(Vec<images::Image>, std::process::Command),
+    /// Gives the staged images the stack's names.
+    Promote(Vec<images::Image>),
     /// Pulls the prebuilt images that aren't here yet, before a start.
     FetchMissing(Vec<images::Image>),
     /// Checks that nothing else holds the ports the stack publishes.
@@ -567,18 +571,20 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         "build" => {
             let env = app.env().ok_or("Finish setup first.")?;
             // A new build can upgrade the database on its next start.
-            vec![Step::Backup(backup::Reason::Rebuild), Step::Images(images::current(&app.dir, &env), cmd)]
+            let images = images::current(&app.dir, &env);
+            vec![Step::Backup(backup::Reason::Rebuild), Step::Images(images.clone(), cmd), Step::Promote(images)]
         }
         "update" => {
             let env = app.env().ok_or("Finish setup first.")?;
             let update = update::pending(&env).ok_or("The server is already on this version's rAthena.")?;
-            // The new commit goes into `.env` only once its image has built,
-            // so a failed or cancelled build leaves the update on offer.
+            // The new commit goes into `.env`, and its image gets the stack's
+            // name, only once every image is ready, so a failed or cancelled
+            // build leaves the old images and the update on offer.
             cmd.env("RATHENA_REPO", &update.repo).env("RATHENA_COMMIT", &update.offered);
             let images = images::wanted(&app.dir, &env, &update.repo, &update.offered);
             // A running server stays on the old image until "Restart on the
             // new version" (or the next Start); players aren't dropped by surprise.
-            vec![Step::Backup(backup::Reason::Update), Step::Images(images, cmd), Step::Pin(update)]
+            vec![Step::Backup(backup::Reason::Update), Step::Images(images.clone(), cmd), Step::Pin(update, images)]
         }
         "go-back" => {
             // An update the other way: the commit moves once its image is here,
@@ -587,7 +593,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             let previous = update::previous(&env).ok_or("There's no previous server version to go back to.")?;
             cmd.env("RATHENA_REPO", &previous.repo).env("RATHENA_COMMIT", &previous.commit);
             let images = images::wanted(&app.dir, &env, &previous.repo, &previous.commit);
-            vec![Step::Backup(backup::Reason::GoBack), Step::Images(images, cmd), Step::GoBack(previous)]
+            vec![Step::Backup(backup::Reason::GoBack), Step::Images(images.clone(), cmd), Step::GoBack(previous, images)]
         }
         "stop" => {
             cmd.arg("down");
@@ -626,7 +632,8 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             ctx.check_cancelled()?;
             match step {
                 Step::Compose(cmd) => ctx.run(cmd),
-                Step::Images(wanted, build) => images::fetch_or_build(&ctx, &wanted, build),
+                Step::Images(wanted, build) => images::stage(&ctx, &wanted, build),
+                Step::Promote(wanted) => images::promote(&ctx.dir, &wanted),
                 Step::FetchMissing(wanted) => images::fetch_missing(&ctx, &wanted),
                 Step::Ports => stack::check_ports(&ctx.dir),
                 Step::Record(built) => {
@@ -640,13 +647,17 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
                 }
                 Step::Restore(file) => backup::restore(&ctx, &file),
                 Step::TestRestore(file) => backup::test_restore(&ctx, &file),
-                Step::Pin(update) => envfile::edit(&ctx.dir.join(".env"), |env| {
-                    update::pin(env, &update);
-                    Ok(())
+                Step::Pin(update, wanted) => images::promote(&ctx.dir, &wanted).and_then(|()| {
+                    envfile::edit(&ctx.dir.join(".env"), |env| {
+                        update::pin(env, &update);
+                        Ok(())
+                    })
                 }),
-                Step::GoBack(previous) => envfile::edit(&ctx.dir.join(".env"), |env| {
-                    update::go_back(env, &previous);
-                    Ok(())
+                Step::GoBack(previous, wanted) => images::promote(&ctx.dir, &wanted).and_then(|()| {
+                    envfile::edit(&ctx.dir.join(".env"), |env| {
+                        update::go_back(env, &previous);
+                        Ok(())
+                    })
                 }),
             }
         });

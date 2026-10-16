@@ -29,6 +29,9 @@ pub const KEY: &str = "PREBUILT_IMAGES";
 pub struct Image {
     pub local: String,
     pub service: &'static str,
+    /// The variable `compose.yaml` takes the image's name from, set to
+    /// [`Image::staging`] while a new one is built.
+    pub var: &'static str,
     /// The published image to pull, when there may be one.
     pub remote: Option<String>,
     /// What it's made from, as its published tag names it:
@@ -60,16 +63,31 @@ pub fn wanted(dir: &Path, env: &EnvFile, repo: &str, commit: &str) -> Vec<Image>
         Image {
             local: format!("rag-wrapper/rathena:{packetver}"),
             service: "db-init",
+            var: "RATHENA_IMAGE",
             remote: rathena,
             source: rathena_source,
         },
         Image {
             local: "rag-wrapper/portal".into(),
             service: "portal",
+            var: "PORTAL_IMAGE",
             remote: portal,
             source: portal_source,
         },
     ]
+}
+
+impl Image {
+    /// Where a new image waits until every image is ready: next to the
+    /// stack's name, so the stack keeps its old image until then.
+    pub fn staging(&self) -> String {
+        let name = self.local.rsplit('/').next().unwrap_or_default();
+        if name.contains(':') {
+            format!("{}-next", self.local)
+        } else {
+            format!("{}:next", self.local)
+        }
+    }
 }
 
 /// The images for the commit in `.env`.
@@ -133,9 +151,9 @@ fn is_current(image: &Image) -> bool {
     }
 }
 
-/// Pulls the published image and names it as the stack expects. Fails
-/// when there is none to pull; the caller then builds it.
-fn pull(ctx: &Ctx, image: &Image) -> Result<(), String> {
+/// Downloads the published image. Fails when there is none to pull; the
+/// caller then builds it.
+fn download<'a>(ctx: &Ctx, image: &'a Image) -> Result<&'a str, String> {
     let remote = image.remote.as_deref().ok_or("No prebuilt image for these settings.")?;
     ctx.line(format!("Downloading the prebuilt image {remote}"));
     let mut cmd = host::command("docker");
@@ -149,37 +167,81 @@ fn pull(ctx: &Ctx, image: &Image) -> Result<(), String> {
         }
         return Err(e);
     }
-    let mut tag = host::command("docker");
-    tag.args(["tag", remote, &image.local]);
-    stack::output(tag)?;
     remember(&ctx.dir, |state| {
         state.unpublished.remove(remote);
     });
-    record(&ctx.dir, std::slice::from_ref(image));
-    Ok(())
+    Ok(remote)
 }
 
-/// Gets every image: pulled where a published one exists, built here
-/// otherwise. `build` is the `docker compose` command to build with,
-/// which a server update points at its new commit.
-pub fn fetch_or_build(ctx: &Ctx, images: &[Image], mut build: Command) -> Result<(), String> {
+fn tag(from: &str, to: &str) -> Result<(), String> {
+    let mut cmd = host::command("docker");
+    cmd.args(["tag", from, to]);
+    stack::output(cmd).map(|_| ())
+}
+
+fn untag(name: &str) {
+    let mut cmd = host::command("docker");
+    cmd.args(["image", "rm", name]);
+    let _ = stack::output(cmd);
+}
+
+/// Gets every image under its [`Image::staging`] name: pulled where a
+/// published one exists, built here otherwise. `build` is the `docker
+/// compose` command to build with, which a server update points at its new
+/// commit. The stack's own names are left alone until [`promote`], so a
+/// failed or cancelled step leaves the stack the images it had.
+pub fn stage(ctx: &Ctx, images: &[Image], build: Command) -> Result<(), String> {
+    let staged = stage_all(ctx, images, build);
+    if staged.is_err() {
+        // A half-made set is never used; it would only take up disk space.
+        for image in images {
+            untag(&image.staging());
+        }
+    }
+    staged
+}
+
+fn stage_all(ctx: &Ctx, images: &[Image], build: Command) -> Result<(), String> {
     let mut to_build = Vec::new();
     for image in images {
         ctx.check_cancelled()?;
-        if let Err(e) = pull(ctx, image) {
-            ctx.check_cancelled()?;
-            if image.remote.is_some() {
-                ctx.line(format!("No prebuilt image to download ({e}); building {} on this computer.", image.local));
+        match download(ctx, image) {
+            Ok(remote) => tag(remote, &image.staging())?,
+            Err(e) => {
+                ctx.check_cancelled()?;
+                if image.remote.is_some() {
+                    ctx.line(format!("No prebuilt image to download ({e}); building {} on this computer.", image.local));
+                }
+                to_build.push(image);
             }
-            to_build.push(image.clone());
         }
     }
     if to_build.is_empty() {
         return Ok(());
     }
-    build.args(["--progress", "plain", "build"]).args(to_build.iter().map(|i| i.service));
-    ctx.run(build)?;
-    record(&ctx.dir, &to_build);
+    ctx.run(build_command(build, &to_build))
+}
+
+/// `build` set to build `images` under their staging names.
+fn build_command(mut build: Command, images: &[&Image]) -> Command {
+    for image in images {
+        build.env(image.var, image.staging());
+    }
+    build.args(["--progress", "plain", "build"]).args(images.iter().map(|i| i.service));
+    build
+}
+
+/// Moves the stack's names to the images [`stage`] made, once all of them
+/// are ready. A server update does this right before it saves the new
+/// commit to `.env`, so the images never run ahead of it.
+pub fn promote(dir: &Path, images: &[Image]) -> Result<(), String> {
+    for image in images {
+        tag(&image.staging(), &image.local)?;
+    }
+    for image in images {
+        untag(&image.staging());
+    }
+    record(dir, images);
     Ok(())
 }
 
@@ -189,12 +251,19 @@ pub fn fetch_or_build(ctx: &Ctx, images: &[Image], mut build: Command) -> Result
 pub fn fetch_missing(ctx: &Ctx, images: &[Image]) -> Result<(), String> {
     for image in images.iter().filter(|i| i.remote.is_some() && !is_current(i)) {
         ctx.check_cancelled()?;
-        if pull(ctx, image).is_err() {
-            ctx.check_cancelled()?;
-            if exists(&image.local) {
-                ctx.line(format!("No newer prebuilt image to download; keeping {}.", image.local));
-            } else {
-                ctx.line(format!("No prebuilt image to download; {} will be built on this computer.", image.local));
+        match download(ctx, image) {
+            // `.env` already names what this image is made from.
+            Ok(remote) => {
+                tag(remote, &image.local)?;
+                record(&ctx.dir, std::slice::from_ref(image));
+            }
+            Err(_) => {
+                ctx.check_cancelled()?;
+                if exists(&image.local) {
+                    ctx.line(format!("No newer prebuilt image to download; keeping {}.", image.local));
+                } else {
+                    ctx.line(format!("No prebuilt image to download; {} will be built on this computer.", image.local));
+                }
             }
         }
     }
@@ -402,6 +471,7 @@ mod tests {
         Image {
             local: "rag-wrapper/rathena:20250716".into(),
             service: "db-init",
+            var: "RATHENA_IMAGE",
             remote: remote.then(|| format!("ghcr.io/akreao/rag-wrapper-rathena:{source}")),
             source: source.into(),
         }
@@ -448,7 +518,7 @@ mod tests {
 
     #[test]
     fn a_portal_change_is_only_recommended() {
-        let image = Image { local: "rag-wrapper/portal".into(), service: "portal", remote: None, source: "newhash".into() };
+        let image = Image { local: "rag-wrapper/portal".into(), service: "portal", var: "PORTAL_IMAGE", remote: None, source: "newhash".into() };
         let state = built(&image.local, "sha256:1", "oldhash");
         assert_eq!(stale(&image, "sha256:1", &[], &state), Some(false));
     }
@@ -463,5 +533,36 @@ mod tests {
 
         let env = EnvFile::parse(&format!("PACKETVER=20250716\n{KEY}=\n"));
         assert!(wanted(&dir, &env, "x", "0123456789abcdef").iter().all(|i| i.remote.is_none()));
+    }
+
+    #[test]
+    fn new_images_wait_beside_the_stacks_names() {
+        let dir = stack("staging");
+        let images = wanted(&dir, &EnvFile::parse("PACKETVER=20250716\n"), "x", "0123456789abcdef");
+        assert_eq!(images[0].staging(), "rag-wrapper/rathena:20250716-next");
+        assert_eq!(images[1].staging(), "rag-wrapper/portal:next");
+    }
+
+    #[test]
+    fn builds_under_the_staging_names() {
+        let dir = stack("build");
+        let images = wanted(&dir, &EnvFile::parse("PACKETVER=20250716\n"), "x", "0123456789abcdef");
+        let cmd = build_command(Command::new("docker"), &images.iter().collect::<Vec<_>>());
+        let envs: Vec<_> = cmd.get_envs().map(|(k, v)| (k.to_str().unwrap(), v.unwrap().to_str().unwrap())).collect();
+        assert_eq!(envs, [("PORTAL_IMAGE", "rag-wrapper/portal:next"), ("RATHENA_IMAGE", "rag-wrapper/rathena:20250716-next")]);
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
+        assert_eq!(args, ["--progress", "plain", "build", "db-init", "portal"]);
+    }
+
+    // The staging names only work if compose.yaml names its images by these
+    // variables, defaulting to the stack's names.
+    #[test]
+    fn compose_names_its_images_by_their_variables() {
+        let compose = include_str!("../../../compose.yaml");
+        assert!(compose.contains("image: ${RATHENA_IMAGE:-rag-wrapper/rathena:${PACKETVER:-20250716}}"));
+        assert!(compose.contains("image: ${PORTAL_IMAGE:-rag-wrapper/portal}"));
+        let dir = stack("compose");
+        let images = wanted(&dir, &EnvFile::parse("PACKETVER=20250716\n"), "x", "0123456789abcdef");
+        assert_eq!((images[0].var, images[1].var), ("RATHENA_IMAGE", "PORTAL_IMAGE"));
     }
 }
