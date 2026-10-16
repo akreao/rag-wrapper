@@ -359,11 +359,6 @@ apply_mods() {
 	rm -f "${imports}"
 }
 
-# The files enabled mods add to one database, from its import file's Footer.
-mod_files() {
-	sed -n "s/^    - Path: '\(.*\)'\$/\1/p" "db/import/$1" 2>/dev/null | sed "s/''/'/g"
-}
-
 sql_in() {
 	db=$1
 	shift
@@ -486,18 +481,52 @@ check_not_newer() {
 # settings show once a restart has loaded them, and the portal keeps the
 # previous tables until the new ones are complete. Only the portal uses
 # them, so a failure here leaves the map server running.
+#
+# A load takes seconds of CPU and a few hundred MB in Renewal, so it's
+# skipped when the tables were last filled from the same inputs, and runs
+# at a lower priority than the map server otherwise.
 load_lookup() {
 	mode=re
 	if [ "${PRERE:-yes}" = "yes" ]; then
 		mode=pre-re
 	fi
+	# Empty when it can't be worked out, which always loads. A new or reset
+	# database has no wrapper_lookup_info, so it loads too.
+	inputs=$(lookup_inputs "${mode}") || inputs=
+	if [ -n "${inputs}" ] && [ "$(char_cmd -N -e "SELECT value FROM wrapper_lookup_info WHERE name='inputs'" 2>/dev/null)" = "${inputs}" ]; then
+		# The portal says when the map server loaded what it shows.
+		if char_cmd -e "UPDATE wrapper_lookup_info SET value=UNIX_TIMESTAMP() WHERE name='loaded_at'"; then
+			echo "Lookup tables: unchanged since the last start"
+			return 0
+		fi
+	fi
 	sql=$(mktemp)
-	if lookup_db.py "${mode}" > "${sql}" && char_cmd < "${sql}"; then
+	# The tables are utf8mb4, and the client would otherwise send as latin1
+	# (the container has no locale), garbling names that aren't ASCII.
+	if nice -n 10 lookup_db.py "${mode}" "${inputs}" > "${sql}" && char_cmd --default-character-set=utf8mb4 < "${sql}"; then
 		:
 	else
 		echo "[Warning]: couldn't fill the portal's item and monster tables" >&2
 	fi
 	rm -f "${sql}"
+}
+
+# A fingerprint of everything lookup_db.py can read: the game mode, the
+# script itself, and the contents of db/, conf/ (with the overrides
+# folder), npc/ and the mods' db/ and npc/ folders. Wider than what it
+# reads, so a change it doesn't need only costs a load.
+lookup_inputs() {
+	inputs_mode=$1
+	script=$(command -v lookup_db.py) || return 1
+	set -- db conf npc
+	for dir in mods/*/db mods/*/npc; do
+		if [ -d "${dir}" ]; then
+			set -- "$@" "${dir}"
+		fi
+	done
+	sums=$(find "$@" -type f -print0 | LC_ALL=C sort -z | xargs -0 -r md5sum) || return 1
+	[ -n "${sums}" ] || return 1
+	printf '%s\n%s\n%s\n' "${inputs_mode}" "$(md5sum < "${script}")" "${sums}" | md5sum | cut -d ' ' -f 1
 }
 
 # The tables the login server uses. They stay in the accounts database;

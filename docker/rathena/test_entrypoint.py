@@ -276,6 +276,80 @@ class EntrypointTest(unittest.TestCase):
         result = self.create_admin("", password="")
         self.assertEqual(result.stdout + result.stderr, "")
 
+    def load_lookup(self, stored=None, **env):
+        """Runs entrypoint.sh's load_lookup on the test folder, with the
+        inputs fingerprint wrapper_lookup_info holds (None: no table).
+        Returns what ran, one line per command, and the fingerprint."""
+        with open(ENTRYPOINT, encoding="utf-8") as f:
+            text = f.read()
+        functions = ""
+        for name in ("load_lookup", "lookup_inputs"):
+            function = text[text.index(f"{name}() {{") :]
+            functions += function[: function.index("\n}\n") + 3]
+        log = self.path("ran.log")
+        open(log, "w").close()
+        with open(self.path("bin/lookup_db.py"), "w", encoding="utf-8") as f:
+            f.write(f'#!/bin/sh\necho "lookup_db.py $*" >> "{log}"\necho "SQL"\n')
+        os.chmod(self.path("bin/lookup_db.py"), 0o755)
+        script = textwrap.dedent(
+            f"""\
+            set -eu
+            cd "{self.root}"
+            char_cmd() {{
+                case "$*" in
+                    *"SELECT value"*) [ -n "${{STORED+x}}" ] || return 1; echo "$STORED"; return 0 ;;
+                esac
+                echo "char_cmd $* $(cat)" >> "{log}"
+            }}
+            """
+        ) + functions + "load_lookup\n"
+        full = {**os.environ, "PATH": self.path("bin") + os.pathsep + os.environ.get("PATH", "/usr/bin:/bin"), **env}
+        full.pop("STORED", None)
+        if stored is not None:
+            full["STORED"] = stored
+        result = subprocess.run(["sh", "-c", script], env=full, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(log, encoding="utf-8") as f:
+            ran = f.read().splitlines()
+        loads = [line for line in ran if line.startswith("lookup_db.py")]
+        return ran, loads[0].split()[2] if loads and len(loads[0].split()) > 2 else None
+
+    def test_lookup_tables_load_as_utf8mb4_with_the_inputs(self):
+        ran, inputs = self.load_lookup()
+        self.assertEqual(ran[0], f"lookup_db.py pre-re {inputs}")
+        self.assertRegex(inputs, "^[0-9a-f]{32}$")
+        self.assertEqual(ran[1], "char_cmd --default-character-set=utf8mb4 SQL")
+        ran, _ = self.load_lookup(PRERE="no")
+        self.assertTrue(ran[0].startswith("lookup_db.py re "))
+
+    def test_lookup_tables_are_kept_when_nothing_changed(self):
+        _, inputs = self.load_lookup()
+        ran, _ = self.load_lookup(stored=inputs)
+        self.assertEqual(len(ran), 1)
+        self.assertIn("UPDATE wrapper_lookup_info SET value=UNIX_TIMESTAMP() WHERE name='loaded_at'", ran[0])
+
+        # A mod's client files aren't read, so they don't count.
+        self.write("mods/eden/client/data/sprite.spr", "x")
+        self.assertEqual(len(self.load_lookup(stored=inputs)[0]), 1)
+
+        changes = (
+            ("conf/user/battle_conf.txt", "base_exp_rate: 200\n"),
+            ("mods/eden/db/item_db.yml", HEADER),
+            ("mods/eden/npc/spawns.txt", "// spawns\n"),
+            ("db/import/item_db.yml", HEADER + "Body:\n"),
+            ("npc/custom/healer.txt", "// changed\n"),
+        )
+        for rel, text in changes:
+            self.write(rel, text)
+            ran, new = self.load_lookup(stored=inputs)
+            self.assertNotEqual(new, inputs, rel)
+            self.assertTrue(ran[0].startswith("lookup_db.py"), rel)
+            inputs = new
+
+        # The other mode, and a reset database, load.
+        self.assertTrue(self.load_lookup(stored=inputs, PRERE="no")[0][0].startswith("lookup_db.py"))
+        self.assertTrue(self.load_lookup(stored=None)[0][0].startswith("lookup_db.py"))
+
     def test_unknown_command(self):
         result = self.run_entrypoint("serve", code=64)
         self.assertIn("usage:", result.stderr)

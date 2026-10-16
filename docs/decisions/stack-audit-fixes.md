@@ -63,3 +63,15 @@ Audit stack item 13. The Dockerfile runs one `make` job per 2 GB of `MemAvailabl
 
 - The `MAKE_JOBS` build arg (and `.env` setting, through `compose.yaml`) overrides it. Empty picks by memory.
 - Layer order is unchanged. Changing the Dockerfile changes the build files' hash, so existing installs download or rebuild the image once.
+
+## Item and monster lookup and rate events: second audit round
+
+Release fix list items 4, 5, 6, 7 and 13. The details are in [item-monster-lookup.md](item-monster-lookup.md) and [rate-events.md](rate-events.md).
+
+- Commented-out `//` spawn lines are no longer stored as spawns (maps like "//gefenia01" on the Monsters pages, monsters that never spawn listed as spawning).
+- The lookup tables are loaded with `--default-character-set=utf8mb4`, so names that aren't ASCII aren't garbled. Only that load: the schema and upgrade imports are left as they were.
+- A mod's partial `Modes`, `RaceGroups` or `Locations` changes those keys only, as rAthena does, so an MVP made aggressive stays an MVP on the pages. `Ai` resets `Modes`; `Jobs` is still replaced whole.
+- The rate events script keeps the current rates when its query fails.
+- The lookup load is skipped when a hash of everything it can read matches the one stored with the tables, and runs under `nice` otherwise. When in doubt it loads.
+- `mod_files()`, unused since the lookup load replaced the item names load, is gone.
+

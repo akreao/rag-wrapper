@@ -16,9 +16,10 @@ the portal keeps answering from the old ones until the new ones are whole:
   wrapper_mobs         one row per monster
   wrapper_mob_drops    a monster's drops, with the rate on this server
   wrapper_mob_spawns   where a monster spawns, one row per spawn line
-  wrapper_lookup_info  when the tables were filled, and the server's rates
+  wrapper_lookup_info  when the tables were filled, the server's rates,
+                       and the fingerprint of the inputs, if given
 
-Usage: lookup_db.py pre-re|re   (run from the rAthena folder)
+Usage: lookup_db.py pre-re|re [inputs]   (run from the rAthena folder)
 
 Problems are printed to stderr; the tables are written with what loaded.
 """
@@ -130,10 +131,17 @@ def source(path):
     return ""
 
 
+# Fields rAthena changes key by key on a partial update (mob.cpp and
+# itemdb.cpp set or clear each one named), rather than replacing them.
+MERGED = ("Modes", "RaceGroups", "Locations", "Classes")
+
+
 def load_entries(start, mode, key="Id"):
     """Entries by key, with later files' fields replacing earlier ones, as
     rAthena applies an import entry with a known key as a partial update.
-    Drops and MvpDrops are combined as rAthena does (see merge_drops)."""
+    Drops and MvpDrops are combined as rAthena does (see merge_drops), and
+    the MERGED maps key by key; a monster's Ai resets its Modes first, as
+    it does in rAthena (Jobs is replaced whole: rAthena resets it too)."""
     entries = {}
     for path, doc in yaml_files(start, mode):
         if doc is None:
@@ -146,9 +154,13 @@ def load_entries(start, mode, key="Id"):
             old = entries.get(k)
             if old is None:
                 old = entries[k] = {"_source": source(path)}
+            if "Ai" in entry:
+                old.pop("Modes", None)
             for field, value in entry.items():
                 if field in ("Drops", "MvpDrops"):
                     old.setdefault("_" + field, []).append(value)
+                elif field in MERGED and isinstance(value, dict) and isinstance(old.get(field), dict):
+                    old[field] = {**old[field], **value}
                 else:
                     old[field] = value
     return entries
@@ -323,7 +335,8 @@ def spawns(path, mobs_by_aegis, count_rate):
     except OSError:
         return
     for line in src.splitlines():
-        if "monster\t" not in line.lower():
+        # Not a spawn line, or one commented out (rAthena's files have many).
+        if "monster\t" not in line.lower() or line.lstrip().startswith("//"):
             continue
         w = line.split("\t")
         if len(w) < 4 or w[1].strip().lower() not in ("monster", "boss_monster"):
@@ -492,9 +505,11 @@ COLUMNS = {
 }
 
 
-def collect(mode):
+def collect(mode, inputs=""):
     """Every table's rows, by table name, read from the rAthena folder
-    that is the current directory."""
+    that is the current directory. inputs is entrypoint.sh's fingerprint
+    of the files and settings read, kept so a start with the same ones
+    can skip the load."""
     items = load_entries("db/item_db.yml", mode)
     items = {k: v for k, v in items.items() if text(v.get("AegisName")) and text(v.get("Name"))}
     items_by_aegis = {text(v["AegisName"]).lower(): k for k, v in items.items()}
@@ -564,6 +579,8 @@ def collect(mode):
                                s["amount"], s["delay1"], s["delay2"], s["boss"], path))
 
     info = {"loaded_at": str(int(time.time())), "mode": mode}
+    if inputs:
+        info["inputs"] = inputs
     for key in ("base_exp_rate", "job_exp_rate", "item_rate_common", "item_rate_heal", "item_rate_use",
                 "item_rate_equip", "item_rate_card", "item_rate_mvp"):
         info[key] = str(rates.get(key, 100))
@@ -593,10 +610,10 @@ def write_sql(out, tables):
 
 
 def main(argv):
-    if len(argv) != 2 or argv[1] not in ("pre-re", "re"):
-        print("usage: lookup_db.py pre-re|re", file=sys.stderr)
+    if len(argv) not in (2, 3) or argv[1] not in ("pre-re", "re"):
+        print("usage: lookup_db.py pre-re|re [inputs]", file=sys.stderr)
         return 64
-    tables = collect(argv[1])
+    tables = collect(argv[1], argv[2] if len(argv) == 3 else "")
     write_sql(sys.stdout, tables)
     print(f"Lookup tables: {len(tables['wrapper_items'])} items, {len(tables['wrapper_mobs'])} monsters, "
           f"{len(tables['wrapper_mob_drops'])} drops, {len(tables['wrapper_mob_spawns'])} spawns", file=sys.stderr)

@@ -13,3 +13,4 @@ Roadmap feature 28: pick EXP and drop rates and a time window in the desktop app
 - **An optional News post** (on by default) goes on top of the News page, dated like the News screen's own posts.
 - **Events stack on rAthena's Floating Rates NPC** (Steven, 2026-10-16): with that custom NPC on, an event multiplies whatever rates it last set, so double EXP over a floating 130% gives 260%. The script treats a rate another script changed as the server's own, so after Floating Rates' hourly change the event applies on top within 30 seconds.
 - **Restart warnings (feature 25) are separate**: that feature's announcements don't depend on this one.
+- **A failed read changes nothing** (stack audit, 2026-10-16). When `query_sql` fails (it returns -1, the database restarting, say), the check stops there and tries again 30 seconds later. Before, it read as "no event": players were told the event ended, the rates went back, and it came back silently when the database answered.
