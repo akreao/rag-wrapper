@@ -113,6 +113,7 @@ class EntrypointTest(unittest.TestCase):
             [
                 "start_point: iz_int,18,26",
                 "start_point_pre: new_1-1,53,111",
+                "char_del_delay: 0",
                 "import: conf/user/char_conf.txt",
                 "pincode_enabled: no",
                 "userid: wrapper_inter",
