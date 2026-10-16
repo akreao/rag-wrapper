@@ -11,6 +11,7 @@ mod live;
 mod luamerge;
 mod menu;
 mod mods;
+mod modzip;
 mod net;
 mod news;
 mod settings;
@@ -929,6 +930,21 @@ fn new_item_mod(app: State<App>, name: String) -> Result<(), String> {
     host::open(root.as_os_str())
 }
 
+/// Installs a mod from a zip file the Mods screen sends as the request's
+/// body, with its file name in the `File-Name` header. It's switched off
+/// until the Mods screen switches it on.
+#[tauri::command]
+async fn install_mod_zip(app: State<'_, App>, request: tauri::ipc::Request<'_>) -> Result<modzip::Installed, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("The zip didn't arrive.".into());
+    };
+    let name = request.headers().get("File-Name").and_then(|v| v.to_str().ok()).map(modzip::percent_decode).unwrap_or_default();
+    let (dir, bytes) = (app.mods_dir(), bytes.clone());
+    tauri::async_runtime::spawn_blocking(move || modzip::install(&dir, &name, &bytes))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Opens the mods folder in the file manager, to add mods by copying folders in.
 #[tauri::command]
 fn open_mods(app: State<App>) -> Result<(), String> {
@@ -1045,6 +1061,7 @@ pub fn run() {
             move_mod,
             open_mods,
             new_item_mod,
+            install_mod_zip,
             follow_logs
         ])
         .on_window_event(|window, event| {

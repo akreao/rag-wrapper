@@ -1045,9 +1045,16 @@ $("publish").addEventListener("click", async () => {
 
 // ---- Mods: server-side scripts and database files, applied on restart ----
 
+// Any new action on the screen clears the last install's message too.
 function modsError(text) {
   $("mods-error").textContent = text || "";
   $("mods-error").hidden = !text;
+  modsInstalled(null);
+}
+
+function modsInstalled(text) {
+  $("mods-installed").textContent = text || "";
+  $("mods-installed").hidden = !text;
 }
 
 function modItem(m) {
@@ -1296,6 +1303,32 @@ $("open-mods").addEventListener("click", async () => {
   } catch (err) {
     modsError(`Couldn't open the folder: ${err}`);
   }
+});
+
+$("install-mod-zip").addEventListener("click", () => {
+  $("mod-zip-file").value = "";
+  $("mod-zip-file").click();
+});
+
+// Unpacked by the app into a new mod folder, switched off.
+$("mod-zip-file").addEventListener("change", async () => {
+  const file = $("mod-zip-file").files[0];
+  if (!file) return;
+  modsError(null);
+  const button = $("install-mod-zip");
+  button.disabled = true;
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const done = await invoke("install_mod_zip", bytes, { headers: { "File-Name": encodeURIComponent(file.name) } });
+    const lines = [`Installed ${done.name} (${done.files} file${done.files === 1 ? "" : "s"}). It's off: switch it on below.`];
+    if (done.skipped.length) lines.push("Left out:", ...done.skipped);
+    modsInstalled(lines.join("\n"));
+  } catch (err) {
+    modsError(String(err));
+  } finally {
+    button.disabled = false;
+  }
+  await refreshMods();
 });
 
 $("new-item-mod").addEventListener("submit", async (e) => {

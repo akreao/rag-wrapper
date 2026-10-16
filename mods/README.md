@@ -17,6 +17,8 @@ mods/
     db/pre-re/mob_db.yml
 ```
 
+The Mods screen's **Install from zip…** button unpacks a mod's zip into a new folder here, switched off. The zip holds these folders at its top, or inside one folder named for the mod.
+
 - **`npc/`**: every `.txt` file in it (subfolders too) is loaded as an NPC script, in path order, after rAthena's own scripts. `@reloadscript` keeps them. An NPC doesn't replace one of rAthena's with the same name: both load, and yours is renamed with a `Duplicate unique name` warning. To replace one, give yours its own unique name and unload the original when the scripts load:
 
   ```
