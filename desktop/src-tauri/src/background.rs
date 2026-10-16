@@ -52,7 +52,11 @@ pub fn tray(app: &tauri::App) -> tauri::Result<()> {
             "start" | "stop" => {
                 let _ = handle.emit("tray-task", event.id().as_ref());
             }
-            "quit" => crate::quit(handle),
+            // The window runs Stop first, so players are warned.
+            "quit" => {
+                crate::show_main(handle);
+                let _ = handle.emit("tray-quit", ());
+            }
             _ => {}
         });
     if let Some(icon) = app.default_window_icon() {

@@ -21,6 +21,7 @@
       <button id="start" class="primary">Start server</button>
       <button id="stop">Stop</button>
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
+      <button id="skip-wait" hidden title="Tell players it's happening now and go ahead">Go ahead now</button>
       <button id="cancel" hidden>Cancel</button>
       <button id="quit" title="Stop the server and close rag-wrapper">Quit</button>
     </div>
@@ -247,6 +248,16 @@
         <tbody></tbody>
       </table>
       <p id="no-players" class="hint">The server is off.</p>
+    </section>
+    <section class="card">
+      <h2>Message everyone</h2>
+      <div class="row">
+        <input id="announce-text" maxlength="200" placeholder="such as: Double EXP starts at 8!" aria-label="Message">
+        <button id="announce-send">Send</button>
+      </div>
+      <p id="announce-error" class="error" hidden></p>
+      <p id="announce-sent" class="notice" hidden></p>
+      <p class="hint">Shows in yellow in every player's chat window. Up to 200 plain letters, digits and punctuation. Restart, Stop and the other changes that restart the game servers also warn players 5 minutes ahead, and again at 1 minute, unless nobody's online.</p>
     </section>
     <section class="card">
       <div class="online-head">

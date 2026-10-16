@@ -147,6 +147,21 @@ CONF
 	} > conf/import/map_conf.txt
 }
 
+# The stack's own scripts in npc/wrapper/ (docker/rathena/npc/ in
+# rag-wrapper), such as the desktop app's in-game announcements, load
+# after rAthena's own, before the custom NPCs and mods.
+apply_wrapper_npcs() {
+	if ! grep -qx 'import: npc/wrapper.conf' npc/scripts_custom.conf; then
+		printf '\nimport: npc/wrapper.conf\n' >> npc/scripts_custom.conf
+	fi
+	: > npc/wrapper.conf
+	for path in npc/wrapper/*.txt; do
+		if [ -f "${path}" ]; then
+			echo "npc: ${path}" >> npc/wrapper.conf
+		fi
+	done
+}
+
 # rAthena ships custom NPCs (npc/custom/) that npc/scripts_custom.conf
 # lists switched off. conf/user/custom_npcs.txt, which the desktop app's
 # Mods screen writes, names the ones to load, one script per line. A line
@@ -563,6 +578,17 @@ init_db() {
 	init_char_db
 	apply_upgrades char_cmd
 
+	# The desktop app's in-game announcements, which the image's
+	# npc/wrapper/announcements.txt shows and marks shown. A month of
+	# them is kept.
+	char_cmd -e "CREATE TABLE IF NOT EXISTS wrapper_announcements (
+		id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		message varchar(255) NOT NULL,
+		created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		shown_at datetime NULL,
+		skipped tinyint(1) NOT NULL DEFAULT 0);
+		DELETE FROM wrapper_announcements WHERE created_at < NOW() - INTERVAL 30 DAY"
+
 	# Account 1 is the server-to-server login; replace the stock s1/p1.
 	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass=MD5('${INTER_PASSWORD}') WHERE account_id=1"
 
@@ -579,6 +605,7 @@ init_db() {
 }
 
 write_imports
+apply_wrapper_npcs
 apply_custom_npcs
 apply_mods
 

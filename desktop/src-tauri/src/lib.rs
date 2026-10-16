@@ -1,3 +1,4 @@
+mod announce;
 mod background;
 mod backup;
 mod battleconf;
@@ -519,6 +520,8 @@ struct TaskEvent {
 
 /// One step of a task, run in order until one fails.
 enum Step {
+    /// Warns players in game and waits, before a restart or stop.
+    Warn(announce::Going),
     Compose(std::process::Command),
     Backup(backup::Reason),
     /// A backup if there's none from the last day; never fails the task.
@@ -591,13 +594,19 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             // `up` builds any that couldn't be downloaded, from the current build files.
             let missing = wanted.iter().filter(|i| !images::exists(&i.local)).cloned().collect();
             let fetch = Step::FetchMissing(wanted);
+            let mut steps = Vec::new();
+            // Everything but a start or a portal move restarts the map
+            // server, which drops everyone in game.
+            if !["start", "portal"].contains(&kind.as_str()) {
+                steps.push(Step::Warn(announce::Going::Restart));
+            }
             // A mod's database files can change items or monsters players
             // already have, so the database is backed up before they load.
-            if mods::new_databases(&app.mods_dir()).is_empty() {
-                vec![fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]
-            } else {
-                vec![Step::Backup(backup::Reason::Mods), fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]
+            if !mods::new_databases(&app.mods_dir()).is_empty() {
+                steps.push(Step::Backup(backup::Reason::Mods));
             }
+            steps.extend([fetch, Step::Ports, Step::Compose(cmd), Step::Record(missing)]);
+            steps
         }
         "build" => {
             let env = app.env().ok_or("Finish setup first.")?;
@@ -626,14 +635,15 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         }
         "stop" => {
             cmd.arg("down");
-            vec![Step::Daily, Step::Compose(cmd)]
+            vec![Step::Warn(announce::Going::Stop), Step::Daily, Step::Compose(cmd)]
         }
         "daily-backup" => vec![Step::Daily],
         "backup" | "restore" | "test-restore" => {
             app.env().ok_or("Finish setup first.")?;
             match kind.as_str() {
                 "backup" => vec![Step::Backup(backup::Reason::Manual)],
-                "restore" => vec![Step::Restore(file.ok_or("Pick a backup to restore.")?)],
+                // Restoring stops the game servers while it loads.
+                "restore" => vec![Step::Warn(announce::Going::Restart), Step::Restore(file.ok_or("Pick a backup to restore.")?)],
                 _ => vec![Step::TestRestore(file.ok_or("Pick a backup to test.")?)],
             }
         }
@@ -644,6 +654,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         kind: kind.clone(),
         pid: None,
         cancelled: false,
+        skip_wait: false,
     });
     drop(slot);
     let _ = handle.emit(
@@ -661,6 +672,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         let result = steps.into_iter().try_for_each(|step| {
             ctx.check_cancelled()?;
             match step {
+                Step::Warn(going) => announce::warn(&ctx, going),
                 Step::Compose(cmd) => ctx.run(cmd),
                 Step::Images(wanted, build) => images::fetch_or_build(&ctx, &wanted, build),
                 Step::FetchMissing(wanted) => images::fetch_missing(&ctx, &wanted),
@@ -830,6 +842,28 @@ fn cancel_task(app: State<App>) {
     if let Some(running) = app.task.lock().unwrap().as_mut() {
         running.cancel();
     }
+}
+
+/// Ends the wait before a restart or stop early: players are told it's
+/// happening now.
+#[tauri::command]
+fn skip_wait(app: State<App>) {
+    if let Some(running) = app.task.lock().unwrap().as_mut() {
+        running.skip_wait = true;
+    }
+}
+
+/// Shows a message of the host's own to everyone in game, once the map
+/// server has shown it.
+#[tauri::command]
+async fn send_announcement(handle: AppHandle, message: String) -> Result<(), String> {
+    off_main(handle, move |_, app| {
+        if !app.env_path().exists() {
+            return Err("Finish setup first.".to_owned());
+        }
+        announce::send(&app.dir, &message)
+    })
+    .await?
 }
 
 /// The backups, newest first.
@@ -1083,6 +1117,8 @@ pub fn run() {
             player_history,
             run_task,
             cancel_task,
+            skip_wait,
+            send_announcement,
             backups,
             open_backups,
             client_patch,
@@ -1239,6 +1275,8 @@ fn stop_and_exit(handle: AppHandle) {
     }
     if app.env_path().exists() {
         backup::daily(&app.ctx(&handle));
+        // No time for the usual warning, but players learn why they're dropped.
+        announce::now(&app.dir, announce::Going::Stop);
         let mut cmd = stack::compose(&app.dir);
         cmd.arg("down");
         let lines = handle.clone();

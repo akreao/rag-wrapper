@@ -354,7 +354,15 @@ class EntrypointTest(unittest.TestCase):
         self.assertIn("Custom NPCs on: npc/custom/warper.txt npc/custom/healer.txt\n", result.stdout)
         self.assertEqual(self.read("npc/custom_npcs.conf").splitlines(), ["npc: npc/custom/warper.txt", "npc: npc/custom/healer.txt"])
         imports = [line for line in self.read("npc/scripts_custom.conf").splitlines() if line.startswith("import:")]
-        self.assertEqual(imports, ["import: npc/custom_npcs.conf", "import: npc/mods.conf"])
+        self.assertEqual(imports, ["import: npc/wrapper.conf", "import: npc/custom_npcs.conf", "import: npc/mods.conf"])
+
+    def test_stack_scripts_load_before_the_custom_npcs(self):
+        self.write("npc/wrapper/announcements.txt", "// announcements\n")
+        self.write("conf/user/custom_npcs.txt", "npc/custom/warper.txt\n")
+        self.run_entrypoint()
+        self.assertEqual(self.read("npc/wrapper.conf"), "npc: npc/wrapper/announcements.txt\n")
+        imports = [line for line in self.read("npc/scripts_custom.conf").splitlines() if line.startswith("import:")]
+        self.assertEqual(imports, ["import: npc/wrapper.conf", "import: npc/custom_npcs.conf", "import: npc/mods.conf"])
 
     def test_custom_npcs_for_one_mode(self):
         self.write("conf/user/custom_npcs.txt", "re: npc/custom/official/GeffenMagicTournament.txt\npre-re: npc/custom/healer.txt\n")
