@@ -72,6 +72,7 @@ const (
 	esReadOnly    = 0x0800
 	esAutoVScroll = 0x0040
 	bsDefPush     = 0x0001
+	bnClicked     = 0
 	ssNoPrefix    = 0x0080
 	ssEndEllipsis = 0x4000
 
@@ -145,6 +146,10 @@ type rect struct{ Left, Top, Right, Bottom int32 }
 // shared is what the patching goroutine tells the window.
 type shared struct {
 	sync.Mutex
+	view
+}
+
+type view struct {
 	title    string
 	news     string
 	status   string
@@ -214,7 +219,7 @@ func run() int {
 	}
 
 	w := &window{dir: dir, exe: exe, cfg: cfg, updated: updated, controls: map[int]windows.HWND{}, shown: map[windows.HWND]string{},
-		state: &shared{title: "Patcher", status: "Connecting to " + cfg.Portal + "..."}}
+		state: &shared{view: view{title: "Patcher", status: "Connecting to " + cfg.Portal + "..."}}}
 	theWindow = w
 	if err := w.create(); err != nil {
 		messageBox(0, "Patcher", err.Error(), mbIconErr)
@@ -386,11 +391,14 @@ func (w *window) control(class, text string, style, exStyle uintptr, x, y, cx, c
 	return windows.HWND(h)
 }
 
-// refresh copies the shared state into the controls.
+// refresh copies the shared state into the controls. It works on a copy,
+// unlocked: setting a control's text can send the window a WM_COMMAND
+// before it returns (the news box's EN_VSCROLL when long news gets a
+// scroll bar), and command takes the lock too.
 func (w *window) refresh() {
-	s := w.state
-	s.Lock()
-	defer s.Unlock()
+	w.state.Lock()
+	s := w.state.view
+	w.state.Unlock()
 	if s.quit {
 		pDestroyWindow.Call(uintptr(w.hwnd))
 		return
@@ -417,7 +425,10 @@ func wndProc(hwnd, message, wParam, lParam uintptr) uintptr {
 		w.refresh()
 		return 0
 	case wmCommand:
-		w.command(int(wParam & 0xffff))
+		// Only clicks: the news box sends notifications too.
+		if wParam>>16 == bnClicked {
+			w.command(int(wParam & 0xffff))
+		}
 		return 0
 	case wmClose:
 		pDestroyWindow.Call(hwnd)
