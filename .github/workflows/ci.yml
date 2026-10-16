@@ -48,6 +48,8 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
           python3 -m unittest docker/rathena/test_merge_mods.py
+      - name: lookup_db.py tests
+        run: python3 -m unittest docker/rathena/test_lookup_db.py
       - name: entrypoint.sh tests
         run: python3 -m unittest docker/rathena/test_entrypoint.py
 

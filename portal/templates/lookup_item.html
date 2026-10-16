@@ -1,0 +1,51 @@
+{{define "content"}}{{with .Data}}{{with .Item}}<h1>{{.Name}}{{if .Slots}} [{{.Slots}}]{{end}}</h1>
+<p><a href="/items">All items</a></p>
+<div class="card wide">
+<dl class="facts">
+  <dt>Number</dt><dd>{{.ID}} <small class="note">{{.Aegis}}</small></dd>
+  <dt>Type</dt><dd>{{.TypeText}}</dd>
+  {{with .Custom}}<dt>Added by</dt><dd>{{.}}</dd>{{end}}
+  <dt>Weight</dt><dd>{{.WeightText}}</dd>
+  <dt>Buy / sell</dt><dd>{{thousands .Buy}} / {{thousands .Sell}} zeny</dd>
+  {{if .Attack}}<dt>Attack</dt><dd>{{.Attack}}</dd>{{end}}
+  {{if .MagicAttack}}<dt>Magic attack</dt><dd>{{.MagicAttack}}</dd>{{end}}
+  {{if .Defense}}<dt>Defense</dt><dd>{{.Defense}}</dd>{{end}}
+  {{if .Range}}<dt>Range</dt><dd>{{.Range}}</dd>{{end}}
+  {{if .WeaponLevel}}<dt>Weapon level</dt><dd>{{.WeaponLevel}}</dd>{{end}}
+  {{if .ArmorLevel}}<dt>Armor level</dt><dd>{{.ArmorLevel}}</dd>{{end}}
+  {{if .Equipment}}
+  <dt>Required level</dt><dd>{{if .EquipLevelMin}}{{.EquipLevelMin}}{{else}}Any{{end}}{{if .EquipLevelMax}} to {{.EquipLevelMax}}{{end}}</dd>
+  <dt>Refineable</dt><dd>{{if .Refineable}}Yes{{else}}No{{end}}</dd>
+  {{if ne .Gender "Both"}}<dt>Gender</dt><dd>{{.Gender}}</dd>{{end}}
+  <dt>Jobs</dt><dd>{{.Jobs}}</dd>
+  {{end}}
+  {{with .Locations}}<dt>{{if eq $.Data.Item.Type "Card"}}Goes in{{else}}Worn on{{end}}</dt><dd>{{.}}</dd>{{end}}
+</dl>
+</div>
+{{if or .Script .EquipScript .UnEquipScript}}<section>
+<h2>Effect</h2>
+<p class="note">The server's script for this item. The in-game description comes from the game client.</p>
+{{with .Script}}<pre class="script">{{.}}</pre>{{end}}
+{{with .EquipScript}}<p>When equipped:</p><pre class="script">{{.}}</pre>{{end}}
+{{with .UnEquipScript}}<p>When taken off:</p><pre class="script">{{.}}</pre>{{end}}
+</section>{{end}}
+{{end}}
+<section>
+<h2>Dropped by</h2>
+{{with .DroppedBy}}
+<table>
+  <thead><tr><th>Monster</th><th>Level</th><th>Chance</th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td>{{template "mobLink" .}} <small class="note">#{{.MobID}}</small></td>
+    <td>{{.MobLevel}}</td>
+    <td>{{.Chance}}{{if .MVP}} <span class="tag bad">MVP prize</span>{{end}}{{if .StealProtected}} <span class="tag">Can't be stolen</span>{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p>No monster drops this item.</p>
+{{end}}
+</section>
+{{template "lookupNote" .}}
+{{end}}{{end}}

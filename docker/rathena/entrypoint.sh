@@ -439,49 +439,25 @@ check_not_newer() {
 	fi
 }
 
-# The portal shows item names (on its admin inventory page) from this
-# table. It is refilled on every start from the item database this image
-# was built with, pre-renewal or renewal, plus db/import/item_db.yml and the
-# enabled mods' item_db.yml, so it follows rAthena updates and custom
-# items. Assumes rAthena's own YAML
-# layout: "  - Id: 501" with "    Name: Red Potion" under it.
-load_item_names() {
+# The portal's item and monster pages (and the item names on its admin
+# pages) read tables lookup_db.py fills from the item and monster
+# databases, drop rate settings and spawns this map server loads. It runs
+# beside the map server each time the map server starts, so mods and
+# settings show once a restart has loaded them, and the portal keeps the
+# previous tables until the new ones are complete. Only the portal uses
+# them, so a failure here leaves the map server running.
+load_lookup() {
 	mode=re
 	if [ "${PRERE:-yes}" = "yes" ]; then
 		mode=pre-re
 	fi
-	# Only the portal uses these names, so a failure here doesn't stop the
-	# servers from starting.
-	if ! {
-		echo "CREATE TABLE IF NOT EXISTS wrapper_item_names (
-			id int unsigned NOT NULL PRIMARY KEY,
-			name varchar(100) NOT NULL);"
-		echo "START TRANSACTION; DELETE FROM wrapper_item_names;"
-		# Later files win, so db/import and then the mods come last.
-		{
-			cat "db/${mode}"/item_db_*.yml db/import/item_db.yml
-			mod_files item_db.yml | while IFS= read -r path; do cat "${path}"; done
-		} 2>/dev/null | awk '
-			{ sub(/\r$/, "") }
-			/^  - Id:/ { id = $3 + 0; next }
-			/^    Name:/ && id > 0 {
-				name = substr($0, index($0, ":") + 1)
-				sub(/^ +/, "", name)
-				if (name ~ /^"/) { name = substr(name, 2); sub(/".*$/, "", name) }
-				else { sub(/[ \t]+#.*$/, "", name); sub(/ +$/, "", name) }
-				gsub(/\\/, "\\\\", name); gsub(/\047/, "\047\047", name)
-				if (n % 500 == 0) printf "%sREPLACE INTO wrapper_item_names VALUES ", (n ? ";\n" : "")
-				else printf ","
-				printf "(%d,\047%s\047)", id, name
-				n++; id = 0
-			}
-			END { if (n) print ";" }'
-		echo "COMMIT;"
-	} | char_cmd; then
-		echo "Couldn't load item names; the portal will show item numbers" >&2
-		return 0
+	sql=$(mktemp)
+	if lookup_db.py "${mode}" > "${sql}" && char_cmd < "${sql}"; then
+		:
+	else
+		echo "[Warning]: couldn't fill the portal's item and monster tables" >&2
 	fi
-	echo "Item names loaded: $(char_cmd -N -e "SELECT COUNT(*) FROM wrapper_item_names")"
+	rm -f "${sql}"
 }
 
 # The tables the login server uses. They stay in the accounts database;
@@ -574,7 +550,6 @@ init_db() {
 			echo "Created admin account ${ADMIN_USER}"
 		fi
 	fi
-	load_item_names
 	echo "Database ready"
 }
 
@@ -586,7 +561,10 @@ case "${1:-}" in
 	init)  init_db ;;
 	login) exec ./login-server ;;
 	char)  exec ./char-server ;;
-	map)   exec ./map-server ;;
+	map)
+		load_lookup &
+		exec ./map-server
+		;;
 	web)   exec ./web-server ;;
 	config) ;;
 	*)

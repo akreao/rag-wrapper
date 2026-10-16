@@ -26,7 +26,7 @@ label { display: block; margin-bottom: 12px; font-weight: 500; }
 label small, .card small { display: block; color: var(--muted); font-weight: 400; }
 input, select { display: block; width: 100%; margin-top: 4px; padding: 8px; font: inherit; color: var(--fg);
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
-input[type=radio] { display: inline; width: auto; margin: 0 6px 0 0; }
+input[type=radio], input[type=checkbox] { display: inline; width: auto; margin: 0 6px 0 0; }
 fieldset { border: 0; padding: 0; margin: 0 0 12px; }
 legend { font-weight: 500; margin-bottom: 4px; }
 label.choice { display: inline-block; margin-right: 16px; font-weight: 400; }
@@ -34,7 +34,8 @@ button { font: inherit; padding: 8px 16px; border: 0; border-radius: 6px; backgr
 button.danger { background: var(--bad-fg); }
 button.link { background: none; color: var(--accent); padding: 0; text-decoration: underline; }
 form.inline { display: inline; }
-.search { display: flex; gap: 8px; margin-bottom: 16px; max-width: 480px; }
+.search { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; max-width: 480px; }
+.search input[name=q] { flex: 1 1 180px; }
 .search input { margin: 0; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; display: block; overflow-x: auto; }
 th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -63,3 +64,7 @@ a.button { display: inline-block; padding: 8px 16px; border-radius: 6px; backgro
 .news h1 { margin-top: 0; }
 .news h2 { margin-top: 24px; }
 .news img { max-width: 100%; }
+pre.script { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: .9rem; }
+.search label.choice { display: flex; align-items: center; margin: 0; white-space: nowrap; }
+.search select { margin: 0; width: auto; }
+.grid.stats { margin-bottom: 24px; }

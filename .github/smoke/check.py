@@ -218,6 +218,22 @@ def main():
         fail("the map server reported problems in the mod:\n" + "\n".join(problems))
     print("smoke-test mod loaded")
 
+    step("portal item and monster lookup")
+    # The map server's container fills the tables beside the map server.
+    def lookup(path):
+        return urllib.request.urlopen(f"{PORTAL}{path}", timeout=10).read().decode()
+    page = wait_for("the portal's item search to list the mod's item",
+                    lambda: next((p for p in [lookup("/items?q=smoke")] if "Smoke Test Potion" in p), None))
+    if "Mod: smoke-test" not in page:
+        fail("the portal's item search doesn't say the mod added its item")
+    page = lookup("/monsters/1002")
+    for text in ("Poring", "prt_fild08", 'href="/items/909"'):
+        if text not in page:
+            fail(f"the portal's Poring page has no {text!r}")
+    if "[Warning]: couldn't fill the portal's item and monster tables" in logs("map"):
+        fail("the map server's container couldn't fill the lookup tables")
+    print("item and monster pages show the server's data")
+
     step("rAthena's custom NPCs")
     with open("overrides/custom_npcs.txt", encoding="utf-8") as f:
         wanted = [line.strip() for line in f if line.strip()]
