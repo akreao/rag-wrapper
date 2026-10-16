@@ -130,6 +130,13 @@ main { flex: 1; min-height: 0; padding: 16px 20px; }
 #news-posts textarea { width: 100%; }
 #news-intro-box summary { cursor: pointer; color: var(--muted); }
 #news-intro-box textarea { width: 100%; }
+#events-page { overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+#events-page .card { max-width: 760px; width: 100%; }
+#events-page[hidden], #event-error[hidden], #events-error[hidden], #no-events[hidden] { display: none; }
+.event-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.event-fields .percent { display: flex; gap: 6px; align-items: baseline; }
+#events .state { white-space: nowrap; }
+#events button { padding: 3px 10px; font-size: 12px; }
 #live-page { overflow: auto; display: flex; flex-direction: column; gap: 16px; }
 #live-page .card { max-width: 760px; width: 100%; }
 #live-page[hidden] { display: none; }

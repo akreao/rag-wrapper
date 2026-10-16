@@ -617,6 +617,21 @@ init_db() {
 		skipped tinyint(1) NOT NULL DEFAULT 0);
 		DELETE FROM wrapper_announcements WHERE created_at < NOW() - INTERVAL 30 DAY"
 
+	# The desktop app's Events screen writes EXP and drop events here;
+	# npc/wrapper/rate_events.txt applies them and sets started once
+	# announced. Times are Unix seconds, rates percent of the server's own.
+	char_cmd -e "CREATE TABLE IF NOT EXISTS wrapper_rate_events (
+		id int unsigned NOT NULL AUTO_INCREMENT PRIMARY KEY,
+		title varchar(100) NOT NULL,
+		starts_at bigint NOT NULL,
+		ends_at bigint NOT NULL,
+		exp_rate int unsigned NOT NULL DEFAULT 100,
+		drop_rate int unsigned NOT NULL DEFAULT 100,
+		start_text varchar(255) NOT NULL DEFAULT '',
+		end_text varchar(255) NOT NULL DEFAULT '',
+		started tinyint(1) NOT NULL DEFAULT 0,
+		KEY starts_at (starts_at))"
+
 	# Account 1 is the server-to-server login; replace the stock s1/p1.
 	mysql_cmd -e "UPDATE login SET userid='${INTER_USER}', user_pass=MD5('${INTER_PASSWORD}') WHERE account_id=1"
 

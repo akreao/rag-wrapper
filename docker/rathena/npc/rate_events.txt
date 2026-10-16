@@ -1,0 +1,108 @@
+//===== rag-wrapper ==========================================
+//= EXP and drop events, from the desktop app's Events screen.
+//===== Description: =========================================
+//= Every 30 seconds, reads the event that's on now from the
+//= wrapper_rate_events table and sets the exp and drop rates to
+//= its share of the server's own rates, with no restart: rAthena's
+//= setbattleflag reloads the monster database for these flags.
+//= Announces each event in game when it starts and when it ends,
+//= and tells players who log in during one.
+//============================================================
+
+-	script	rag_wrapper_rate_events	-1,{
+OnInit:
+	// Exp flags (kind 0) take the event's exp_rate, drop flags (kind 1)
+	// its drop_rate; each stops at rAthena's own limit for the flag.
+	// $rate_base and $rate_set are indexed like .flag$, so add new flags
+	// at the end.
+	setarray .flag$,
+		"base_exp_rate", "job_exp_rate",
+		"item_rate_common", "item_rate_common_boss", "item_rate_common_mvp",
+		"item_rate_heal", "item_rate_heal_boss", "item_rate_heal_mvp",
+		"item_rate_use", "item_rate_use_boss", "item_rate_use_mvp",
+		"item_rate_equip", "item_rate_equip_boss", "item_rate_equip_mvp",
+		"item_rate_card", "item_rate_card_boss", "item_rate_card_mvp",
+		"item_rate_mvp", "item_rate_treasure";
+	.count = getarraysize(.flag$);
+	for (.@i = 0; .@i < .count; .@i++) {
+		.kind[.@i] = (.@i >= 2);
+		.max[.@i] = .kind[.@i] ? 1000000 : 2147483647;
+	}
+	end;
+
+// Runs on every start-up, after @reloadscript, and when the char server
+// reconnects. @reloadscript keeps the rates this script set (and the
+// permanent $ variables saying what they were); a new start reads the
+// server's own rates from its config.
+OnInterIfInit:
+	initnpctimer;
+	end;
+
+OnInterIfInitOnce:
+	for (.@i = 0; .@i < .count; .@i++) {
+		$rate_base[.@i] = getbattleflag(.flag$[.@i]);
+		$rate_set[.@i] = $rate_base[.@i];
+	}
+	// An event that ended while the server was off isn't announced.
+	$rate_event = 0;
+	callsub L_Check;
+	end;
+
+OnTimer30000:
+	callsub L_Check;
+	initnpctimer;
+	end;
+
+OnPCLoginEvent:
+	if ($rate_event)
+		dispbottom $rate_event_text$;
+	end;
+
+L_Check:
+	// The newest event whose window holds the database's clock now.
+	.@id = 0;
+	.@exp = 100;
+	.@drop = 100;
+	.@text$ = "";
+	.@end$ = "";
+	.@started = 1;
+	query_sql("SELECT id, exp_rate, drop_rate, start_text, end_text, started FROM wrapper_rate_events WHERE starts_at <= UNIX_TIMESTAMP() AND ends_at > UNIX_TIMESTAMP() ORDER BY starts_at DESC, id DESC LIMIT 1", .@id, .@exp, .@drop, .@text$, .@end$, .@started);
+
+	// The event this script last applied ended, or was deleted or
+	// replaced while it was on.
+	if ($rate_event && $rate_event != .@id && $rate_event_end$ != "")
+		announce $rate_event_end$, bc_all;
+	// Announced once, even across restarts.
+	if (.@id && !.@started) {
+		announce .@text$, bc_all;
+		query_sql("UPDATE wrapper_rate_events SET started = 1 WHERE id = " + .@id);
+	}
+	$rate_event = .@id;
+	$rate_event_text$ = .@text$;
+	$rate_event_end$ = .@end$;
+
+	// A flag that isn't what this script last set was changed by someone
+	// else (@reloadbattleconf, say), so it becomes the server's own rate.
+	.@changes = 0;
+	for (.@i = 0; .@i < .count; .@i++) {
+		.@now = getbattleflag(.flag$[.@i]);
+		if (.@now != $rate_set[.@i])
+			$rate_base[.@i] = .@now;
+		.@want = $rate_base[.@i] * (.kind[.@i] ? .@drop : .@exp) / 100;
+		if (.@want > .max[.@i])
+			.@want = .max[.@i];
+		$rate_set[.@i] = .@want;
+		if (.@want != .@now) {
+			.@change[.@changes] = .@i;
+			.@changes++;
+		}
+	}
+	// Only the last flag reloads the monster database, which applies them all.
+	for (.@c = 0; .@c < .@changes; .@c++) {
+		.@i = .@change[.@c];
+		setbattleflag .flag$[.@i], $rate_set[.@i], (.@c == .@changes - 1);
+	}
+	if (.@changes)
+		debugmes "Rate event " + .@id + ": exp " + .@exp + "%, drops " + .@drop + "%";
+	return;
+}

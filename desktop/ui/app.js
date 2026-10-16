@@ -435,6 +435,7 @@ async function refreshOverview() {
   $("nav-patch").hidden = !overview.configured;
   $("nav-mods").hidden = !overview.configured;
   $("nav-news").hidden = !overview.configured;
+  $("nav-events").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
     if ($("setup-ip").value !== "other") {
@@ -742,7 +743,7 @@ $("announce-text").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendAnnouncement();
 });
 
-// ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods and News ----
+// ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods, News and Events ----
 
 let page = "dashboard";
 
@@ -755,12 +756,14 @@ function showPage(next) {
   $("patch-page").hidden = next !== "patch";
   $("mods-page").hidden = next !== "mods";
   $("news-page").hidden = next !== "news";
+  $("events-page").hidden = next !== "events";
   $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
   $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
   $("nav-live").textContent = page === "live" ? "Back to server" : "Dashboard";
   $("nav-patch").textContent = page === "patch" ? "Back to server" : "Client patch";
   $("nav-mods").textContent = page === "mods" ? "Back to server" : "Mods";
   $("nav-news").textContent = page === "news" ? "Back to server" : "News";
+  $("nav-events").textContent = page === "events" ? "Back to server" : "Events";
   renderPlayerNews();
   if (next === "live") {
     refreshHistory(true);
@@ -1824,6 +1827,117 @@ $("news-open").addEventListener("click", () => {
   // The portal's address is known only while it runs.
   if ($("portal").hidden) return newsMessage("Start the server to open the account portal.", false);
   invoke("open_url", { url: `${$("portal-link").dataset.url}news` });
+});
+
+// ---- Events: EXP and drop events, kept in the server's database ----
+
+const eventTime = (t) => new Date(t * 1000).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+// A Date as a datetime-local input's value, in local time.
+function inputTime(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function eventState(e, now) {
+  if (e.ends_at <= now) return "Ended";
+  if (e.starts_at <= now) return "On now";
+  return "Planned";
+}
+
+function showEvents(events) {
+  const now = Date.now() / 1000;
+  const rows = events.map((e) => {
+    const tr = document.createElement("tr");
+    const cell = (text, cls) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (cls) td.className = cls;
+      tr.append(td);
+    };
+    cell(e.title);
+    cell(`${eventTime(e.starts_at)} to ${eventTime(e.ends_at)}`);
+    cell(`EXP ${e.exp_rate}%, drops ${e.drop_rate}%`);
+    cell(eventState(e, now), "state muted");
+    const td = document.createElement("td");
+    const del = document.createElement("button");
+    del.textContent = e.ends_at <= now ? "Remove" : e.starts_at <= now ? "End now" : "Delete";
+    del.title = e.starts_at <= now && e.ends_at > now ? "Rates go back to normal within 30 seconds, with the end announcement" : "";
+    del.addEventListener("click", async () => {
+      del.disabled = true;
+      try {
+        showEvents(await invoke("delete_rate_event", { id: e.id }));
+      } catch (err) {
+        eventsError(String(err));
+        del.disabled = false;
+      }
+    });
+    td.append(del);
+    tr.append(td);
+    return tr;
+  });
+  $("events").querySelector("tbody").replaceChildren(...rows);
+  $("events").hidden = !rows.length;
+  $("no-events").hidden = !!rows.length;
+  eventsError(null);
+}
+
+function eventsError(error) {
+  $("events-error").textContent = error || "";
+  $("events-error").hidden = !error;
+}
+
+async function loadEvents() {
+  try {
+    showEvents(await invoke("rate_events"));
+  } catch (err) {
+    $("events").hidden = true;
+    $("no-events").hidden = true;
+    eventsError(String(err));
+  }
+}
+
+$("nav-events").addEventListener("click", async () => {
+  if (page === "events") return showPage("dashboard");
+  // A fresh form starts this coming Saturday at 10:00 and runs to Sunday night.
+  if (!$("event-start").value) {
+    const start = new Date();
+    start.setDate(start.getDate() + ((6 - start.getDay() + 7) % 7 || 7));
+    start.setHours(10, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    end.setHours(23, 59, 0, 0);
+    $("event-start").value = inputTime(start);
+    $("event-end").value = inputTime(end);
+  }
+  $("event-error").hidden = true;
+  showPage("events");
+  await loadEvents();
+});
+
+$("event-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const seconds = (id) => Math.floor(new Date($(id).value).getTime() / 1000);
+  const event = {
+    title: $("event-title").value,
+    starts_at: seconds("event-start"),
+    ends_at: seconds("event-end"),
+    exp_rate: Number($("event-exp").value),
+    drop_rate: Number($("event-drop").value),
+    post_news: $("event-news").checked,
+  };
+  $("event-error").hidden = true;
+  $("event-add").disabled = true;
+  try {
+    showEvents(await invoke("add_rate_event", { event }));
+    $("event-title").value = "";
+    // The News screen shows the new post the next time it opens, unless
+    // it has unsaved edits of its own.
+  } catch (err) {
+    $("event-error").textContent = String(err);
+    $("event-error").hidden = false;
+  }
+  $("event-add").disabled = false;
 });
 
 // ---- Tasks ----
