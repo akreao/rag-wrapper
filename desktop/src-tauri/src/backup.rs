@@ -82,7 +82,7 @@ pub enum Reason {
     BeforeRestore,
     /// Before the game servers first load a mod's database files.
     Mods,
-    /// On stop or close, when there's no backup from the last day.
+    /// On stop or quit, or while the server runs, when there's no backup from the last day.
     Daily,
 }
 
@@ -236,21 +236,26 @@ fn stop_db(ctx: &Ctx) {
 }
 
 /// Backs up a running database when no backup of any kind was made in
-/// the last 24 hours. Used on stop and close, in place of a schedule.
+/// the last 24 hours. Used on stop and quit, and every hour while the app runs.
 /// A failure is reported but doesn't stop the server from going down.
 pub fn daily(ctx: &Ctx) {
-    if !db_running(&ctx.dir) {
-        return;
-    }
-    let newest = list(&ctx.backups).into_iter().find_map(|b| {
-        chrono::NaiveDateTime::parse_from_str(&b.created, "%Y-%m-%d %H:%M:%S").ok()
-    });
-    if !due(newest, chrono::Local::now().naive_local()) {
+    if !daily_due(&ctx.dir, &ctx.backups) {
         return;
     }
     if let Err(e) = create(ctx, Reason::Daily, None) {
         ctx.line(e);
     }
+}
+
+/// Whether the database runs and there's no backup of any kind from the last 24 hours.
+pub fn daily_due(dir: &Path, backups: &Path) -> bool {
+    if !db_running(dir) {
+        return false;
+    }
+    let newest = list(backups).into_iter().find_map(|b| {
+        chrono::NaiveDateTime::parse_from_str(&b.created, "%Y-%m-%d %H:%M:%S").ok()
+    });
+    due(newest, chrono::Local::now().naive_local())
 }
 
 fn due(newest: Option<chrono::NaiveDateTime>, now: chrono::NaiveDateTime) -> bool {

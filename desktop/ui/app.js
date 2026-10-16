@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "restore" or "test-restore" while one runs
+let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "daily-backup", "restore" or "test-restore" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -494,8 +494,59 @@ $("nav").addEventListener("click", async () => {
   $("game-saved").hidden = true;
   $("game-error").hidden = true;
   await loadGameSettings();
+  await loadBackgroundSettings();
   showPage("settings");
 });
+
+// ---- Running in the background ----
+
+async function loadBackgroundSettings() {
+  const settings = await invoke("background_settings");
+  $("keep-running").checked = settings.keep_running;
+  $("start-at-login").checked = settings.start_at_login;
+  $("background-error").hidden = true;
+}
+
+for (const [box, command] of [
+  ["keep-running", "set_keep_running"],
+  ["start-at-login", "set_start_at_login"],
+]) {
+  $(box).addEventListener("change", async () => {
+    $("background-error").hidden = true;
+    try {
+      await invoke(command, { on: $(box).checked });
+    } catch (err) {
+      $(box).checked = !$(box).checked;
+      $("background-error").textContent = String(err);
+      $("background-error").hidden = false;
+    }
+  });
+}
+
+// A start or stop from the tray, or the start at login, runs while the
+// window may be hidden; it opens the window if it fails.
+let backgroundTask = null;
+
+async function runInBackground(kind) {
+  backgroundTask = kind;
+  if (!(await runTask(kind))) {
+    backgroundTask = null;
+    invoke("show_window");
+  }
+}
+
+listen("tray-task", ({ payload }) => runInBackground(payload));
+
+async function startAtLogin() {
+  if (!(await invoke("launched_at_login"))) return;
+  // Docker may still be starting when the desktop does.
+  for (let i = 0; i < 24 && overview?.configured && overview.docker_error; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await refreshOverview();
+  }
+  if (!overview?.configured || overview.docker_error || task) return invoke("show_window");
+  await runInBackground("start");
+}
 
 $("nav-live").addEventListener("click", () => showPage(page === "live" ? "dashboard" : "live"));
 
@@ -1486,9 +1537,11 @@ async function runTask(kind, file) {
   await showView("activity");
   try {
     await invoke("run_task", { kind, file: file ?? null });
+    return true;
   } catch (err) {
     push(activity, String(err));
     render();
+    return false;
   }
 }
 
@@ -1509,11 +1562,15 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", rebind: "Network change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
+    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", rebind: "Network change", stop: "Stop", "daily-backup": "Daily backup", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);
     if (view === "activity") render();
+    if (payload.kind === backgroundTask) {
+      backgroundTask = null;
+      if (!payload.ok) invoke("show_window");
+    }
     await refreshOverview();
     await refreshServices();
     await refreshBackups();
@@ -1538,17 +1595,21 @@ listen("log-line", ({ payload }) => {
   queueRender();
 });
 
-// Closing the window stops the server first; show its output meanwhile.
+// Quitting stops the server first; show its output meanwhile.
 listen("closing", async () => {
   task = "stop";
   updateButtons();
-  banner("Stopping the server before closing…");
+  banner("Stopping the server before quitting…");
   showPage("dashboard");
   activity.length = 0;
   await showView("activity");
 });
 
-refreshOverview().then(refreshServices).then(refreshBackups).then(refreshLive);
+refreshOverview()
+  .then(refreshServices)
+  .then(refreshBackups)
+  .then(refreshLive)
+  .finally(() => startAtLogin().catch(() => invoke("show_window")));
 setInterval(refreshServices, 3000);
 setInterval(refreshLive, 5000);
 // Clashes between mods show soon after their files change.
