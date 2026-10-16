@@ -15,7 +15,7 @@
 //! `data.integrity` lists each file's CRC32, so the patcher (which has
 //! `check_integrity` on) can reject a damaged download.
 
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use flate2::write::ZlibEncoder;
 use flate2::{Compression, Crc};
@@ -48,18 +48,35 @@ impl<W: Write + Seek> ThorWriter<W> {
     /// Adds a file. `path` is relative, with `\` separators, in the
     /// client's encoding.
     pub fn add(&mut self, path: &[u8], content: &[u8]) -> io::Result<()> {
+        self.add_from(path, content).map(|_| ())
+    }
+
+    /// Adds a file read from `content`, compressed straight into the
+    /// archive, so a large file is never held in memory. Returns its size.
+    pub fn add_from(&mut self, path: &[u8], mut content: impl Read) -> io::Result<u64> {
+        let offset = self.out.stream_position()?;
         let mut crc = Crc::new();
-        crc.update(content);
-        let mut zlib = ZlibEncoder::new(Vec::new(), Compression::default());
-        zlib.write_all(content)?;
-        let compressed = zlib.finish()?;
-        let offset = u32_of(self.out.stream_position()?)?;
-        self.out.write_all(&compressed)?;
+        let mut size = 0u64;
+        let mut zlib = ZlibEncoder::new(&mut self.out, Compression::default());
+        let mut buf = vec![0; 1 << 16];
+        loop {
+            let n = match content.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            };
+            crc.update(&buf[..n]);
+            zlib.write_all(&buf[..n])?;
+            size += n as u64;
+        }
+        zlib.finish()?;
+        let end = self.out.stream_position()?;
         self.entries.push(Entry {
             path: path.to_vec(),
-            file: Some((offset, u32_of(compressed.len())?, u32_of(content.len())?, crc.sum())),
+            file: Some((u32_of(offset)?, u32_of(end - offset)?, u32_of(size)?, crc.sum())),
         });
-        Ok(())
+        Ok(size)
     }
 
     /// Deletes a file from the client folder or GRF.
@@ -213,6 +230,15 @@ mod tests {
         assert_eq!(a.files[&b"rag-wrapper.exe"[..]].as_deref(), Some(&b"MZ..."[..]));
         assert_eq!(a.files[&b"System\\a.lub"[..]].as_deref(), Some(&b""[..]));
         assert_eq!(a.files[&b"old.txt"[..]], None);
+    }
+
+    #[test]
+    fn streams_a_file_larger_than_its_buffer() {
+        let content: Vec<u8> = (0..300_000u32).map(|i| (i * 7 % 251) as u8).collect();
+        let mut w = ThorWriter::new(Cursor::new(Vec::new()), None).unwrap();
+        assert_eq!(w.add_from(b"bgm.mp3", content.as_slice()).unwrap(), 300_000);
+        let a = read::archive(&w.finish().unwrap().into_inner());
+        assert_eq!(a.files[&b"bgm.mp3"[..]].as_deref(), Some(content.as_slice()));
     }
 
     #[test]
