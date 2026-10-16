@@ -100,6 +100,8 @@ struct Overview {
     prere: bool,
     /// The rAthena commit this app version comes with, when the server isn't on it yet.
     server_update: Option<update::ServerUpdate>,
+    /// The rAthena commit the server is built from, and the one Settings can go back to.
+    server_version: Option<update::ServerVersion>,
     /// The game servers run an older image than the one built, and restart onto it when asked.
     restart_pending: bool,
     /// The same for the portal alone, after a Rebuild that changed only the portal.
@@ -145,6 +147,7 @@ fn overview(app: State<App>) -> Overview {
         packetver: get("PACKETVER"),
         prere: get("PRERE") != "no",
         server_update: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(update::pending),
+        server_version: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).map(update::version),
         restart_pending: docker_error.is_none() && stack::runs_old_image(&app.dir, &get("PACKETVER")),
         portal_restart_pending: docker_error.is_none() && stack::portal_runs_old_image(&app.dir),
         rebuild: env
@@ -433,6 +436,8 @@ enum Step {
     TestRestore(String),
     /// Moves `.env` to the update's commit.
     Pin(update::ServerUpdate),
+    /// Moves `.env` back to the previous commit.
+    GoBack(update::Previous),
     /// Pulls the prebuilt images, building any that aren't published with the command.
     Images(Vec<images::Image>, std::process::Command),
     /// Pulls the prebuilt images that aren't here yet, before a start.
@@ -445,7 +450,7 @@ enum Step {
 
 /// Runs `start`, `restart`, `readdress` (after the address changed),
 /// `portal` (after the portal port changed), `stop`,
-/// `build`, `update`, `backup`, or `restore` or `test-restore` (of `file`), streaming its
+/// `build`, `update`, `go-back`, `backup`, or `restore` or `test-restore` (of `file`), streaming its
 /// output as `task-line` events.
 #[tauri::command]
 fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<String>) -> Result<(), String> {
@@ -508,6 +513,15 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             // new version" (or the next Start); players aren't dropped by surprise.
             vec![Step::Backup(backup::Reason::Update), Step::Images(images, cmd), Step::Pin(update)]
         }
+        "go-back" => {
+            // An update the other way: the commit moves once its image is here,
+            // and the restart onto it waits for a click.
+            let env = app.env().ok_or("Finish setup first.")?;
+            let previous = update::previous(&env).ok_or("There's no previous server version to go back to.")?;
+            cmd.env("RATHENA_REPO", &previous.repo).env("RATHENA_COMMIT", &previous.commit);
+            let images = images::wanted(&app.dir, &env, &previous.repo, &previous.commit);
+            vec![Step::Backup(backup::Reason::GoBack), Step::Images(images, cmd), Step::GoBack(previous)]
+        }
         "stop" => {
             cmd.arg("down");
             vec![Step::Daily, Step::Compose(cmd)]
@@ -561,6 +575,11 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 Step::Pin(update) => {
                     let mut env = EnvFile::load(&ctx.dir.join(".env")).map_err(|e| e.to_string())?;
                     update::pin(&mut env, &update);
+                    env.save().map_err(|e| e.to_string())
+                }
+                Step::GoBack(previous) => {
+                    let mut env = EnvFile::load(&ctx.dir.join(".env")).map_err(|e| e.to_string())?;
+                    update::go_back(&mut env, &previous);
                     env.save().map_err(|e| e.to_string())
                 }
             }

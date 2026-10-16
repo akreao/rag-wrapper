@@ -32,3 +32,17 @@ set -a
 . ./.env
 set +a
 python3 .github/smoke/check.py
+
+# After going back to an older server version, a database the newer one
+# upgraded stops db-init before the servers start, and is left as it is.
+root_sql() { docker compose exec -T -e MYSQL_PWD="${DB_ROOT_PASSWORD}" db mariadb --user=root ragnarok -e "$1"; }
+root_sql "INSERT INTO wrapper_sql_upgrades (file) VALUES ('upgrade_99991231.sql')"
+if docker compose run --rm --no-deps db-init > newer.log 2>&1; then
+	cat newer.log
+	echo "db-init ran on a database a newer server version upgraded" >&2
+	exit 1
+fi
+cat newer.log
+grep -q "upgraded by a newer server version" newer.log
+root_sql "DELETE FROM wrapper_sql_upgrades WHERE file='upgrade_99991231.sql'"
+docker compose run --rm --no-deps db-init

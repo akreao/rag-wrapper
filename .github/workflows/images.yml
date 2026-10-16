@@ -36,13 +36,16 @@ env:
 
 jobs:
   rathena:
-    name: rAthena ${{ matrix.packetver }} ${{ matrix.mode }}
-    # The PACKETVER presets on the Settings screen, in both modes.
+    name: rAthena ${{ matrix.packetver }} ${{ matrix.mode }}${{ matrix.pin == 'previous' && ' (previous release)' || '' }}
+    # The PACKETVER presets on the Settings screen, in both modes, for the
+    # commit this release pins and the one the previous release pinned,
+    # which Settings can go back to.
     strategy:
       fail-fast: false
       matrix:
         packetver: ['20250716', '20220406']
         mode: [prere, re]
+        pin: [current, previous]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +53,8 @@ jobs:
         id: tag
         run: |
           repo=$(sed -n 's/^RATHENA_REPO=//p' .env.example)
-          commit=$(sed -n 's/^RATHENA_COMMIT=//p' .env.example)
+          key=${{ matrix.pin == 'previous' && 'RATHENA_COMMIT_PREVIOUS' || 'RATHENA_COMMIT' }}
+          commit=$(sed -n "s/^${key}=//p" .env.example)
           hash=$(cd docker/rathena && find . -type f -not -path '*/.*' -printf '%P\n' | LC_ALL=C sort | xargs -d '\n' sha256sum | sha256sum | cut -c1-12)
           image="${REGISTRY,,}-rathena:${{ matrix.packetver }}-${{ matrix.mode }}-${commit:0:12}-${hash}"
           echo "repo=$repo" >> "$GITHUB_OUTPUT"

@@ -352,6 +352,32 @@ apply_upgrades() {
 	done
 }
 
+# Upgrades a database has recorded that are dated after this image's
+# newest one came from a newer rAthena commit, after which the server went
+# back to this older one. Its code may not work with what they changed, so
+# the servers don't start and the database is left as it is. Older files
+# missing here (upstream renaming one) don't count. Prints the newer files.
+newer_upgrades() {
+	db=$1
+	if [ -z "$(root_cmd -N -e "SELECT 1 FROM information_schema.tables
+		WHERE table_schema='${db}' AND table_name='wrapper_sql_upgrades'")" ]; then
+		return 0
+	fi
+	newest=$(basename "$(ls sql-files/upgrades/upgrade_*.sql | sort | tail -n 1)")
+	root_cmd -N -e "SELECT file FROM \`${db}\`.wrapper_sql_upgrades
+		WHERE file > '${newest}' ORDER BY file"
+}
+
+check_not_newer() {
+	newer="$(newer_upgrades "${DB_NAME}")$(newer_upgrades "${CHAR_DB_NAME}")"
+	if [ -n "${newer}" ]; then
+		echo "The database was upgraded by a newer server version than this one:" >&2
+		echo "${newer}" | sort -u | sed 's/^/  /' >&2
+		echo "This version can't run on it. Go forward to the newer version again, or restore the backup made before the server update." >&2
+		exit 65
+	fi
+}
+
 # The portal shows item names (on its admin inventory page) from this
 # table. It is refilled on every start from the item database this image
 # was built with, pre-renewal or renewal, plus db/import/item_db.yml and the
@@ -468,6 +494,7 @@ init_db() {
 	else
 		echo "Schema already present: skipping import"
 	fi
+	check_not_newer
 	# Recorded before anything moves, so both databases start from it.
 	apply_upgrades mysql_cmd
 
