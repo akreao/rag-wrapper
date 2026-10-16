@@ -365,7 +365,7 @@
   <main id="mods-page" hidden>
     <section class="card">
       <h2>Mods</h2>
-      <p>Server-side custom content: NPC scripts and changes to rAthena's databases. Add a mod by copying its folder into the mods folder, one folder per mod:</p>
+      <p>Server-side custom content: NPC scripts and changes to rAthena's databases. Add a mod by installing its zip file, or by copying its folder into the mods folder, one folder per mod:</p>
       <ul class="hint">
         <li><code>npc/</code>: NPC scripts (<code>.txt</code>), loaded after rAthena's own.</li>
         <li><code>db/</code>: database files named like rAthena's <code>db/import</code> files (<code>item_db.yml</code>, <code>mob_db.yml</code>, ...). Files in <code>db/pre-re/</code> or <code>db/re/</code> only load in that game mode.</li>
@@ -373,6 +373,8 @@
       </ul>
       <p class="hint">The mods that are on load from top to bottom, so when two change the same entry the lower one wins; the arrows change the order.</p>
       <div class="row">
+        <button id="install-mod-zip">Install from zip…</button>
+        <input id="mod-zip-file" type="file" accept=".zip,application/zip" hidden>
         <button id="open-mods">Open mods folder</button>
         <button id="mods-refresh">Check again</button>
       </div>
@@ -396,8 +398,14 @@
         <button id="mods-restart" type="button">Restart game servers</button>
       </p>
       <p id="mods-error" class="error" hidden></p>
+      <p id="mods-installed" class="hint" hidden></p>
+      <p id="mod-replace" class="notice" hidden>
+        <span id="mod-replace-text"></span>
+        <button id="mod-replace-yes" type="button">Replace</button>
+        <button id="mod-replace-no" type="button">Cancel</button>
+      </p>
       <ul id="mods"></ul>
-      <p id="no-mods" class="hint" hidden>No mods yet. Open the mods folder and copy a mod's folder in.</p>
+      <p id="no-mods" class="hint" hidden>No mods yet. Install a mod's zip, or open the mods folder and copy a mod's folder in.</p>
       <p class="hint">Switching a mod on or off, or changing the order, applies the next time the game servers start. A mod switched on loads last.</p>
     </section>
     <section class="card">
