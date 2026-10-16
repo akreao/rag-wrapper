@@ -72,7 +72,7 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 		"rankingLimit": func() int { return rankingLimit },
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "online", "rankings", "news", "error"} {
+	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "online", "rankings", "market", "news", "error"} {
 		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/items.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
@@ -113,6 +113,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /connect", a.page(a.connect))
 	mux.HandleFunc("GET /online", a.page(a.online))
 	mux.HandleFunc("GET /rankings", a.page(a.rankings))
+	mux.HandleFunc("GET /market", a.page(a.market))
 	mux.HandleFunc("GET /news", a.page(a.newsPage))
 	mux.HandleFunc("GET /connect/clientinfo.xml", a.clientInfoFile)
 	mux.HandleFunc("GET /connect/ExternalSettings_kr.lub", a.externalSettingsFile)
