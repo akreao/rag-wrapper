@@ -42,6 +42,8 @@ func main() {
 		log.Fatal(err)
 	}
 	db.SetMaxOpenConns(10)
+	// Keep them all open between bursts rather than reconnecting.
+	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(5 * time.Minute)
 	waitForDB(db)
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -57,16 +59,48 @@ func TestChecks(t *testing.T) {
 
 func TestLimiter(t *testing.T) {
 	l := newLimiter(2, time.Minute)
-	l.add("1.2.3.4")
-	if !l.allowed("1.2.3.4") {
-		t.Fatal("blocked after one hit")
+	if !l.take("1.2.3.4") || !l.take("1.2.3.4") {
+		t.Fatal("blocked under the limit")
 	}
-	l.add("1.2.3.4")
-	if l.allowed("1.2.3.4") {
-		t.Fatal("allowed after two hits")
+	if l.take("1.2.3.4") {
+		t.Fatal("allowed over the limit")
 	}
-	if !l.allowed("5.6.7.8") {
+	if !l.take("5.6.7.8") {
 		t.Fatal("other key blocked")
+	}
+	l.release("1.2.3.4")
+	if !l.take("1.2.3.4") {
+		t.Fatal("release didn't give the attempt back")
+	}
+}
+
+// Parallel attempts mustn't all get in before any is counted.
+func TestLimiterParallel(t *testing.T) {
+	l := newLimiter(10, time.Minute)
+	var got atomic.Int32
+	var wg sync.WaitGroup
+	for range 200 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if l.take("1.2.3.4") {
+				got.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got.Load() != 10 {
+		t.Fatalf("%d attempts got in, want 10", got.Load())
+	}
+}
+
+func TestLimiterPrune(t *testing.T) {
+	l := newLimiter(1, time.Millisecond)
+	l.take("1.2.3.4")
+	time.Sleep(5 * time.Millisecond)
+	l.prune()
+	if len(l.hits) != 0 {
+		t.Fatal(l.hits)
 	}
 }
 
