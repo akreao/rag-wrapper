@@ -17,6 +17,7 @@ const LABELS = {
 let overview = null;
 let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "restore" or "test-restore" while one runs
 let view = "activity"; // or a service name
+let warningLeft = null; // seconds until the restart or stop while players are being warned
 let logGeneration = 0;
 const activity = [];
 let serviceLines = [];
@@ -613,8 +614,47 @@ function updateButtons() {
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task);
+  // Stop and restore can be called off only while players are being warned.
+  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task) && warningLeft == null;
+  $("skip-wait").hidden = warningLeft == null;
+  $("announce-send").disabled = !ready;
 }
+
+// ---- Warning players before a restart or stop, and messages of the host's own ----
+
+listen("warning", ({ payload }) => {
+  warningLeft = payload;
+  if (payload != null) {
+    const m = Math.floor(payload / 60);
+    const s = String(payload % 60).padStart(2, "0");
+    $("skip-wait").textContent = `Go ahead now (${m}:${s} left)`;
+  }
+  updateButtons();
+});
+$("skip-wait").addEventListener("click", () => invoke("skip_wait"));
+
+async function sendAnnouncement() {
+  const text = $("announce-text").value.trim();
+  if (!text) return;
+  $("announce-error").hidden = true;
+  $("announce-sent").hidden = true;
+  $("announce-send").disabled = true;
+  try {
+    await invoke("send_announcement", { message: text });
+    $("announce-sent").textContent = `Sent: "${text}"`;
+    $("announce-sent").hidden = false;
+    $("announce-text").value = "";
+  } catch (e) {
+    $("announce-error").textContent = String(e);
+    $("announce-error").hidden = false;
+  } finally {
+    updateButtons();
+  }
+}
+$("announce-send").addEventListener("click", sendAnnouncement);
+$("announce-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendAnnouncement();
+});
 
 // ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods and News ----
 
@@ -1659,6 +1699,7 @@ listen("task-line", ({ payload }) => {
 
 listen("task", async ({ payload }) => {
   task = payload.running ? payload.kind : null;
+  if (!payload.running) warningLeft = null;
   updateButtons();
   if (!payload.running) {
     clearProgress();
@@ -1674,7 +1715,10 @@ listen("task", async ({ payload }) => {
     if (page === "mods") refreshMods();
     if (payload.kind === "build" && restartAfterBuild) {
       restartAfterBuild = false;
-      if (payload.ok) await runTask("start");
+      // A restart while the map server still runs, so players are warned
+      // first; the new image gets the same full `up` as a start.
+      const mapUp = lastServices.some((s) => s.service === "map" && s.state === "running");
+      if (payload.ok) await runTask(mapUp ? "restart" : "start");
     }
   }
 });
