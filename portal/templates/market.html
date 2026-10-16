@@ -1,0 +1,32 @@
+{{define "content"}}{{with .Data}}<h1>Market</h1>
+<nav class="tabs">
+  <a href="{{.URL "selling"}}"{{if eq .Shops "selling"}} class="current"{{end}}>For sale</a>
+  <a href="{{.URL "buying"}}"{{if eq .Shops "buying"}} class="current"{{end}}>Wanted</a>
+</nav>
+<form method="get" action="/market" class="search">
+  {{if eq .Shops "buying"}}<input type="hidden" name="shops" value="buying">{{end}}
+  <input type="search" name="q" value="{{.Query}}" placeholder="Item name or number" aria-label="Item">
+  <button>Search</button>
+</form>
+{{with .Offers}}
+<table>
+  <thead><tr><th>Item</th><th>Cards</th><th>{{if eq $.Data.Shops "buying"}}Pays{{else}}Price{{end}}</th><th>{{if eq $.Data.Shops "buying"}}Wants{{else}}Amount{{end}}</th><th>Shop</th><th>{{if eq $.Data.Shops "buying"}}Buyer{{else}}Seller{{end}}</th><th>Where</th></tr></thead>
+  <tbody>
+  {{range .}}<tr>
+    <td>{{.Label}} <small class="note">#{{.ItemID}}</small>{{if not .Identified}} <span class="tag">Unidentified</span>{{end}}{{if .Broken}} <span class="tag bad">Broken</span>{{end}}</td>
+    <td>{{range $i, $n := .CardNames}}{{if $i}}, {{end}}{{$n}}{{end}}</td>
+    <td>{{thousands .Price}} z</td>
+    <td>{{.Amount}}</td>
+    <td>{{.Shop}}</td>
+    <td>{{.Seller}}</td>
+    <td>{{.Map}} ({{.X}}, {{.Y}})</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+{{if and .Query .Total}}<p>No {{if eq .Shops "buying"}}buying store wants{{else}}shop sells{{end}} “{{.Query}}” right now.</p>
+{{else if eq .Shops "buying"}}<p>No buying stores are open right now.</p>
+{{else}}<p>No shops are open right now.</p>{{end}}
+{{end}}
+<p class="note">{{if eq .Shops "buying"}}Buying stores open in the game right now. Sell to them in person.{{else}}Vending shops open in the game right now, including characters left on autotrade. Prices are per item.{{end}}</p>
+{{end}}{{end}}
