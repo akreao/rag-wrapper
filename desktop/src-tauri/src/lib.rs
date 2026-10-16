@@ -18,6 +18,7 @@ mod stack;
 mod task;
 mod thor;
 mod update;
+mod whatsnew;
 
 use std::path::PathBuf;
 use std::process::Child;
@@ -108,6 +109,8 @@ struct Overview {
     /// The server started on another address than before, and players
     /// haven't been told yet.
     address_change: Option<AddressChange>,
+    /// A draft News post for players about this app version, not yet saved or skipped.
+    player_news: Option<whatsnew::PlayerNews>,
     task: Option<String>,
 }
 
@@ -149,6 +152,7 @@ fn overview(app: State<App>) -> Overview {
             .filter(|_| docker_error.is_none() && !get("ADMIN_USER").is_empty())
             .and_then(|env| images::rebuild(&app.dir, env)),
         address_change: env.as_ref().and_then(address_change),
+        player_news: env.as_ref().filter(|_| !get("ADMIN_USER").is_empty()).and_then(whatsnew::pending),
         task: app.task.lock().unwrap().as_ref().map(|r| r.kind.clone()),
     }
 }
@@ -193,6 +197,8 @@ fn write_setup(
         if let Some(update) = update::pending(&env) {
             update::skip(&mut env, &update);
         }
+        // Players haven't been told about anything yet.
+        whatsnew::record(&mut env);
     }
     env.set("ADMIN_USER", admin_user);
     env.set("ADMIN_PASSWORD", admin_password);
@@ -297,6 +303,15 @@ async fn open_battle_conf(handle: AppHandle) -> Result<(), String> {
 
 /// The battle config editor's window label (see `capabilities/default.json`).
 const BATTLE_CONF_WINDOW: &str = "battle-conf";
+
+/// Stops offering players a "What's new" post until the next app
+/// version, once it's saved or skipped.
+#[tauri::command]
+fn dismiss_player_news(app: State<App>) -> Result<(), String> {
+    let mut env = app.env().ok_or("Finish setup first.")?;
+    whatsnew::record(&mut env);
+    env.save().map_err(|e| e.to_string())
+}
 
 /// Opens a web page (the account portal, an update's changes) in the browser.
 #[tauri::command]
@@ -903,6 +918,7 @@ pub fn run() {
             save_build_settings,
             skip_server_update,
             dismiss_address_change,
+            dismiss_player_news,
             game_settings,
             save_game_settings,
             open_overrides,
@@ -1034,6 +1050,8 @@ mod tests {
         // A new install builds the bundled commit, so no update is offered.
         assert_eq!(env.get("RATHENA_COMMIT"), example.get("RATHENA_COMMIT"));
         assert!(update::pending(&env).is_none());
+        // Nor a "What's new" post for players.
+        assert!(whatsnew::pending(&env).is_none());
 
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);

@@ -21,6 +21,11 @@ Patch notes, not a summary: only what changed since the previous version, writte
 
 ## Before you update
 - Anything to do by hand first, or "Nothing to do."
+
+## For players
+- Emotes work, including the cash emotion packs.
 ```
+
+**For players** is different from the rest: it's for the people who play, not the person running the server, and the desktop app offers it to them as a "What's new" News post after the update (the app bundles these files when it's built). Only what a player would notice in the game, the account portal or the patcher, in plain words without PR links, app screens or commit ids: "The stylist offers job outfits", not "rAthena moved to 266a587". Leave the section out when there's nothing for players; the app then offers no post.
 
 `0.1.0.md` is the exception: the first release has nothing to compare against, so it summarises the app.
