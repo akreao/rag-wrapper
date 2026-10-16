@@ -428,6 +428,9 @@ func (a *app) register(req *request) error {
 
 type accountData struct {
 	Characters []Character
+	// DeleteCode is the account's birthdate as the game wants it typed
+	// when deleting a character, empty when the account has none.
+	DeleteCode string
 }
 
 func (a *app) account(req *request) error {
@@ -438,7 +441,7 @@ func (a *app) account(req *request) error {
 	a.render(req, http.StatusOK, "account", view{
 		Title: "Your account",
 		Form:  map[string]string{"email": req.account.Email, "birthdate": req.account.Birthdate},
-		Data:  accountData{Characters: chars},
+		Data:  accountData{Characters: chars, DeleteCode: deleteCode(req.account.Birthdate)},
 	})
 	return nil
 }
@@ -452,7 +455,7 @@ func (a *app) accountError(req *request, msg string) error {
 		Title: "Your account",
 		Error: msg,
 		Form:  map[string]string{"email": req.r.PostFormValue("email"), "birthdate": req.r.PostFormValue("birthdate")},
-		Data:  accountData{Characters: chars},
+		Data:  accountData{Characters: chars, DeleteCode: deleteCode(req.account.Birthdate)},
 	})
 	return nil
 }
@@ -491,7 +494,7 @@ func (a *app) changeDetails(req *request) error {
 	if err := a.store.setDetails(req.r.Context(), req.account.ID, email, birthdate); err != nil {
 		return err
 	}
-	return a.redirect(req, "/account", "Details saved.")
+	return a.redirect(req, "/account", "Details saved. A new birthdate counts in the game from your next login.")
 }
 
 // --- Checks and helpers ---
@@ -538,6 +541,18 @@ func checkBirthdate(d string) string {
 		return "Enter your birthdate. The game asks for it when you delete a character."
 	}
 	return ""
+}
+
+// deleteCode is a "YYYY-MM-DD" birthdate as the game client takes it when
+// deleting a character: six digits, YYMMDD. The delete packet has room for
+// six only, and the char server compares them to the birthdate without its
+// century, so any other format never matches.
+func deleteCode(birthdate string) string {
+	t, err := time.Parse("2006-01-02", birthdate)
+	if err != nil {
+		return ""
+	}
+	return t.Format("060102")
 }
 
 func clientIP(r *http.Request) string {

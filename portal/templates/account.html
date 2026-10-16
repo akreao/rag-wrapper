@@ -16,13 +16,15 @@
   {{end}}
 </section>
 
+{{if not .Data.DeleteCode}}<p class="error">Your account has no birthdate, so you can't delete characters in the game. Set one below, then log in to the game again.</p>{{end}}
+
 <section class="grid">
   <form method="post" action="/account/details" class="card">
     <h2>Email and birthdate</h2>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <label>Email <input type="email" name="email" value="{{index .Form "email"}}" maxlength="39" required></label>
     <label>Birthdate <input type="date" name="birthdate" value="{{index .Form "birthdate"}}" required>
-      <small>The game asks for it when you delete a character.</small></label>
+      <small>The game asks for it when you delete a character. Type it there as six digits, YYMMDD{{with .Data.DeleteCode}}: <strong>{{.}}</strong>{{else}}, so 31 December 1995 is 951231{{end}}.</small></label>
     <button>Save</button>
   </form>
 
