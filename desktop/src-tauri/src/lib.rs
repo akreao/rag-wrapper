@@ -49,6 +49,8 @@ struct App {
     /// The last clash check of the mods: what it checked and its output,
     /// which is None when the image couldn't run it.
     clash_check: Arc<ClashCheck>,
+    /// The running map server's log, read a bit more on each look.
+    map_log: Arc<Mutex<stack::MapLog>>,
 }
 
 /// What the last clash check checked, and its output.
@@ -63,12 +65,20 @@ impl App {
         EnvFile::load(&self.env_path()).ok()
     }
 
+    /// Changes `.env` with no other change to it in between.
+    fn edit_env<T>(&self, change: impl FnOnce(&mut EnvFile) -> Result<T, String>) -> Result<T, String> {
+        if !self.env_path().exists() {
+            return Err("Finish setup first.".into());
+        }
+        envfile::edit(&self.env_path(), change)
+    }
+
     /// Whether the server runs Renewal (`PRERE=no`) rather than Pre-Renewal.
     fn renewal(&self) -> bool {
         self.env().and_then(|e| e.get("PRERE")).as_deref() == Some("no")
     }
 
-        fn overrides_dir(&self) -> PathBuf {
+    fn overrides_dir(&self) -> PathBuf {
         self.dir.join(stack::OVERRIDES)
     }
 
@@ -126,8 +136,22 @@ struct AddressChange {
     link: String,
 }
 
+/// Runs `work` with the app's state off the main thread, which would
+/// otherwise stop drawing the window while Docker answers.
+async fn off_main<T: Send + 'static>(handle: AppHandle, work: impl FnOnce(&AppHandle, &App) -> T + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || work(&handle, &handle.state::<App>()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// What the main screen shows. Asks Docker a dozen questions, so it runs
+/// off the main thread.
 #[tauri::command]
-fn overview(app: State<App>) -> Overview {
+async fn overview(handle: AppHandle) -> Result<Overview, String> {
+    off_main(handle, |_, app| read_overview(app)).await
+}
+
+fn read_overview(app: &App) -> Overview {
     let (docker_version, docker_error) = match stack::check_docker() {
         Ok(v) => (Some(v), None),
         Err(e) => (None, Some(e)),
@@ -163,14 +187,16 @@ fn overview(app: State<App>) -> Overview {
 /// First-run setup: writes `.env` with the admin account, the LAN address
 /// and generated server passwords. `db-init` creates the admin on next start.
 #[tauri::command]
-fn setup(app: State<App>, admin_user: String, admin_password: String, public_ip: Option<String>) -> Result<(), String> {
+async fn setup(handle: AppHandle, admin_user: String, admin_password: String, public_ip: Option<String>) -> Result<(), String> {
     envfile::check_account_field("The username", &admin_user)?;
     envfile::check_account_field("The password", &admin_password)?;
     if let Some(ip) = &public_ip {
         net::check_address(ip)?;
     }
-
-    write_setup(&app.env_path(), || stack::volume_exists("db-data"), &admin_user, &admin_password, public_ip)
+    off_main(handle, move |_, app| {
+        write_setup(&app.env_path(), || stack::volume_exists("db-data"), &admin_user, &admin_password, public_ip)
+    })
+    .await?
 }
 
 /// `setup`'s changes to the `.env` at `path`, made from `.env.example` when
@@ -182,31 +208,43 @@ fn write_setup(
     admin_password: &str,
     public_ip: Option<String>,
 ) -> Result<(), String> {
-    let fresh = !path.exists();
-    if fresh {
-        std::fs::write(path, stack::ENV_EXAMPLE).map_err(|e| e.to_string())?;
+    if path.exists() {
+        return envfile::edit(path, |env| change_setup(env, false, false, admin_user, admin_password, public_ip));
     }
-    let mut env = EnvFile::load(path).map_err(|e| e.to_string())?;
+    // A new `.env` is written once, complete, so it never holds the
+    // example's placeholder passwords.
+    let mut env = EnvFile::parse(stack::ENV_EXAMPLE).at(path);
+    change_setup(&mut env, true, !db_exists(), admin_user, admin_password, public_ip)?;
+    env.save().map_err(|e| e.to_string())
+}
 
+fn change_setup(
+    env: &mut EnvFile,
+    fresh: bool,
+    new_passwords: bool,
+    admin_user: &str,
+    admin_password: &str,
+    public_ip: Option<String>,
+) -> Result<(), String> {
     // Replace the example's placeholder passwords, unless a database made
     // with them already exists and would stop accepting new ones.
-    if fresh && !db_exists() {
+    if new_passwords {
         for key in ["DB_PASSWORD", "DB_ROOT_PASSWORD", "INTER_PASSWORD"] {
             env.set(key, &envfile::random_password(20).map_err(|e| e.to_string())?);
         }
     }
     // A new install already builds this version's commit.
     if fresh {
-        if let Some(update) = update::pending(&env) {
-            update::skip(&mut env, &update);
+        if let Some(update) = update::pending(env) {
+            update::skip(env, &update);
         }
         // Players haven't been told about anything yet.
-        whatsnew::record(&mut env);
+        whatsnew::record(env);
     }
     env.set("ADMIN_USER", admin_user);
     env.set("ADMIN_PASSWORD", admin_password);
-    apply_public_ip(&mut env, public_ip);
-    env.save().map_err(|e| e.to_string())
+    apply_public_ip(env, public_ip);
+    Ok(())
 }
 
 /// Sets the build settings. Returns whether anything changed, in which
@@ -215,25 +253,25 @@ fn write_setup(
 fn save_build_settings(app: State<App>, packetver: String, prere: bool) -> Result<bool, String> {
     let packetver = packetver.trim();
     envfile::check_packetver(packetver)?;
-    let mut env = app.env().ok_or("Finish setup first.")?;
     let prere = if prere { "yes" } else { "no" };
-    let changed = env.get("PACKETVER").as_deref() != Some(packetver) || env.get("PRERE").as_deref() != Some(prere);
-    env.set("PACKETVER", packetver);
-    env.set("PRERE", prere);
-    env.save().map_err(|e| e.to_string())?;
-    Ok(changed)
+    app.edit_env(|env| {
+        let changed = env.get("PACKETVER").as_deref() != Some(packetver) || env.get("PRERE").as_deref() != Some(prere);
+        env.set("PACKETVER", packetver);
+        env.set("PRERE", prere);
+        Ok(changed)
+    })
 }
 
 /// Keeps the server on its current rAthena commit and hides the offer
 /// until an app version comes with another one.
 #[tauri::command]
 fn skip_server_update(app: State<App>) -> Result<(), String> {
-    let mut env = app.env().ok_or("Finish setup first.")?;
-    if let Some(update) = update::pending(&env) {
-        update::skip(&mut env, &update);
-        env.save().map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    app.edit_env(|env| {
+        if let Some(update) = update::pending(env) {
+            update::skip(env, &update);
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -253,24 +291,13 @@ fn save_game_settings(app: State<App>, settings: settings::GameSettings) -> Resu
 /// a build copies them out of the image, so it runs off the main thread.
 #[tauri::command]
 async fn battle_conf(app: State<'_, App>) -> Result<battleconf::BattleConf, String> {
-    let (dir, overrides, env) = (app.dir.clone(), app.overrides_dir(), app.env());
+    let (dir, overrides, env, log) = (app.dir.clone(), app.overrides_dir(), app.env(), app.map_log.clone());
     tauri::async_runtime::spawn_blocking(move || {
         let env = env.ok_or("Set up the server first.")?;
-        battleconf::load(&dir, &overrides, &env, &map_log(&dir))
+        battleconf::load(&dir, &overrides, &env, &stack::map_log(&dir, &log).unwrap_or_default())
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-/// The running map server's log, or nothing when it isn't running.
-fn map_log(dir: &std::path::Path) -> String {
-    let running = stack::status(dir).unwrap_or_default().iter().any(|s| s.service == "map" && s.state == "running");
-    if !running {
-        return String::new();
-    }
-    let mut logs = stack::compose(dir);
-    logs.args(["logs", "--no-log-prefix", "map"]);
-    stack::output(logs).unwrap_or_default()
 }
 
 /// Saves battle config values (option to value) as overrides. Returns
@@ -311,9 +338,10 @@ const BATTLE_CONF_WINDOW: &str = "battle-conf";
 /// version, once it's saved or skipped.
 #[tauri::command]
 fn dismiss_player_news(app: State<App>) -> Result<(), String> {
-    let mut env = app.env().ok_or("Finish setup first.")?;
-    whatsnew::record(&mut env);
-    env.save().map_err(|e| e.to_string())
+    app.edit_env(|env| {
+        whatsnew::record(env);
+        Ok(())
+    })
 }
 
 /// Opens a web page (the account portal, an update's changes) in the browser.
@@ -355,19 +383,20 @@ fn set_public_ip(app: State<App>, public_ip: Option<String>) -> Result<bool, Str
     if let Some(ip) = &public_ip {
         net::check_address(ip)?;
     }
-    let mut env = app.env().ok_or("Finish setup first.")?;
-    let before = env.get("PUBLIC_IP");
-    apply_public_ip(&mut env, public_ip);
-    env.save().map_err(|e| e.to_string())?;
-    Ok(env.get("PUBLIC_IP") != before)
+    app.edit_env(|env| {
+        let before = env.get("PUBLIC_IP");
+        apply_public_ip(env, public_ip);
+        Ok(env.get("PUBLIC_IP") != before)
+    })
 }
 
 /// Hides the address change warning once players have been told.
 #[tauri::command]
 fn dismiss_address_change(app: State<App>) -> Result<(), String> {
-    let mut env = app.env().ok_or("Finish setup first.")?;
-    env.set("ADDRESS_CHANGED_FROM", "");
-    env.save().map_err(|e| e.to_string())
+    app.edit_env(|env| {
+        env.set("ADDRESS_CHANGED_FROM", "");
+        Ok(())
+    })
 }
 
 /// The port players open the account portal on. Returns whether it
@@ -377,11 +406,11 @@ fn set_portal_port(app: State<App>, port: u16) -> Result<bool, String> {
     if port < 1024 {
         return Err("Pick a port from 1024 to 65535.".into());
     }
-    let mut env = app.env().ok_or("Finish setup first.")?;
-    let before = env.get("PORTAL_PORT");
-    env.set("PORTAL_PORT", &port.to_string());
-    env.save().map_err(|e| e.to_string())?;
-    Ok(env.get("PORTAL_PORT") != before)
+    app.edit_env(|env| {
+        let before = env.get("PORTAL_PORT");
+        env.set("PORTAL_PORT", &port.to_string());
+        Ok(env.get("PORTAL_PORT") != before)
+    })
 }
 
 fn apply_public_ip(env: &mut EnvFile, public_ip: Option<String>) {
@@ -397,12 +426,17 @@ fn apply_public_ip(env: &mut EnvFile, public_ip: Option<String>) {
     }
 }
 
+/// Each service's container state. The main screen asks every few
+/// seconds, so it runs off the main thread.
 #[tauri::command]
-fn services(app: State<App>) -> Result<Vec<stack::ServiceStatus>, String> {
-    if !app.env_path().exists() {
-        return Ok(Vec::new());
-    }
-    stack::status(&app.dir)
+async fn services(handle: AppHandle) -> Result<Vec<stack::ServiceStatus>, String> {
+    off_main(handle, |_, app| {
+        if !app.env_path().exists() {
+            return Ok(Vec::new());
+        }
+        stack::status(&app.dir)
+    })
+    .await?
 }
 
 /// Who's online, uptime and each container's CPU and memory, for the
@@ -451,9 +485,14 @@ enum Step {
 /// Runs `start`, `restart`, `readdress` (after the address changed),
 /// `portal` (after the portal port changed), `stop`,
 /// `build`, `update`, `go-back`, `backup`, or `restore` or `test-restore` (of `file`), streaming its
-/// output as `task-line` events.
+/// output as `task-line` events. Asks Docker which images are here before
+/// it starts, so it runs off the main thread.
 #[tauri::command]
-fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<String>) -> Result<(), String> {
+async fn run_task(handle: AppHandle, kind: String, file: Option<String>) -> Result<(), String> {
+    off_main(handle, move |handle, app| start_task(handle, app, kind, file)).await?
+}
+
+fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>) -> Result<(), String> {
     if app.closing.load(Ordering::SeqCst) {
         return Err("The app is closing.".into());
     }
@@ -465,7 +504,7 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
     let mut cmd = stack::compose(&app.dir);
     let steps = match kind.as_str() {
         "start" | "restart" | "readdress" | "portal" => {
-            let mut cmd = up_command(&app)?;
+            let mut cmd = up_command(app)?;
             // After a rebuild or update the new image needs a full `up`,
             // so `db-init` applies its database upgrades first; that
             // recreates every rAthena container anyway.
@@ -552,7 +591,8 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
         },
     );
 
-    let ctx = app.ctx(&handle);
+    let ctx = app.ctx(handle);
+    let handle = handle.clone();
     std::thread::spawn(move || {
         let result = steps.into_iter().try_for_each(|step| {
             ctx.check_cancelled()?;
@@ -572,16 +612,14 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
                 }
                 Step::Restore(file) => backup::restore(&ctx, &file),
                 Step::TestRestore(file) => backup::test_restore(&ctx, &file),
-                Step::Pin(update) => {
-                    let mut env = EnvFile::load(&ctx.dir.join(".env")).map_err(|e| e.to_string())?;
-                    update::pin(&mut env, &update);
-                    env.save().map_err(|e| e.to_string())
-                }
-                Step::GoBack(previous) => {
-                    let mut env = EnvFile::load(&ctx.dir.join(".env")).map_err(|e| e.to_string())?;
-                    update::go_back(&mut env, &previous);
-                    env.save().map_err(|e| e.to_string())
-                }
+                Step::Pin(update) => envfile::edit(&ctx.dir.join(".env"), |env| {
+                    update::pin(env, &update);
+                    Ok(())
+                }),
+                Step::GoBack(previous) => envfile::edit(&ctx.dir.join(".env"), |env| {
+                    update::go_back(env, &previous);
+                    Ok(())
+                }),
             }
         });
         if let Err(e) = &result {
@@ -602,11 +640,10 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
             _ => false,
         };
         if ok && started {
-            if let Ok(mut env) = EnvFile::load(&ctx.dir.join(".env")) {
-                if record_address(&mut env) {
-                    let _ = env.save();
-                }
-            }
+            let _ = envfile::edit(&ctx.dir.join(".env"), |env| {
+                record_address(env);
+                Ok(())
+            });
             if let Err(e) = mods::record_applied(&ctx.dir.join(stack::MODS)) {
                 ctx.line(format!("Couldn't record the loaded mods: {e}"));
             }
@@ -631,11 +668,12 @@ fn run_task(handle: AppHandle, app: State<App>, kind: String, file: Option<Strin
 /// `docker compose up` for the whole stack, after re-detecting the LAN
 /// address unless one is pinned.
 fn up_command(app: &App) -> Result<std::process::Command, String> {
-    let mut env = app.env().ok_or("Finish setup first.")?;
-    if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
-        apply_public_ip(&mut env, None);
-        env.save().map_err(|e| e.to_string())?;
-    }
+    app.edit_env(|env| {
+        if env.get("PUBLIC_IP_AUTO").as_deref() != Some("no") {
+            apply_public_ip(env, None);
+        }
+        Ok(())
+    })?;
     let mut cmd = stack::compose(&app.dir);
     cmd.args(["--progress", "plain", "up", "--detach"]);
     Ok(cmd)
@@ -694,10 +732,9 @@ fn address_change(env: &EnvFile) -> Option<AddressChange> {
 /// Once `db-init` has finished, the admin account exists and the password
 /// has no further use, so no plain-text copy is kept in `.env`.
 fn forget_admin_password(dir: &std::path::Path) {
-    let Ok(mut env) = EnvFile::load(&dir.join(".env")) else {
-        return;
-    };
-    if env.get("ADMIN_PASSWORD").unwrap_or_default().is_empty() {
+    let path = dir.join(".env");
+    let kept = EnvFile::load(&path).ok().and_then(|env| env.get("ADMIN_PASSWORD")).unwrap_or_default();
+    if kept.is_empty() {
         return;
     }
     let initialised = stack::status(dir)
@@ -705,8 +742,10 @@ fn forget_admin_password(dir: &std::path::Path) {
         .iter()
         .any(|s| s.service == "db-init" && s.state == "exited" && s.exit_code == 0);
     if initialised {
-        env.set("ADMIN_PASSWORD", "");
-        let _ = env.save();
+        let _ = envfile::edit(&path, |env| {
+            env.set("ADMIN_PASSWORD", "");
+            Ok(())
+        });
     }
 }
 
@@ -726,7 +765,7 @@ fn backups(app: State<App>) -> Vec<backup::Backup> {
 /// Opens the backups folder in the file manager, so backups can be copied elsewhere.
 #[tauri::command]
 fn open_backups(app: State<App>) -> Result<(), String> {
-    std::fs::create_dir_all(&app.backups).map_err(|e| e.to_string())?;
+    backup::ensure_folder(&app.backups).map_err(|e| e.to_string())?;
     host::open(app.backups.as_os_str())
 }
 
@@ -775,20 +814,12 @@ struct ModsPage {
 /// runs off the main thread.
 #[tauri::command]
 async fn mods(app: State<'_, App>) -> Result<ModsPage, String> {
-    let (dir, mods, env, cache) = (app.dir.clone(), app.mods_dir(), app.env(), app.clash_check.clone());
+    let (dir, mods, env, cache, log) = (app.dir.clone(), app.mods_dir(), app.env(), app.clash_check.clone(), app.map_log.clone());
     let (client_files, renewal, overrides) = (app.client_files.clone(), app.renewal(), app.overrides_dir());
     tauri::async_runtime::spawn_blocking(move || {
-        let running = stack::status(&dir)
-            .unwrap_or_default()
-            .iter()
-            .any(|s| s.service == "map" && s.state == "running");
-        let log = if running {
-            let mut logs = stack::compose(&dir);
-            logs.args(["logs", "--no-log-prefix", "map"]);
-            stack::output(logs).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        let log = stack::map_log(&dir, &log);
+        let running = log.is_some();
+        let log = log.unwrap_or_default();
         let checked = check_clashes(&dir, &mods, env.as_ref(), &cache);
         let mut client_clashes: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         for clash in clientpatch::clashes(&client_files, &mods::client_mods(&mods), renewal) {
@@ -822,10 +853,11 @@ fn check_clashes(dir: &std::path::Path, mods: &std::path::Path, env: Option<&Env
         }
     }
     let mut cmd = host::command("docker");
-    cmd.args(["run", "--rm", "--network", "none", "--entrypoint", "merge_mods.py", "-v"])
+    // Never pulled: the image is built or downloaded under this name by the app.
+    cmd.args(["run", "--rm", "--pull", "never", "--network", "none", "--entrypoint", "merge_mods.py", "-v"])
         .arg(format!("{}:/rathena/mods:ro", mods.display()))
         .args([image.as_str(), "--check", "mods", mode]);
-    let output = stack::output(cmd).ok();
+    let output = stack::output_within(cmd, std::time::Duration::from_secs(300)).ok();
     *cache = Some((key, output.clone()));
     output
 }
@@ -899,6 +931,16 @@ fn follow_logs(handle: AppHandle, app: State<App>, service: Option<String>) -> R
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // A second copy of the app would copy the stack files again under a
+        // running build, and closing either window would stop the server
+        // for both. Opening the app again brings this window forward.
+        .plugin(tauri_plugin_single_instance::init(|handle, _, _| {
+            if let Some(window) = handle.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .setup(|app| {
             // A menu entry is a convenience: the app runs without one.
             if let Err(e) = menu::install(&app.path().app_data_dir()?) {
@@ -925,6 +967,7 @@ pub fn run() {
                 logs_generation: AtomicU64::new(0),
                 closing: AtomicBool::new(false),
                 clash_check: Arc::new(Mutex::new(None)),
+                map_log: Arc::default(),
             });
             Ok(())
         })
@@ -995,6 +1038,9 @@ pub fn run() {
 /// the database if there's no backup from the last day, takes the stack
 /// down (the database volume is kept) and then exits.
 fn stop_and_exit(handle: AppHandle) {
+    /// Each container gets 10 seconds to stop before Docker kills it.
+    const STOP_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+
     let app = handle.state::<App>();
     if let Some(running) = app.task.lock().unwrap().as_mut() {
         if !["backup", "restore"].contains(&running.kind.as_str()) {
@@ -1009,10 +1055,19 @@ fn stop_and_exit(handle: AppHandle) {
         let mut cmd = stack::compose(&app.dir);
         cmd.arg("down");
         let lines = handle.clone();
-        if let Ok((mut child, done)) = stack::spawn_lines(cmd, move |line| {
+        if let Ok((mut child, _)) = stack::spawn_lines(cmd, move |line| {
             let _ = lines.emit("task-line", line);
         }) {
-            let _ = done.join();
+            // A stuck Docker daemon mustn't keep the window from closing.
+            let deadline = std::time::Instant::now() + STOP_LIMIT;
+            while matches!(child.try_wait(), Ok(None)) {
+                if std::time::Instant::now() >= deadline {
+                    let _ = handle.emit("task-line", "Docker didn't stop the server in time; closing anyway.");
+                    let _ = child.kill();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
             let _ = child.wait();
         }
     }

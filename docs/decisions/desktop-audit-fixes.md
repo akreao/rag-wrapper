@@ -1,0 +1,14 @@
+# Desktop app audit fixes
+
+The desktop app's findings from the audit of 2026-10-16, fixed in one PR.
+
+- **`.env` is written atomically and readable by its owner only.** Every save writes `.env.tmp` with mode 0600, syncs it to disk and renames it over `.env`, so a full disk or a crash can't leave `.env` empty and lose the database passwords. First-run setup writes the example the same way, so the generated passwords are never in a file other users can read.
+- **One `.env` edit at a time.** Every load, change and save of `.env`, from a screen or from a running task, holds one lock, so two edits can't save over each other.
+- **`.env` is read the way Compose reads it.** A key set twice takes its last line, and the app changes that line. An unquoted value ends at ` #`, so `PRERE=no  # renewal` reads as Renewal.
+- **Docker calls run off the main thread and give up after 60 seconds.** The overview, the service status the dashboard polls every 3 seconds, starting a task and first-run setup no longer stop the window from drawing while Docker answers. A Docker call that takes longer than 60 seconds is killed and reported ("Is Docker stuck?"). The few that can take longer have their own limit: the mod clash check 5 minutes, the restore test's table check an hour. Closing the app waits up to 2 minutes for `docker compose down`, then closes anyway.
+- **One copy of the app at a time.** Opening the app again brings the open window forward (`tauri-plugin-single-instance`). A second copy used to copy the stack files again under a running build, and closing either window stopped the server for both.
+- **A mod's client files can't link outside the mod.** A link in a mod's `client/` folder to a file outside that folder is left out of the client patch and listed as a problem, so a mod can't hand a file such as `~/.ssh` keys or `.env` to every player. Links in the client files folder are still followed: it's the admin's own folder.
+- **The Mods screen reads only the map server's new log lines.** The log since the map server last started is kept between reads, and each read asks Docker only for lines after the newest one it has. It used to fetch the whole log since the container was made every 5 seconds. Log rotation is in the Docker stack's own fix.
+- **A Lua table a mod assigns twice gets one comma.** The merge used to write `,,`, which stops the client loading the merged file.
+- **Backups are readable by their owner only.** The backups folder is 0700 and each dump 0600, as dumps hold every account's password hash and email. The app closes up an existing folder and its backups the next time it backs up or opens the folder.
+- **Smaller hardening.** A backup name may only use lowercase letters, digits and `-` after its timestamp, so a restore can't reach a file outside the backups folder. The mod clash check never pulls an image (`--pull never`).
