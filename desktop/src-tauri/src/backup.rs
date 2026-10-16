@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -136,13 +137,29 @@ fn file_name(stamp: &str, reason: Reason) -> String {
     format!("{PREFIX}{stamp}-{}{SUFFIX}", reason.slug())
 }
 
+/// Makes the backups folder, readable by its owner only, as the dumps hold
+/// every account's password hash and email. A folder and backups made by
+/// an older version, readable by everyone on the computer, are closed too.
+pub fn ensure_folder(dir: &Path) -> io::Result<()> {
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+    for entry in fs::read_dir(dir)?.flatten() {
+        if entry.file_name().to_str().is_some_and(|n| parse(n).is_some()) {
+            let _ = fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o600));
+        }
+    }
+    Ok(())
+}
+
 /// The time and reason in a backup's file name, or `None` for any other file.
 fn parse(name: &str) -> Option<(String, String)> {
     let rest = name.strip_prefix(PREFIX)?.strip_suffix(SUFFIX)?;
     let (date, rest) = rest.split_once('-')?;
     let (time, reason) = rest.split_once('-')?;
     let digits = |s: &str, n| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
-    if !digits(date, 8) || !digits(time, 6) || reason.is_empty() {
+    // The reason is a slug, so a name can't reach outside the backups folder.
+    let slug = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if !digits(date, 8) || !digits(time, 6) || !slug(reason) {
         return None;
     }
     let created = format!(
@@ -269,7 +286,7 @@ fn start_servers(ctx: &Ctx) -> Result<(), String> {
 
 fn dump(ctx: &Ctx, reason: Reason) -> Result<String, String> {
     ctx.check_cancelled()?;
-    fs::create_dir_all(&ctx.backups).map_err(|e| format!("Couldn't create the backups folder: {e}"))?;
+    ensure_folder(&ctx.backups).map_err(|e| format!("Couldn't create the backups folder: {e}"))?;
     let mut file = file_name(&chrono::Local::now().format("%Y%m%d-%H%M%S").to_string(), reason);
     while ctx.backups.join(&file).exists() {
         // Two backups in the same second; the second waits for its own name.
@@ -314,7 +331,9 @@ fn dump_to(ctx: &Ctx, dest: &Path) -> Result<u64, String> {
 
     let mut stdout = child.stdout.take().unwrap();
     let copied = (|| -> io::Result<bool> {
-        let mut gz = GzEncoder::new(BufWriter::new(File::create(dest)?), Compression::default());
+        // The dump holds every account's password hash and email.
+        let file = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(dest)?;
+        let mut gz = GzEncoder::new(BufWriter::new(file), Compression::default());
         let mut tail = Tail::default();
         let mut buf = vec![0; 64 * 1024];
         loop {
@@ -585,12 +604,9 @@ fn start_test_container(ctx: &Ctx, image: &str) -> Result<(), String> {
 fn wait_ready(ctx: &Ctx) -> Result<(), String> {
     for _ in 0..180 {
         ctx.check_cancelled()?;
-        let ready = host::command("docker")
-            .args(["exec", TEST_CONTAINER, "healthcheck.sh", "--connect", "--innodb_initialized"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
+        let mut check = host::command("docker");
+        check.args(["exec", TEST_CONTAINER, "healthcheck.sh", "--connect", "--innodb_initialized"]);
+        let ready = stack::output(check).is_ok();
         if ready {
             return Ok(());
         }
@@ -605,17 +621,16 @@ fn wait_ready(ctx: &Ctx) -> Result<(), String> {
 }
 
 fn remove_test_container() {
-    let _ = host::command("docker")
-        .args(["rm", "--force", "--volumes", TEST_CONTAINER])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    let mut rm = host::command("docker");
+    rm.args(["rm", "--force", "--volumes", TEST_CONTAINER]);
+    let _ = stack::output(rm);
 }
 
 fn in_test_container(script: &str, args: &[&str]) -> Result<String, String> {
     let mut cmd = host::command("docker");
     cmd.args(["exec", TEST_CONTAINER, "sh", "-c", script, "sh"]).args(args);
-    stack::output(cmd)
+    // Checking every table of a big database takes a while.
+    stack::output_within(cmd, std::time::Duration::from_secs(3600))
 }
 
 /// Checks the loaded backup and counts what it holds.
@@ -731,10 +746,30 @@ mod tests {
             "ragnarok-20261014-075800-.sql.gz",
             ".ragnarok-20261014-075800-manual.sql.gz.partial",
             "../ragnarok-20261014-075800-manual.sql.gz",
+            "ragnarok-20260101-000000-x/../../../../tmp/evil.sql.gz",
+            "ragnarok-20260101-000000-Manual.sql.gz",
             "notes.txt",
         ] {
             assert_eq!(parse(other), None, "{other}");
         }
+    }
+
+    #[test]
+    fn the_folder_and_backups_are_private() {
+        let dir = std::env::temp_dir().join(format!("rag-wrapper-private-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("ragnarok-20261014-075800-manual.sql.gz");
+        fs::write(&old, "").unwrap();
+        fs::set_permissions(&old, fs::Permissions::from_mode(0o644)).unwrap();
+        ensure_folder(&dir).unwrap();
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&old), 0o600);
+        fs::remove_dir_all(&dir).unwrap();
+        ensure_folder(&dir.join("new")).unwrap();
+        assert_eq!(mode(&dir.join("new")), 0o700);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
