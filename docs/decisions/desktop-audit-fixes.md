@@ -20,3 +20,11 @@ The desktop app's findings from the audit of 2026-10-16, fixed in one PR.
 - **Client patches are streamed.** Each file is compressed straight into the `.thor` file and hashed on the way, so a large file is never held in memory. A failed publish deletes its `.thor.tmp`, and any patch file it already finished, since `plist.txt` doesn't list them yet.
 - **Only db-init gets the admin's password.** Only its init step creates the admin account, so `ADMIN_USER` and `ADMIN_PASSWORD` are no longer in the game servers' and web server's environment. After the app blanks the password in `.env`, the stopped db-init container still has it until the next Start recreates it, or Stop removes it. Removing that container sooner would hide the "Database setup: Done" line on the dashboard, so the app leaves it; only docker-group users can inspect containers.
 - **Docker Compose 2.24 or newer.** `compose.yaml` uses `!reset`, which older Compose can't read. The Docker check on the main screen reads the version and, below 2.24, says to update the Compose plugin, in the banner other Docker problems use. A version it can't read is let through.
+
+## Pre-release audit (third PR)
+
+- **The hourly daily backup waits for an empty server.** Its dump locks every table and freezes the game, so it's skipped while anyone is online (or the count can't be read) and tried again an hour later. Once the newest backup is 48 hours old it runs anyway, after an in-game message that the game may pause for a minute.
+- **Install from zip is capped at 1 GB**, checked by the screen before it reads the file and again in the app, and the app no longer copies the zip it was sent. A bigger zip gets a message to unzip it into the mods folder instead.
+- **Changing INTER_PASSWORD warns players like a Restart** (the `repassword` task), and writes the new password only after the warning.
+- **Quitting during a Restart or Stop countdown** no longer tells players it's cancelled before the server goes down.
+- **A mod zip with a README beside the mod's folder installs.** Loose top-level files don't count when picking the mod's folder; they're left out and listed.

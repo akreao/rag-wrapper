@@ -247,19 +247,28 @@ pub fn daily(ctx: &Ctx) {
     }
 }
 
+/// How old the newest backup gets before the daily backup the app makes
+/// while the server runs goes ahead with players online.
+pub const OVERDUE_HOURS: i64 = 48;
+
 /// Whether the database runs and there's no backup of any kind from the last 24 hours.
 pub fn daily_due(dir: &Path, backups: &Path) -> bool {
-    if !db_running(dir) {
-        return false;
-    }
-    let newest = list(backups).into_iter().find_map(|b| {
-        chrono::NaiveDateTime::parse_from_str(&b.created, "%Y-%m-%d %H:%M:%S").ok()
-    });
-    due(newest, chrono::Local::now().naive_local())
+    db_running(dir) && due(newest(backups), chrono::Local::now().naive_local(), 24)
 }
 
-fn due(newest: Option<chrono::NaiveDateTime>, now: chrono::NaiveDateTime) -> bool {
-    newest.is_none_or(|t| now - t >= chrono::TimeDelta::hours(24))
+/// Whether there's no backup of any kind from the last [`OVERDUE_HOURS`].
+pub fn overdue(backups: &Path) -> bool {
+    due(newest(backups), chrono::Local::now().naive_local(), OVERDUE_HOURS)
+}
+
+fn newest(backups: &Path) -> Option<chrono::NaiveDateTime> {
+    list(backups).into_iter().find_map(|b| {
+        chrono::NaiveDateTime::parse_from_str(&b.created, "%Y-%m-%d %H:%M:%S").ok()
+    })
+}
+
+fn due(newest: Option<chrono::NaiveDateTime>, now: chrono::NaiveDateTime, hours: i64) -> bool {
+    newest.is_none_or(|t| now - t >= chrono::TimeDelta::hours(hours))
 }
 
 /// Dumps the database into a new backup, starting MariaDB for it if the
@@ -810,9 +819,11 @@ mod tests {
     fn daily_is_due_after_a_day() {
         let at = |s| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap();
         let now = at("2026-10-15 12:00:00");
-        assert!(due(None, now));
-        assert!(!due(Some(at("2026-10-14 12:00:01")), now));
-        assert!(due(Some(at("2026-10-14 12:00:00")), now));
+        assert!(due(None, now, 24));
+        assert!(!due(Some(at("2026-10-14 12:00:01")), now, 24));
+        assert!(due(Some(at("2026-10-14 12:00:00")), now, 24));
+        assert!(!due(Some(at("2026-10-14 12:00:00")), now, OVERDUE_HOURS));
+        assert!(due(Some(at("2026-10-13 12:00:00")), now, OVERDUE_HOURS));
     }
 
     #[test]

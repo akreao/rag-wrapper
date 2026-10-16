@@ -565,6 +565,10 @@ enum Step {
     Backup(backup::Reason),
     /// A backup if there's none from the last day; never fails the task.
     Daily,
+    /// Tells anyone in game that a backup is about to pause the game.
+    BackupNotice,
+    /// Gives INTER_PASSWORD a new random value.
+    InterPassword,
     Restore(String),
     /// Loads a backup into a throwaway database to check it would restore.
     TestRestore(String),
@@ -588,7 +592,7 @@ enum Step {
 
 /// Runs `start`, `restart`, `readdress` (after the address changed),
 /// `portal` (after the portal port changed), `rebind` (after "This network
-/// only" changed), `stop`,
+/// only" changed), `repassword` (a new INTER_PASSWORD), `stop`,
 /// `build`, `update`, `go-back`, `backup`, or `restore` or `test-restore` (of `file`), streaming its
 /// output as `task-line` events. Asks Docker which images are here before
 /// it starts, so it runs off the main thread.
@@ -608,15 +612,18 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
 
     let mut cmd = stack::compose(&app.dir);
     let steps = match kind.as_str() {
-        "start" | "restart" | "readdress" | "portal" | "rebind" => {
+        "start" | "restart" | "readdress" | "portal" | "rebind" | "repassword" => {
             let mut cmd = up_command(app)?;
+            // A new INTER_PASSWORD has to reach `db-init` and every server
+            // at once, so it gets a full `up` like a start.
+            let full = ["start", "repassword"].contains(&kind.as_str());
             // After a rebuild or update the new image needs a full `up`,
             // so `db-init` applies its database upgrades first; that
             // recreates every rAthena container anyway.
-            let new_image = kind != "start"
+            let new_image = !full
                 && (stack::runs_old_image(&app.dir, &app.env().and_then(|e| e.get("PACKETVER")).unwrap_or_default())
                     || stack::portal_runs_old_image(&app.dir));
-            if kind != "start" && !new_image {
+            if !full && !new_image {
                 // The game servers read their configs only when they start;
                 // the database keeps running. A new address only concerns
                 // the char and map servers, which hand it to the client,
@@ -642,6 +649,10 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             // server, which drops everyone in game.
             if !["start", "portal"].contains(&kind.as_str()) {
                 steps.push(Step::Warn(announce::Going::Restart));
+            }
+            // Only once players were warned, so a cancel leaves the old one.
+            if kind == "repassword" {
+                steps.push(Step::InterPassword);
             }
             // A mod's database files can change items or monsters players
             // already have, so the database is backed up before they load.
@@ -682,7 +693,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             cmd.arg("down");
             vec![Step::Warn(announce::Going::Stop), Step::Daily, Step::Compose(cmd)]
         }
-        "daily-backup" => vec![Step::Daily],
+        "daily-backup" => vec![Step::BackupNotice, Step::Daily],
         "backup" | "restore" | "test-restore" => {
             app.env().ok_or("Finish setup first.")?;
             match kind.as_str() {
@@ -732,6 +743,11 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
                     backup::daily(&ctx);
                     Ok(())
                 }
+                Step::BackupNotice => {
+                    announce::tell(&ctx.dir, announce::BACKING_UP);
+                    Ok(())
+                }
+                Step::InterPassword => notices::new_inter_password(&ctx.dir.join(".env")),
                 Step::Restore(file) => backup::restore(&ctx, &file),
                 Step::TestRestore(file) => backup::test_restore(&ctx, &file),
                 Step::Pin(update, wanted) => images::promote(&ctx.dir, &wanted).and_then(|()| {
@@ -758,7 +774,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
         // An address change restarts the map server too, and a restore starts
         // the game servers again when they were running.
         let started = match kind.as_str() {
-            "start" | "restart" | "readdress" | "portal" | "rebind" => true,
+            "start" | "restart" | "readdress" | "portal" | "rebind" | "repassword" => true,
             "restore" => stack::status(&ctx.dir)
                 .unwrap_or_default()
                 .iter()
@@ -1063,10 +1079,9 @@ async fn install_mod_zip(app: State<'_, App>, request: tauri::ipc::Request<'_>) 
     };
     let name = request.headers().get("File-Name").and_then(|v| v.to_str().ok()).map(modzip::percent_decode).unwrap_or_default();
     let replace = request.headers().get("Replace").is_some_and(|v| v == "yes");
-    let (dir, bytes) = (app.mods_dir(), bytes.clone());
-    tauri::async_runtime::spawn_blocking(move || modzip::install(&dir, &name, &bytes, replace))
-        .await
-        .map_err(|e| e.to_string())?
+    // Unpacked from the request's own bytes rather than a copy, as a zip
+    // can be up to `MAX_ZIP`; `block_in_place` keeps the other commands running.
+    tokio::task::block_in_place(|| modzip::install(&app.mods_dir(), &name, bytes, replace))
 }
 
 /// Opens the mods folder in the file manager, to add mods by copying folders in.
@@ -1277,13 +1292,21 @@ fn quit(handle: &AppHandle) {
 
 /// With the app now running for days in the tray, the daily backup that
 /// Stop and quitting make is also made once a day while the server runs.
+/// The dump locks every table, which freezes the game while it runs, so it
+/// waits for a time nobody's online, unless the newest backup is
+/// [`backup::OVERDUE_HOURS`] old; then players are told first.
 fn daily_backups(handle: AppHandle) {
     loop {
         std::thread::sleep(std::time::Duration::from_secs(60 * 60));
         let app = handle.state::<App>();
-        if app.task.lock().unwrap().is_none() && backup::daily_due(&app.dir, &app.backups) {
-            let _ = start_task(&handle, &app, "daily-backup".into(), None);
+        if app.task.lock().unwrap().is_some() || !backup::daily_due(&app.dir, &app.backups) {
+            continue;
         }
+        // A count that can't be read counts as someone online.
+        if announce::online(&app.dir) != Some(0) && !backup::overdue(&app.backups) {
+            continue;
+        }
+        let _ = start_task(&handle, &app, "daily-backup".into(), None);
     }
 }
 

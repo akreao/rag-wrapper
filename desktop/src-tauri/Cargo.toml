@@ -23,3 +23,5 @@ encoding_rs = "0.8"
 sha2 = "0.10"
 zip = { version = "9", default-features = false, features = ["deflate-flate2", "deflate64"] }
 tauri-plugin-single-instance = "2"
+# Tauri's own runtime; the zip install unpacks on it with `block_in_place`.
+tokio = { version = "1", features = ["rt-multi-thread"] }

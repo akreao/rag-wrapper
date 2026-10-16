@@ -24,6 +24,10 @@ use crate::mods;
 /// The most a zip may unpack to. A mod with client files (sprites, a GRF)
 /// can be large, but not this large.
 const MAX_BYTES: u64 = 4 << 30;
+/// The biggest zip the screen sends. The whole zip is held in memory, in
+/// the window and again in the app, so a bigger one is unzipped by hand
+/// into the mods folder instead. `ui/app.js` checks the same size first.
+pub const MAX_ZIP: u64 = 1 << 30;
 /// The most files and folders a zip may have.
 const MAX_ENTRIES: usize = 100_000;
 
@@ -53,10 +57,14 @@ struct Entry {
 
 /// Unpacks the zip `bytes`, sent as the file `file_name`, into a new mod
 /// folder in `mods_dir`. The mod's name is the zip's single top folder when
-/// everything is inside one, as when someone zips a mod's folder, and
-/// otherwise the zip's file name. With `replace`, the zip's files replace
-/// an installed mod of that name.
+/// everything but loose files is inside one, as when someone zips a mod's
+/// folder (perhaps with a README beside it), and otherwise the zip's file
+/// name. With `replace`, the zip's files replace an installed mod of that
+/// name.
 pub fn install(mods_dir: &Path, file_name: &str, bytes: &[u8], replace: bool) -> Result<Installed, String> {
+    if bytes.len() as u64 > MAX_ZIP {
+        return Err(too_big(file_name));
+    }
     let mut zip = ZipArchive::new(io::Cursor::new(bytes)).map_err(|e| format!("{file_name} isn't a zip file the app can read: {e}"))?;
     if zip.len() > MAX_ENTRIES {
         return Err(format!("{file_name} has more than {MAX_ENTRIES} files, too many for a mod."));
@@ -125,6 +133,14 @@ pub fn install(mods_dir: &Path, file_name: &str, bytes: &[u8], replace: bool) ->
     result
 }
 
+/// Why a zip over [`MAX_ZIP`] isn't installed, and what to do instead.
+pub fn too_big(file_name: &str) -> String {
+    format!(
+        "{file_name} is bigger than {} GB, too big to install from here. Unzip it yourself and copy the mod's folder into the mods folder (Open mods folder).",
+        MAX_ZIP >> 30
+    )
+}
+
 /// Writes the entries into `temp`, a folder this creates, leaving out the
 /// first `strip` parts of each path. Returns how many files it wrote and
 /// what it left out.
@@ -137,6 +153,9 @@ fn unpack<R: Read + Seek>(zip: &mut ZipArchive<R>, entries: &[Entry], strip: usi
     for entry in entries {
         let rel = entry.parts[strip.min(entry.parts.len())..].join("/");
         if rel.is_empty() {
+            if !entry.dir {
+                skipped.push(format!("{}: beside the mod's folder in the zip, not in it.", entry.parts.join("/")));
+            }
             continue;
         }
         if entry.link {
@@ -192,11 +211,11 @@ fn safe_parts(raw: &str) -> Option<Vec<String>> {
 
 /// The mod's folder name, and how many leading path parts to leave out:
 /// one when everything is in a single folder that isn't itself one of a
-/// mod's folders.
+/// mod's folders. Loose files beside that folder, like a README, don't
+/// count.
 fn mod_name(file_name: &str, entries: &[Entry]) -> (String, usize) {
-    let tops: BTreeSet<&str> = entries.iter().map(|e| e.parts[0].as_str()).collect();
-    let folder = entries.iter().any(|e| e.parts.len() > 1 || e.dir);
-    if let (1, true) = (tops.len(), folder) {
+    let tops: BTreeSet<&str> = entries.iter().filter(|e| e.parts.len() > 1 || e.dir).map(|e| e.parts[0].as_str()).collect();
+    if tops.len() == 1 {
         let top = *tops.iter().next().unwrap();
         if !MOD_FOLDERS.contains(&top) {
             return (folder_name(top), 1);
@@ -284,6 +303,19 @@ mod tests {
         // Switched off, and no hidden install folder left behind.
         assert!(!dir.join(mods::ENABLED).exists());
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn loose_files_beside_the_mod_s_folder_are_left_out() {
+        let dir = temp_dir("readme");
+        let zip = zip_of(&[("README.txt", "read me"), ("eden/npc/a.txt", "npc"), ("LICENSE", "l")]);
+        let installed = install(&dir, "eden-v2.zip", &zip, false).unwrap();
+        assert_eq!(installed.name, "eden");
+        assert_eq!(installed.files, 1);
+        assert_eq!(installed.skipped.len(), 2, "{:?}", installed.skipped);
+        assert!(installed.skipped[0].starts_with("README.txt: "));
+        assert_eq!(fs::read_to_string(dir.join("eden/npc/a.txt")).unwrap(), "npc");
+        assert!(!dir.join("eden/README.txt").exists());
     }
 
     #[test]

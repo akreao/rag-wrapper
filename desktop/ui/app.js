@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "daily-backup", "restore" or "test-restore" while one runs
+let task = null; // "start", "restart", "readdress", "portal", "rebind", "repassword", "stop", "build", "update", "backup", "daily-backup", "restore" or "test-restore" while one runs
 let view = "activity"; // or a service name
 let warningLeft = null; // seconds until the restart or stop while players are being warned
 let logGeneration = 0;
@@ -702,7 +702,7 @@ function updateButtons() {
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
   // Stop and restore can be called off only while players are being warned.
-  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task) && warningLeft == null;
+  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind", "repassword"].includes(task) && warningLeft == null;
   $("skip-wait").hidden = warningLeft == null;
   $("announce-send").disabled = !ready;
 }
@@ -1665,10 +1665,18 @@ $("install-mod-zip").addEventListener("click", () => {
   $("mod-zip-file").click();
 });
 
+// The biggest zip the app takes, as modzip.rs's MAX_ZIP: the whole zip is
+// read into memory, here and again in the app.
+const MAX_ZIP = 1024 ** 3;
+
 // Unpacked by the app into a new mod folder, switched off. A zip for a mod
 // that's already there asks first, then replaces it in place.
 async function installZip(file, replace) {
   modsError(null);
+  if (file.size > MAX_ZIP) {
+    modsError(`${file.name} is bigger than 1 GB, too big to install from here. Unzip it yourself and copy the mod's folder into the mods folder (Open mods folder).`);
+    return;
+  }
   const button = $("install-mod-zip");
   button.disabled = true;
   try {
@@ -2032,7 +2040,7 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", rebind: "Network change", stop: "Stop", "daily-backup": "Daily backup", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
+    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", rebind: "Network change", repassword: "INTER_PASSWORD change", stop: "Stop", "daily-backup": "Daily backup", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);

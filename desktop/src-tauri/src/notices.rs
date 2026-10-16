@@ -2,6 +2,8 @@
 //! `.env.example`'s public values, and an admin account `db-init` left as
 //! it was. `db-init` logs both too, but nobody reads that log.
 
+use std::path::Path;
+
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
@@ -104,7 +106,9 @@ pub fn dismiss_db_placeholders(app: State<crate::App>) -> Result<(), String> {
 /// Gives INTER_PASSWORD a random value. `db-init` sets the account to it on
 /// every start and the servers read it from their configs, so it only has
 /// to reach all of them at once: a running server is started again in full
-/// (`db-init` first), never just the game servers. Returns whether that
+/// (`db-init` first), never just the game servers. That's the `repassword`
+/// task, which warns players like a Restart and changes the password only
+/// after the warning, so a cancel leaves the old one. Returns whether that
 /// restart began.
 #[tauri::command]
 pub async fn change_inter_password(handle: AppHandle) -> Result<bool, String> {
@@ -112,31 +116,28 @@ pub async fn change_inter_password(handle: AppHandle) -> Result<bool, String> {
         if let Some(running) = app.task.lock().unwrap().as_ref() {
             return Err(format!("Wait for the current {} to finish.", running.kind));
         }
-        let new = envfile::random_password(20).map_err(|e| e.to_string())?;
-        let old = app.edit_env(|env| {
-            let old = env.get("INTER_PASSWORD").unwrap_or_default();
-            env.set("INTER_PASSWORD", &new);
-            Ok(old)
-        })?;
         let running = stack::status(&app.dir)
             .unwrap_or_default()
             .iter()
             .any(|s| stack::GAME_SERVERS.contains(&s.service.as_str()) && s.state == "running");
-        if !running {
-            return Ok(false);
+        if running {
+            crate::start_task(handle, app, "repassword".into(), None)?;
+        } else {
+            app.edit_env(set_inter_password)?;
         }
-        if let Err(e) = crate::start_task(handle, app, "start".into(), None) {
-            // Left changed, the next restart of only the game servers would
-            // hand them a password the database doesn't have yet.
-            let _ = app.edit_env(|env| {
-                env.set("INTER_PASSWORD", &old);
-                Ok(())
-            });
-            return Err(e);
-        }
-        Ok(true)
+        Ok(running)
     })
     .await?
+}
+
+/// The `repassword` task's step that changes `.env`, once players were warned.
+pub fn new_inter_password(env_path: &Path) -> Result<(), String> {
+    envfile::edit(env_path, set_inter_password)
+}
+
+fn set_inter_password(env: &mut EnvFile) -> Result<(), String> {
+    env.set("INTER_PASSWORD", &envfile::random_password(20).map_err(|e| e.to_string())?);
+    Ok(())
 }
 
 #[cfg(test)]
