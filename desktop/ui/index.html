@@ -23,6 +23,7 @@
       <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
       <button id="skip-wait" hidden title="Tell players it's happening now and go ahead">Go ahead now</button>
       <button id="cancel" hidden>Cancel</button>
+      <button id="quit" title="Stop the server and close rag-wrapper">Quit</button>
     </div>
   </header>
 
@@ -237,6 +238,21 @@
       <button id="go-back" type="button" hidden>Go back to the previous version</button>
       <p id="no-previous" class="hint" hidden>There's no previous version to go back to yet.</p>
       <p class="hint">Use this when a server update breaks something, without waiting for a new app version. Going back again returns to the newer version.</p>
+    </section>
+
+    <section class="card">
+      <h2>Running in the background</h2>
+      <label class="check">
+        <input id="keep-running" type="checkbox">
+        Keep the server running when this window is closed
+      </label>
+      <p class="hint">rag-wrapper stays in the system tray, where you can open it again, start or stop the server, or quit, which stops the server. Opening rag-wrapper from the applications menu also brings the window back. When the server is off, closing the window quits. On GNOME the tray needs the AppIndicator extension.</p>
+      <label class="check">
+        <input id="start-at-login" type="checkbox">
+        Start the server when I log in
+      </label>
+      <p class="hint">rag-wrapper starts in the tray, without its window, and starts the server. The window opens if the server can't start.</p>
+      <p id="background-error" class="error" hidden></p>
     </section>
   </main>
 

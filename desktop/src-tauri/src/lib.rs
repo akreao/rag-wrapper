@@ -1,4 +1,5 @@
 mod announce;
+mod background;
 mod backup;
 mod battleconf;
 mod clientpatch;
@@ -49,8 +50,10 @@ struct App {
     logs: Mutex<Option<Child>>,
     /// Bumped on every log switch so the UI can drop lines from the old stream.
     logs_generation: AtomicU64,
-    /// Set once the window has asked to close and the stack is going down.
+    /// Set once the app is quitting and the stack is going down.
     closing: AtomicBool,
+    /// Set when the app was started at login, until the window asks.
+    at_login: AtomicBool,
     /// The last clash check of the mods: what it checked and its output,
     /// which is None when the image couldn't run it.
     clash_check: Arc<ClashCheck>,
@@ -658,6 +661,7 @@ fn start_task(handle: &AppHandle, app: &App, kind: String, file: Option<String>)
             cmd.arg("down");
             vec![Step::Warn(announce::Going::Stop), Step::Daily, Step::Compose(cmd)]
         }
+        "daily-backup" => vec![Step::Daily],
         "backup" | "restore" | "test-restore" => {
             app.env().ok_or("Finish setup first.")?;
             match kind.as_str() {
@@ -1072,17 +1076,23 @@ pub fn run() {
         // A second copy of the app would copy the stack files again under a
         // running build, and closing either window would stop the server
         // for both. Opening the app again brings this window forward.
-        .plugin(tauri_plugin_single_instance::init(|handle, _, _| {
-            if let Some(window) = handle.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }))
+        .plugin(tauri_plugin_single_instance::init(|handle, _, _| show_main(handle)))
         .setup(|app| {
+            // The window starts hidden, and stays so when started at login:
+            // the server starts and the app waits in the tray.
+            let at_login = std::env::args().any(|a| a == background::AT_LOGIN);
+            if !at_login {
+                show_main(app.handle());
+            }
             // A menu entry is a convenience: the app runs without one.
             if let Err(e) = menu::install(&app.path().app_data_dir()?) {
                 eprintln!("Couldn't add the applications menu entry: {e}");
+            }
+            background::refresh(&app.path().app_data_dir()?);
+            // Without a tray (a desktop that shows none), opening the app
+            // from the menu again brings the window back.
+            if let Err(e) = background::tray(app) {
+                eprintln!("Couldn't add the tray icon: {e}");
             }
             // Backups and client files sit beside the stack, not in it.
             let (dir, data) = match stack::stack_dir_override() {
@@ -1105,11 +1115,14 @@ pub fn run() {
                 logs: Mutex::new(None),
                 logs_generation: AtomicU64::new(0),
                 closing: AtomicBool::new(false),
+                at_login: AtomicBool::new(at_login),
                 clash_check: Arc::new(Mutex::new(None)),
                 map_log: Arc::default(),
             });
             let handle = app.handle().clone();
             std::thread::spawn(move || count_players(handle));
+            let handle = app.handle().clone();
+            std::thread::spawn(move || daily_backups(handle));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1152,20 +1165,21 @@ pub fn run() {
             move_mod,
             open_mods,
             new_item_mod,
-            follow_logs
+            follow_logs,
+            background_settings,
+            set_keep_running,
+            set_start_at_login,
+            launched_at_login,
+            show_window,
+            quit_app
         ])
         .on_window_event(|window, event| {
-            // Only the main window's close stops the server; the battle
+            // Only the main window's close concerns the server; the battle
             // config editor just closes.
             if let (tauri::WindowEvent::CloseRequested { api, .. }, "main") = (event, window.label()) {
                 api.prevent_close();
                 let handle = window.app_handle().clone();
-                let app = handle.state::<App>();
-                if !app.closing.swap(true, Ordering::SeqCst) {
-                    let _ = handle.emit("closing", ());
-                    let handle = handle.clone();
-                    std::thread::spawn(move || stop_and_exit(handle));
-                }
+                std::thread::spawn(move || close_main(&handle));
             }
         })
         .build(tauri::generate_context!())
@@ -1181,8 +1195,104 @@ pub fn run() {
         });
 }
 
-/// The server only runs while the app is open: closing the window cancels
-/// any build, start or restore test (a backup or restore is left to finish), backs up
+/// Closing the window hides it while the server or a task runs, unless
+/// the user chose to have it stop the server; otherwise it quits.
+fn close_main(handle: &AppHandle) {
+    let app = handle.state::<App>();
+    if app.closing.load(Ordering::SeqCst) {
+        return;
+    }
+    let busy = app.task.lock().unwrap().is_some()
+        || stack::status(&app.dir).is_ok_and(|s| s.iter().any(|s| s.state == "running"));
+    if busy && background::keep_running(app.env().as_ref()) {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.hide();
+        }
+    } else {
+        quit(handle);
+    }
+}
+
+/// Brings the main window forward, from the tray or a second launch.
+fn show_main(handle: &AppHandle) {
+    if let Some(window) = handle.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Stops the server and exits, showing the window while it does.
+fn quit(handle: &AppHandle) {
+    let app = handle.state::<App>();
+    if !app.closing.swap(true, Ordering::SeqCst) {
+        show_main(handle);
+        let _ = handle.emit("closing", ());
+        let handle = handle.clone();
+        std::thread::spawn(move || stop_and_exit(handle));
+    }
+}
+
+/// With the app now running for days in the tray, the daily backup that
+/// Stop and quitting make is also made once a day while the server runs.
+fn daily_backups(handle: AppHandle) {
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(60 * 60));
+        let app = handle.state::<App>();
+        if app.task.lock().unwrap().is_none() && backup::daily_due(&app.dir, &app.backups) {
+            let _ = start_task(&handle, &app, "daily-backup".into(), None);
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BackgroundSettings {
+    keep_running: bool,
+    start_at_login: bool,
+}
+
+#[tauri::command]
+fn background_settings(app: State<App>) -> BackgroundSettings {
+    BackgroundSettings {
+        keep_running: background::keep_running(app.env().as_ref()),
+        start_at_login: background::start_at_login(),
+    }
+}
+
+#[tauri::command]
+fn set_keep_running(app: State<App>, on: bool) -> Result<(), String> {
+    app.edit_env(|env| {
+        env.set(background::KEEP_RUNNING, if on { "yes" } else { "no" });
+        Ok(())
+    })
+}
+
+#[tauri::command]
+fn set_start_at_login(handle: AppHandle, on: bool) -> Result<(), String> {
+    let data = handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    background::set_start_at_login(on, &data)
+}
+
+/// Whether the app was started at login, so the window should start the
+/// server. True only the first time it's asked.
+#[tauri::command]
+fn launched_at_login(app: State<App>) -> bool {
+    app.at_login.swap(false, Ordering::SeqCst)
+}
+
+/// The window's Quit button, for a desktop that shows no tray.
+#[tauri::command]
+fn quit_app(handle: AppHandle) {
+    quit(&handle);
+}
+
+/// Shows the window, when something started in the background needs the user.
+#[tauri::command]
+fn show_window(handle: AppHandle) {
+    show_main(&handle);
+}
+
+/// Quitting cancels any build, start or restore test (a backup or restore is left to finish), backs up
 /// the database if there's no backup from the last day, takes the stack
 /// down (the database volume is kept) and then exits.
 fn stop_and_exit(handle: AppHandle) {
