@@ -1,0 +1,28 @@
+//===== rag-wrapper ==========================================
+//= In-game announcements from the desktop app
+//===== Description: =========================================
+//= The desktop app adds a row to wrapper_announcements, which
+//= entrypoint.sh makes in the characters database: the warning
+//= before a restart or stop, or a message of the host's own.
+//= Every two seconds this shows new rows to everyone online and
+//= marks them shown; the app waits for that to know the map server
+//= has this script.
+//============================================================
+
+-	script	wrapper_announcements	-1,{
+OnInit:
+	// Rows from before this start are out of date ("restarting in
+	// 5 minutes" from the restart that just happened).
+	query_sql "UPDATE `wrapper_announcements` SET `shown_at` = NOW(), `skipped` = 1 WHERE `shown_at` IS NULL";
+	initnpctimer;
+	end;
+
+OnTimer2000:
+	.@n = query_sql("SELECT `id`, `message` FROM `wrapper_announcements` WHERE `shown_at` IS NULL ORDER BY `id` LIMIT 10", .@id, .@message$);
+	for (.@i = 0; .@i < .@n; .@i++) {
+		announce .@message$[.@i], bc_all;
+		query_sql "UPDATE `wrapper_announcements` SET `shown_at` = NOW() WHERE `id` = " + .@id[.@i];
+	}
+	initnpctimer;
+	end;
+}

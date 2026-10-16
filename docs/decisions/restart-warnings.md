@@ -1,0 +1,11 @@
+# Warning players before a restart
+
+Roadmap feature 25: before a Restart, Stop or anything else that restarts the map server, players in game are warned, and the host can send a message of their own to everyone.
+
+- **An NPC script reads a table; rAthena isn't changed.** The desktop app adds a row to `wrapper_announcements` in the characters database, and `npc/wrapper/announcements.txt`, which the image loads after rAthena's own scripts, shows new rows with `announce` every 2 seconds and marks them shown. The map server's console was the alternative, but it reads the server's standard input, which `docker compose` doesn't keep open, and an answer to "did it go out?" would mean scraping the log. The shown mark answers that, and tells the app whether the running image has the script at all.
+- **The table is made by `db-init`, not an rAthena upgrade file.** It belongs to the wrapper, like `wrapper_item_names` and `wrapper_sql_upgrades`, so it needs no change to the fork and isn't copied between the two characters databases. Rows older than 30 days are deleted at each start.
+- **5 minutes, then 1 minute, then "now".** The warning reads "Server restarting in 5 minutes." (or "shutting down" for Stop), as the roadmap set out. It's skipped when nobody's online and ends early when everyone logs off, checked every 15 seconds. **Go ahead now** skips the rest and **Cancel** calls it off, and players are told either way.
+- **A warning that can't go out never holds up the restart.** When the map server is down, the online count can't be read, or the script never marks the warning shown (an image from before it), the app says so in the Activity pane and carries on without the wait.
+- **Messages are plain ASCII, up to 200 characters.** The client shows other characters in its own code page, so "é" would arrive garbled. The app sends them to the database as a hex literal, so nothing in them needs quoting.
+- **Closing the window doesn't wait.** It still says "Server shutting down now." to anyone online, since the window is closing anyway; roadmap feature 30 (keep the server running when the window closes) changes that.
+- **Messages waiting when the map server starts are dropped.** A "restarting in 5 minutes" from before the restart would be wrong once it's back, so the script marks those skipped at start-up.
