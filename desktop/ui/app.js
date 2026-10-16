@@ -15,7 +15,7 @@ const LABELS = {
 };
 
 let overview = null;
-let task = null; // "start", "restart", "readdress", "portal", "stop", "build", "update", "backup", "restore" or "test-restore" while one runs
+let task = null; // "start", "restart", "readdress", "portal", "rebind", "stop", "build", "update", "backup", "restore" or "test-restore" while one runs
 let view = "activity"; // or a service name
 let logGeneration = 0;
 const activity = [];
@@ -296,6 +296,7 @@ async function refreshOverview() {
       showNote("ip-note", $("ip").value);
     }
     $("connect-addr").textContent = `${overview.public_ip}:6900`;
+    if ($("bind-confirm").hidden) $("bind-ip").checked = overview.bind_ip;
     if (document.activeElement !== $("portal-port")) $("portal-port").value = overview.portal_port;
     $("admin-name").textContent = overview.admin_user;
     if (!buildFormDirty) fillBuildForm();
@@ -458,11 +459,11 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "go-back", "go-back-yes", "ip-yes", "portal-port-use"])
+  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "go-back", "go-back-yes", "ip-yes", "portal-port-use", "bind-yes"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
-  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal"].includes(task);
+  $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind"].includes(task);
 }
 
 // ---- Pages: the main screen, Dashboard, Settings, Backups, Client patch, Mods and News ----
@@ -722,6 +723,36 @@ async function savePortalPort() {
     await runTask("portal");
   }
 }
+
+// "This network only" moves every published port, so a running server
+// restarts the services that publish them once it's confirmed.
+async function saveBind(restart) {
+  $("bind-error").hidden = true;
+  $("bind-confirm").hidden = true;
+  let changed = false;
+  try {
+    changed = await invoke("set_this_network_only", { on: $("bind-ip").checked });
+  } catch (err) {
+    $("bind-error").textContent = err;
+    $("bind-error").hidden = false;
+  }
+  await refreshOverview();
+  if (changed && restart) {
+    showPage("dashboard");
+    await runTask("rebind");
+  }
+}
+
+$("bind-ip").addEventListener("change", () => {
+  if (!serverRunning()) return saveBind(false);
+  $("bind-error").hidden = true;
+  $("bind-confirm").hidden = false;
+});
+$("bind-yes").addEventListener("click", () => saveBind(true));
+$("bind-no").addEventListener("click", () => {
+  $("bind-confirm").hidden = true;
+  $("bind-ip").checked = overview.bind_ip;
+});
 
 $("portal-port-use").addEventListener("click", savePortalPort);
 $("portal-port").addEventListener("keydown", (e) => {
@@ -1478,7 +1509,7 @@ listen("task", async ({ payload }) => {
   updateButtons();
   if (!payload.running) {
     clearProgress();
-    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
+    const verb = { start: "Start", restart: "Restart", readdress: "Address change", portal: "Portal port change", rebind: "Network change", stop: "Stop", build: "Build", update: "Server update", backup: "Backup", restore: "Restore", "test-restore": "Restore test" }[
       payload.kind
     ];
     push(activity, payload.ok ? `\n${verb} finished.` : `\n${verb} failed. See the output above.`);
