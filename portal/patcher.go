@@ -165,7 +165,7 @@ func (a *app) patcherDownload(w http.ResponseWriter, r *http.Request) {
 // says where the portal is: it asks the portal for the rest.
 func (a *app) newPatcherDownload(w http.ResponseWriter, r *http.Request) {
 	if !a.conn.Patcher.NewAvailable() {
-		http.Error(w, "The new patcher isn't in this portal's image. Rebuild the portal with docker compose build portal.", http.StatusNotFound)
+		http.Error(w, "The new launcher isn't in this portal's image. Rebuild the portal with docker compose build portal.", http.StatusNotFound)
 		return
 	}
 	cfg := map[string]string{"portal": a.conn.BaseURL(r)}
@@ -177,6 +177,7 @@ func (a *app) newPatcherDownload(w http.ResponseWriter, r *http.Request) {
 		newPatcherConfig: append(cfgJSON, '\n'),
 	}, map[string]string{
 		filepath.Join(filepath.Dir(a.conn.Patcher.NewExe), "LICENSE-Go"): "licenses/go-LICENSE.txt",
+		filepath.Join(filepath.Dir(a.conn.Patcher.NewExe), "LICENSE-third-party"): "licenses/third-party-LICENSES.txt",
 	})
 }
 

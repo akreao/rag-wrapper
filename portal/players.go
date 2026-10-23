@@ -232,19 +232,36 @@ func (c connectInfo) newsSource() []byte {
 // latestPost is the first "## " section of the news file, up to the next
 // heading of level 1 or 2. Lines inside ``` or ~~~ code blocks don't count.
 func latestPost(src []byte) []byte {
+	if posts := newsPosts(src, 1); len(posts) > 0 {
+		return posts[0]
+	}
+	return nil
+}
+
+// newsPosts is the news file's "## " sections, newest (first) first, at
+// most limit of them. A post runs up to the next heading of level 1 or 2;
+// lines inside ``` or ~~~ code blocks don't count.
+func newsPosts(src []byte, limit int) [][]byte {
+	var posts [][]byte
 	var post []string
+	inPost := false
+	end := func() {
+		if inPost {
+			posts = append(posts, []byte(strings.Join(post, "")))
+		}
+		post, inPost = nil, false
+	}
 	fence := ""
 	for _, line := range strings.SplitAfter(string(src), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if fence == "" && (strings.HasPrefix(trimmed, "# ") || strings.HasPrefix(trimmed, "## ") || trimmed == "#" || trimmed == "##") {
-			if post != nil {
-				break
+			end()
+			if len(posts) >= limit {
+				return posts
 			}
-			if strings.HasPrefix(trimmed, "## ") || trimmed == "##" {
-				post = []string{}
-			}
+			inPost = strings.HasPrefix(trimmed, "## ") || trimmed == "##"
 		}
-		if post != nil {
+		if inPost {
 			post = append(post, line)
 		}
 		if f := fenceOf(trimmed); f != "" && (fence == "" || f == fence) {
@@ -255,7 +272,8 @@ func latestPost(src []byte) []byte {
 			}
 		}
 	}
-	return []byte(strings.Join(post, ""))
+	end()
+	return posts[:min(len(posts), limit)]
 }
 
 func fenceOf(line string) string {

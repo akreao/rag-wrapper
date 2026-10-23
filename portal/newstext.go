@@ -17,7 +17,30 @@ func (c connectInfo) latestNewsText() (title, body string) {
 	if src == nil {
 		return "", ""
 	}
-	post := latestPost(src)
+	return postText(latestPost(src))
+}
+
+// newsText is up to limit news posts as plain text, newest first.
+func (c connectInfo) newsText(limit int) []newsPostText {
+	src := c.newsSource()
+	if src == nil {
+		return nil
+	}
+	var out []newsPostText
+	for _, p := range newsPosts(src, limit) {
+		title, text := postText(p)
+		out = append(out, newsPostText{Title: title, Text: text})
+	}
+	return out
+}
+
+type newsPostText struct {
+	Title string `json:"title"`
+	Text  string `json:"text"`
+}
+
+// postText is one post's "## " heading and its blocks as lines of text.
+func postText(post []byte) (title, body string) {
 	doc := markdown.Parser().Parse(text.NewReader(post))
 	var blocks []string
 	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
