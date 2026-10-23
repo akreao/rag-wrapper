@@ -435,7 +435,7 @@ func clientPath(dir, p string) (string, error) {
 	if bad {
 		return "", fmt.Errorf("the patch has a file name the patcher won't write: %q", p)
 	}
-	for _, own := range []string{configName, stateName, downloadName} {
+	for _, own := range []string{configName, stateName, downloadName, settingsName} {
 		if strings.EqualFold(rel, own) {
 			return "", fmt.Errorf("the patch would replace the patcher's own %s", own)
 		}

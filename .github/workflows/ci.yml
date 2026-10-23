@@ -144,6 +144,8 @@ jobs:
           file patcher/rpatchur.exe | tee /dev/stderr | grep -q 'PE32+ executable (GUI) x86-64'
           file patcher/rag-wrapper-patcher.exe | tee /dev/stderr | grep -q 'PE32+ executable (GUI) x86-64'
           test -s patcher/LICENSE-Go
+          grep -q 'gioui.org' patcher/LICENSE-third-party
+          grep -q 'SIL OPEN FONT LICENSE' patcher/LICENSE-third-party
 
   # Compile checks only; packaged builds come with tagged releases.
   desktop:

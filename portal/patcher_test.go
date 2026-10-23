@@ -132,9 +132,10 @@ func TestPatcherRoutes(t *testing.T) {
 	}
 
 	rec = get(h, "/connect")
-	if body := rec.Body.String(); !strings.Contains(body, "Download the patcher") || !strings.Contains(body, "<em>LANG</em>") ||
-		strings.Contains(body, "WARP0716") || !strings.Contains(body, `href="/connect/`+newPatcherZip+`"`) ||
-		!strings.Contains(body, "run WARPGATE.exe") || !strings.Contains(body, "the one that has been checked under Wine") {
+	// The launcher is the main download, rpatchur the backup.
+	if body := rec.Body.String(); !strings.Contains(body, `<a class="button" href="/connect/`+newPatcherZip+`" download>Download the launcher</a>`) ||
+		!strings.Contains(body, `href="/connect/`+patcherZip+`" download>download the old patcher</a>`) || !strings.Contains(body, "<em>LANG</em>") ||
+		strings.Contains(body, "WARP0716") || !strings.Contains(body, "run WARPGATE.exe") {
 		t.Fatalf("connect with a patch published:\n%s", body)
 	}
 }
@@ -234,7 +235,7 @@ func TestNewsText(t *testing.T) {
 
 func TestConnectWithoutPatches(t *testing.T) {
 	h, _ := patcherSetup(t, "")
-	if body := get(h, "/connect").Body.String(); strings.Contains(body, "Download the patcher") || !strings.Contains(body, "WARP0716") ||
+	if body := get(h, "/connect").Body.String(); strings.Contains(body, "Download the launcher") || strings.Contains(body, "Download the patcher") || !strings.Contains(body, "WARP0716") ||
 		!strings.Contains(body, "<em>LANG</em>") {
 		t.Fatalf("connect with nothing published:\n%s", body)
 	}

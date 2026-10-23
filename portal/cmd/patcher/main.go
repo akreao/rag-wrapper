@@ -1,15 +1,17 @@
-// Command patcher is the players' client patcher, a Windows program the
-// portal builds and hands out (roadmap feature 17, replacing rpatchur).
+// Command patcher is the players' launcher and client patcher, a Windows
+// program the portal builds and hands out (roadmap feature 17, replacing
+// rpatchur).
 //
 // It sits in the game client's folder with the config the portal wrote
 // into its download, fetches the server's patch list, applies each THOR
 // patch it hasn't applied yet (into rag-wrapper.grf or the client folder),
-// and starts the patched client when the player clicks Play. It shows the
-// server's newest news post meanwhile, and updates itself when the portal
-// has a newer build.
+// and starts the patched client when the player clicks Play. Its tabs show
+// the server's news, who's online and the launcher's settings meanwhile,
+// and it updates itself when the portal has a newer build.
 //
-// On Windows it's a window (ui_windows.go). Elsewhere it runs in a
-// terminal, for testing against a portal from Linux.
+// On Windows it's a Gio window in the portal's look (ui_windows.go,
+// theme_windows.go). Elsewhere it runs in a terminal, for testing against
+// a portal from Linux.
 package main
 
 import (

@@ -128,6 +128,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /connect/"+patcherZip, a.patcherDownload)
 	mux.HandleFunc("GET /connect/"+newPatcherZip, a.newPatcherDownload)
 	mux.HandleFunc("GET /patcher/info.json", a.patcherInfo)
+	mux.HandleFunc("GET /patcher/launcher.json", a.launcherInfo)
 	mux.HandleFunc("GET /patcher/"+patcherName+".exe", a.newPatcherExe)
 	mux.HandleFunc("GET /patcher/{$}", a.patcherPage)
 	mux.HandleFunc("GET /patcher/plist.txt", a.patcherList)
