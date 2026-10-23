@@ -10,13 +10,15 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /portal .
 # Our own launcher (cmd/patcher), cross-compiled for Windows. go-winres adds
 # the manifest that gives it Windows' current look for its buttons and
 # progress bar, the desktop app's icon (a copy in cmd/patcher), and the file
-# details Windows shows.
+# details Windows shows. noopengl leaves out Gio's OpenGL fallback, which needs
+# a libEGL.dll the download doesn't ship and crashes without it, so a
+# Direct3D failure reaches the launcher's error box instead.
 ARG GO_WINRES_VERSION=v0.3.3
 RUN go run github.com/tc-hib/go-winres@${GO_WINRES_VERSION} simply --arch amd64 --manifest gui --icon cmd/patcher/icon.png \
       --out cmd/patcher/rsrc --product-name "rag-wrapper launcher" --file-description "rag-wrapper game launcher" \
       --original-filename rag-wrapper-patcher.exe \
  && mkdir /patcher \
- && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -H windowsgui" \
+ && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -tags noopengl -ldflags="-s -w -H windowsgui" \
       -o /patcher/rag-wrapper-patcher.exe ./cmd/patcher \
  && cp "$(go env GOROOT)/LICENSE" /patcher/LICENSE-Go \
  && for m in gioui.org gioui.org/shader github.com/go-text/typesetting golang.org/x/exp golang.org/x/exp/shiny \

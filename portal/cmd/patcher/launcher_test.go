@@ -63,6 +63,33 @@ func TestGameUp(t *testing.T) {
 	}
 }
 
+func TestGameState(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	up := &liveInfo{Address: "127.0.0.1", LoginPort: ln.Addr().(*net.TCPAddr).Port}
+	down := &liveInfo{Address: "127.0.0.1", LoginPort: 0}
+	ctx := context.Background()
+	for _, c := range []struct {
+		name       string
+		live, last *liveInfo
+		want       int
+	}{
+		{"portal answers, game up", up, nil, upYes},
+		{"portal answers, game down", down, up, upNo},
+		{"no portal, last address answers", nil, up, upYes},
+		// Not Offline: the launcher never reached the portal.
+		{"no portal, last address doesn't answer", nil, down, upNoPortal},
+		{"no portal yet", nil, nil, upNoPortal},
+	} {
+		if got := gameState(ctx, c.live, c.last); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 func TestSettings(t *testing.T) {
 	dir := t.TempDir()
 	if s := loadSettings(dir); s.Theme != themeSystem || s.KeepOpen || s.Tab != "" {

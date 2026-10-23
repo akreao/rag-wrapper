@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -22,6 +24,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/paint"
 	"gioui.org/text"
+	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"golang.org/x/sys/windows"
@@ -38,10 +41,26 @@ import (
 // frame draws from a copy.
 
 var (
-	user32        = windows.NewLazySystemDLL("user32.dll")
-	shell32       = windows.NewLazySystemDLL("shell32.dll")
-	pMessageBoxW  = user32.NewProc("MessageBoxW")
-	pShellExecute = shell32.NewProc("ShellExecuteW")
+	user32                = windows.NewLazySystemDLL("user32.dll")
+	shell32               = windows.NewLazySystemDLL("shell32.dll")
+	shcore                = windows.NewLazySystemDLL("shcore.dll")
+	gdi32                 = windows.NewLazySystemDLL("gdi32.dll")
+	pMessageBoxW          = user32.NewProc("MessageBoxW")
+	pPostMessageW         = user32.NewProc("PostMessageW")
+	pSetProcessDPIAware   = user32.NewProc("SetProcessDPIAware")
+	pSystemParametersInfo = user32.NewProc("SystemParametersInfoW")
+	pAdjustWindowRectEx   = user32.NewProc("AdjustWindowRectEx")
+	pGetDesktopWindow     = user32.NewProc("GetDesktopWindow")
+	pMonitorFromWindow    = user32.NewProc("MonitorFromWindow")
+	pGetMonitorInfoW      = user32.NewProc("GetMonitorInfoW")
+	pGetWindowRect        = user32.NewProc("GetWindowRect")
+	pSetWindowPos         = user32.NewProc("SetWindowPos")
+	pGetDC                = user32.NewProc("GetDC")
+	pReleaseDC            = user32.NewProc("ReleaseDC")
+	pGetDeviceCaps        = gdi32.NewProc("GetDeviceCaps")
+	pGetDpiForMonitor     = shcore.NewProc("GetDpiForMonitor")
+	pShellExecute         = shell32.NewProc("ShellExecuteW")
+	pD3D11CreateDevice    = windows.NewLazySystemDLL("d3d11.dll").NewProc("D3D11CreateDevice")
 )
 
 const (
@@ -56,6 +75,16 @@ const (
 // liveEvery is how often the launcher asks the server who's online.
 const liveEvery = 30 * time.Second
 
+// The window's size and smallest size, in dp, when the screen has room;
+// windowSize shrinks them to fit. Below contentMin the Play and Settings
+// tabs scroll, so the status line and Play always show (News and Players
+// are lists that scroll anyway).
+const (
+	windowW, windowH = 980, 660
+	minW, minH       = 860, 440
+	contentMin       = 440
+)
+
 // The tabs, in order, with the names settings.Tab keeps.
 type tab int
 
@@ -68,13 +97,6 @@ const (
 
 var tabNames = [...]string{"Play", "News", "Players", "Settings"}
 var tabKeys = [...]string{"play", "news", "players", "settings"}
-
-// Game server reachability, from gameUp.
-const (
-	upUnknown = iota
-	upYes
-	upNo
-)
 
 // status is what the goroutines tell the window.
 type status struct {
@@ -103,6 +125,11 @@ type launcher struct {
 	st status
 	// wake asks watchLive to look again now.
 	wake chan struct{}
+	// hwnd is the window's, once it's open, for closing it from the patch
+	// goroutine.
+	hwnd atomic.Uintptr
+	// fonts brings the shaper with the system fonts (systemShaper).
+	fonts chan *text.Shaper
 
 	// Only the window's goroutine uses the rest.
 	set      settings
@@ -123,7 +150,7 @@ type launcher struct {
 	links    map[string]*widget.Clickable
 	keepOpen widget.Bool
 	themes   widget.Enum
-	lists    struct{ playNews, news, online, top widget.List }
+	lists    struct{ page, playNews, news, online, top widget.List }
 }
 
 func run() int {
@@ -167,6 +194,7 @@ func run() int {
 		set:   loadSettings(dir),
 		links: map[string]*widget.Clickable{},
 		wake:  make(chan struct{}, 1),
+		fonts: make(chan *text.Shaper, 1),
 		st:    status{text: "Connecting to " + cfg.Portal + "...", busy: true},
 	}
 	for i, k := range tabKeys {
@@ -179,15 +207,24 @@ func run() int {
 	l.keepOpen.Value = l.set.KeepOpen
 	l.themes.Value = l.set.Theme
 	l.applyTheme()
-	for _, li := range []*widget.List{&l.lists.playNews, &l.lists.news, &l.lists.online, &l.lists.top} {
+	for _, li := range []*widget.List{&l.lists.page, &l.lists.playNews, &l.lists.news, &l.lists.online, &l.lists.top} {
 		li.Axis = layout.Vertical
 	}
 
+	if err := checkD3D11(); err != nil {
+		noWindow(err)
+		return 1
+	}
 	l.win = new(app.Window)
-	l.win.Option(app.Title("Launcher"), app.Size(980, 660), app.MinSize(860, 600))
+	size, least := windowSize()
+	l.win.Option(app.Title("Launcher"), app.Size(size.w, size.h), app.MinSize(least.w, least.h))
 	go l.loop()
 	go l.patch()
 	go l.watchLive()
+	go func() {
+		l.fonts <- systemShaper()
+		l.win.Invalidate()
+	}()
 	app.Main()
 	return 0
 }
@@ -248,7 +285,10 @@ func (l *launcher) patch() {
 		l.update(func(s *status) { s.text = "Updating the launcher..." })
 		if err := replaceSelf(ctx, info, l.exe); err == nil {
 			if shellExecute(l.exe, updatedFlag, l.dir) == nil {
+				// Closed from here, not on the next frame: a minimized
+				// window draws none.
 				l.update(func(s *status) { s.quit = true })
+				l.close()
 				return
 			}
 		}
@@ -268,15 +308,19 @@ func (l *launcher) patch() {
 // watchLive asks the server who's online and the news, and checks the
 // game's login server, now and every liveEvery.
 func (l *launcher) watchLive() {
+	var last *liveInfo
 	for {
 		ctx := context.Background()
 		live, err := fetchLive(ctx, l.cfg.Portal)
-		up := upNo
-		if err == nil && gameUp(ctx, live.Address, live.LoginPort) {
-			up = upYes
+		if err != nil {
+			live = nil
+		}
+		up := gameState(ctx, live, last)
+		if live != nil {
+			last = live
 		}
 		l.update(func(s *status) {
-			if err == nil {
+			if live != nil {
 				s.live = live
 			}
 			s.up = up
@@ -302,14 +346,79 @@ func (l *launcher) saveSettings() {
 	saveSettings(l.dir, l.set)
 }
 
+// noWindow tells the player the window couldn't open or draw, and what to
+// do instead. Gio draws with Direct3D 11 only here (its OpenGL renderer
+// needs ANGLE's libEGL.dll, which the download doesn't have), so the cause
+// is nearly always a missing graphics driver, a very old graphics card or
+// a virtual machine without 3D.
+func noWindow(err error) {
+	messageBox("The launcher couldn't draw its window on this PC. It needs Direct3D 11 graphics, which a missing graphics driver, a very old graphics card or a virtual machine without 3D doesn't have.\n\nOn the server's \"How to connect\" page, click \"download the old patcher\", extract it into the game client's folder the same way, and tell the server's owner.\n\n("+err.Error()+")", mbIconErr)
+}
+
+// checkD3D11 makes the Direct3D 11 device Gio will ask for, and lets it
+// go. Gio's own failure isn't a clean error: when Direct3D 11 fails it
+// tries OpenGL, and the second time round (the window draws again before
+// it closes) its OpenGL loader crashes on the missing libEGL.dll, so the
+// launcher would vanish without a word.
+func checkD3D11() error {
+	if err := pD3D11CreateDevice.Find(); err != nil {
+		return fmt.Errorf("Direct3D 11 isn't installed: %w", err)
+	}
+	const driverHardware, sdkVersion, featureLevel91 = 1, 7, 0x9100
+	var dev, ctx unsafe.Pointer
+	var level uint32
+	r, _, _ := pD3D11CreateDevice.Call(0, driverHardware, 0, 0, 0, 0, sdkVersion,
+		uintptr(unsafe.Pointer(&dev)), uintptr(unsafe.Pointer(&level)), uintptr(unsafe.Pointer(&ctx)))
+	for _, obj := range []unsafe.Pointer{ctx, dev} {
+		if obj != nil {
+			release(obj)
+		}
+	}
+	if r != 0 {
+		return fmt.Errorf("D3D11CreateDevice: error %#x", uint32(r))
+	}
+	if level < featureLevel91 {
+		return fmt.Errorf("the graphics card's Direct3D feature level is too low (%#x)", level)
+	}
+	return nil
+}
+
+// release calls a COM object's Release, the third method in its table.
+func release(obj unsafe.Pointer) {
+	vtbl := *(**[3]uintptr)(obj)
+	syscall.SyscallN(vtbl[2], uintptr(obj))
+}
+
+// close closes the window from any goroutine, minimized or not: Windows
+// queues the WM_CLOSE, and Gio's DestroyEvent then ends the launcher.
+func (l *launcher) close() {
+	if h := l.hwnd.Load(); h != 0 {
+		pPostMessageW.Call(h, wmClose, 0, 0)
+	}
+}
+
 func (l *launcher) loop() {
 	var ops op.Ops
 	for {
 		switch e := l.win.Event().(type) {
 		case app.DestroyEvent:
 			l.saveSettings()
+			if e.Err != nil {
+				noWindow(e.Err)
+				os.Exit(1)
+			}
 			os.Exit(0)
+		case app.Win32ViewEvent:
+			if e.Valid() {
+				l.hwnd.Store(e.HWND)
+				l.win.Run(func() { fitWindow(e.HWND) })
+			}
 		case app.FrameEvent:
+			select {
+			case sh := <-l.fonts:
+				l.th.Shaper = sh
+			default:
+			}
 			gtx := app.NewContext(&ops, e)
 			s := l.snapshot()
 			if s.quit {
@@ -447,20 +556,35 @@ func (l *launcher) layout(gtx layout.Context, s status) {
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.topBar(gtx, s) }),
 			layout.Rigid(layout.Spacer{Height: 16}.Layout),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				switch l.tab {
-				case tabNews:
-					return l.newsTab(gtx, s)
-				case tabPlayers:
-					return l.playersTab(gtx, s)
-				case tabSettings:
-					return l.settingsTab(gtx, s)
+				// On a short screen the tab keeps its smallest height and
+				// scrolls, rather than squashing into the bars around it.
+				least := gtx.Dp(contentMin)
+				if l.tab == tabNews || l.tab == tabPlayers || gtx.Constraints.Max.Y >= least {
+					return l.tabContent(gtx, s)
 				}
-				return l.playTab(gtx, s)
+				return material.List(l.th.Theme, &l.lists.page).Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+					gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = least, least
+					return layout.Inset{Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return l.tabContent(gtx, s)
+					})
+				})
 			}),
 			layout.Rigid(layout.Spacer{Height: 16}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return l.bottomBar(gtx, s) }),
 		)
 	})
+}
+
+func (l *launcher) tabContent(gtx layout.Context, s status) layout.Dimensions {
+	switch l.tab {
+	case tabNews:
+		return l.newsTab(gtx, s)
+	case tabPlayers:
+		return l.playersTab(gtx, s)
+	case tabSettings:
+		return l.settingsTab(gtx, s)
+	}
+	return l.playTab(gtx, s)
 }
 
 // raised lays w out in a plain raised box (no title bar).
@@ -647,6 +771,8 @@ func welcomeText(s status) string {
 	switch {
 	case s.ready && s.up == upNo:
 		return "Your game is up to date, but the game server isn't answering. It may be starting or stopped."
+	case s.ready && s.up == upNoPortal:
+		return "Your game is up to date. The server's website isn't answering just now, so the launcher can't tell whether the game server is up. Click Play to try."
 	case s.ready:
 		return "Your game is up to date. Click Play to start it."
 	case s.failed:
@@ -664,6 +790,8 @@ func (l *launcher) tiles(gtx layout.Context, s status) layout.Dimensions {
 		server, serverColor = "Online", t.p.okFg
 	case upNo:
 		server, serverColor = "Offline", t.p.badFg
+	case upNoPortal:
+		server, serverColor = "Unknown", t.p.muted
 	}
 	playing, mode, date := "-", "-", "-"
 	if s.live != nil {
@@ -1028,7 +1156,100 @@ func shellExecute(file, args, dir string) error {
 	return nil
 }
 
-// messageBox is for the checks before the window opens.
+const (
+	wmClose            = 0x0010
+	spiGetWorkArea     = 0x0030
+	wsOverlappedWindow = 0x00CF0000
+	wsExAppWindow      = 0x00040000
+	wsExWindowEdge     = 0x00000100
+	monitorPrimary     = 1 // MONITOR_DEFAULTTOPRIMARY
+	monitorNearest     = 2 // MONITOR_DEFAULTTONEAREST
+	swpNoZOrder        = 0x0004
+	swpNoActivate      = 0x0010
+	logPixelsX         = 88
+)
+
+type dpSize struct{ w, h unit.Dp }
+
+type rect struct{ left, top, right, bottom int32 }
+
+type monitorInfo struct {
+	size    uint32
+	monitor rect
+	work    rect
+	flags   uint32
+}
+
+// windowSize is the window's size and smallest size in dp: windowW by
+// windowH and minW by minH, each shrunk to fit the main screen's work area
+// (the screen less the taskbar) with the window's frame around it. Gio
+// takes sizes in dp and doesn't fit them to the screen itself, so without
+// this 1080p at 150% opens with Play behind the taskbar, and 768p at 125%
+// can't fit even the smallest size.
+func windowSize() (size, least dpSize) {
+	size, least = dpSize{windowW, windowH}, dpSize{minW, minH}
+	// Gio does this too, when it opens the window; the sizes here must be
+	// in the same pixels.
+	pSetProcessDPIAware.Call()
+	var work rect
+	if r, _, _ := pSystemParametersInfo.Call(spiGetWorkArea, 0, uintptr(unsafe.Pointer(&work)), 0); r == 0 {
+		return
+	}
+	var frame rect
+	pAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&frame)), wsOverlappedWindow, 0, wsExAppWindow|wsExWindowEdge)
+	px := float32(systemDPI()) / 96
+	fitW := unit.Dp(float32(work.right-work.left-(frame.right-frame.left)) / px)
+	fitH := unit.Dp(float32(work.bottom-work.top-(frame.bottom-frame.top)) / px)
+	size = dpSize{min(size.w, fitW), min(size.h, fitH)}
+	least = dpSize{min(least.w, size.w), min(least.h, size.h)}
+	return
+}
+
+// systemDPI is the main screen's DPI, worked out as Gio does it.
+func systemDPI() int {
+	if pGetDpiForMonitor.Find() == nil {
+		desktop, _, _ := pGetDesktopWindow.Call()
+		mon, _, _ := pMonitorFromWindow.Call(desktop, monitorPrimary)
+		var x, y uint32
+		if r, _, _ := pGetDpiForMonitor.Call(mon, 0, uintptr(unsafe.Pointer(&x)), uintptr(unsafe.Pointer(&y))); r == 0 && x > 0 {
+			return int(x)
+		}
+	}
+	dc, _, _ := pGetDC.Call(0)
+	if dc == 0 {
+		return 96
+	}
+	defer pReleaseDC.Call(0, dc)
+	if dpi, _, _ := pGetDeviceCaps.Call(dc, logPixelsX); dpi > 0 {
+		return int(dpi)
+	}
+	return 96
+}
+
+// fitWindow centres the window in the work area of the screen it opened
+// on, shrinking it if that screen is smaller than the main one. Windows
+// would place it anywhere, bottom edge under the taskbar included. It runs
+// on the window's thread.
+func fitWindow(hwnd uintptr) {
+	mon, _, _ := pMonitorFromWindow.Call(hwnd, monitorNearest)
+	mi := monitorInfo{size: uint32(unsafe.Sizeof(monitorInfo{}))}
+	if r, _, _ := pGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&mi))); r == 0 {
+		return
+	}
+	var wr rect
+	if r, _, _ := pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&wr))); r == 0 {
+		return
+	}
+	work := mi.work
+	w := min(wr.right-wr.left, work.right-work.left)
+	h := min(wr.bottom-wr.top, work.bottom-work.top)
+	x := work.left + (work.right-work.left-w)/2
+	y := work.top + (work.bottom-work.top-h)/2
+	pSetWindowPos.Call(hwnd, 0, uintptr(x), uintptr(y), uintptr(w), uintptr(h), swpNoZOrder|swpNoActivate)
+}
+
+// messageBox is for the checks before the window opens, and for a window
+// that couldn't open.
 func messageBox(text string, flags uintptr) int {
 	t, _ := windows.UTF16PtrFromString("Launcher")
 	m, _ := windows.UTF16PtrFromString(strings.ReplaceAll(text, "\x00", ""))

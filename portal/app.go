@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"errors"
@@ -107,10 +108,40 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 	return a, nil
 }
 
+// staticFiles serves the embedded static files with an ETag, a hash of each
+// file worked out once here. Embedded files have no modification time, so
+// without it a browser can't cache them and fetches the font, theme.js and
+// style.css again on every page. "no-cache" makes it check the ETag each
+// time, which costs a 304 and no body, and picks up a new file at once after
+// a portal update.
+func staticFiles(static fs.FS) http.Handler {
+	etags := map[string]string{}
+	fs.WalkDir(static, ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(static, name)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(b)
+		etags[name] = `"` + hex.EncodeToString(sum[:16]) + `"`
+		return nil
+	})
+	files := http.FileServerFS(static)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if etag, ok := etags[r.URL.Path]; ok {
+			w.Header().Set("ETag", etag)
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
 func (a *app) routes() http.Handler {
 	static, _ := fs.Sub(assets, "static")
 	mux := http.NewServeMux()
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", staticFiles(static)))
 	mux.HandleFunc("GET /healthz", a.healthz)
 	mux.HandleFunc("GET /{$}", a.page(a.home))
 	mux.HandleFunc("GET /connect", a.page(a.connect))

@@ -82,7 +82,9 @@ type theme struct {
 	p palette
 }
 
-func newTheme() *theme {
+// nunito is the embedded Nunito, parsed afresh for each shaper: a shaper
+// isn't safe to share between goroutines, and nor are its faces.
+func nunito() []font.FontFace {
 	var faces []font.FontFace
 	for _, f := range []struct {
 		b []byte
@@ -97,9 +99,33 @@ func newTheme() *theme {
 			faces = append(faces, face)
 		}
 	}
+	return faces
+}
+
+// typeface is Nunito, then Windows' own UI font for the letters Nunito
+// lacks (it has Latin-1 only: no Polish ł, Turkish ş, Cyrillic), then
+// whichever system font has them (CJK, Thai, emoji).
+const typeface = "Nunito, Segoe UI"
+
+// nunitoShaper uses only the embedded Nunito, so the window can draw at
+// once; systemShaper adds the system fonts.
+func nunitoShaper() *text.Shaper {
+	return text.NewShaper(text.NoSystemFonts(), text.WithCollection(nunito()))
+}
+
+// systemShaper is Nunito first, with the system fonts behind it for any
+// letter it doesn't have. It reads C:\Windows\Fonts, which takes a second or
+// two the first time (go-text keeps an index in the user's cache folder
+// after that), so the launcher builds it on its own goroutine and swaps it
+// in when it's ready.
+func systemShaper() *text.Shaper {
+	return text.NewShaper(text.WithCollection(nunito()))
+}
+
+func newTheme() *theme {
 	th := material.NewTheme()
-	th.Shaper = text.NewShaper(text.NoSystemFonts(), text.WithCollection(faces))
-	th.Face = "Nunito"
+	th.Shaper = nunitoShaper()
+	th.Face = typeface
 	th.TextSize = 15
 	t := &theme{Theme: th}
 	t.use(lightPalette)
