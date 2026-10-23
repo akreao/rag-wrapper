@@ -15,3 +15,8 @@ Our patcher (`portal/cmd/patcher`, [own-patcher.md](own-patcher.md)) becomes a t
 - **Licences.** The image collects Gio's, go-text's, `golang.org/x/*`'s and Nunito's licences into `LICENSE-third-party`, which goes in the download as `licenses/third-party-LICENSES.txt` beside Go's.
 - **The launcher is the main download** (Steven, 2026-10-23, in the review). The How to connect page's button gets the launcher, with rpatchur as a small "download the old patcher" link for a PC where it won't start. Dropping rpatchur still waits for a player's Windows PC ([own-patcher.md](own-patcher.md)). The download URLs didn't change. In the Linux steps, `play-on-linux.sh` is now called "the script", so "the launcher" always means the Windows program.
 - **Checked under Wine 9** (Xvfb, llvmpipe): every tab in light and dark, patching four test patches with progress, Try again after the portal was down, Check game files, Play starting the client and closing the launcher, and self-update.
+
+Questions asked about the finished launcher (PR #97), one at a time.
+
+- **The launcher is the main download now**, not after a Windows test (see above).
+- **Play closes the launcher by default**, as the patchers always did. Players who want it left open turn on "Keep the launcher open after Play" in Settings. Left open behind the game, it would keep asking the server who's online every 30 seconds for nothing.
