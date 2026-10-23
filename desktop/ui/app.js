@@ -168,6 +168,7 @@ function renderStatus() {
   pill.hidden = !overview?.configured;
   $("start").hidden = !overview?.configured || allUp;
   $("stop").hidden = !overview?.configured || !anyUp;
+  $("menu-restart").hidden = !overview?.configured || !allUp;
 }
 
 // A slow Docker answer mustn't pile up polls behind it.
@@ -821,7 +822,7 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "go-back", "go-back-yes", "ip-yes", "portal-port-use", "bind-yes"])
+  for (const id of ["start", "stop", "menu-restart", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "go-back", "go-back-yes", "ip-yes", "portal-port-use", "bind-yes"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
@@ -2180,6 +2181,10 @@ async function runTask(kind, file) {
 $("start").addEventListener("click", () => runTask("start"));
 $("stop").addEventListener("click", () => runTask("stop"));
 $("build").addEventListener("click", () => runTask("build"));
+$("menu-restart").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("restart");
+});
 $("cancel").addEventListener("click", () => invoke("cancel_task"));
 $("quit").addEventListener("click", quitApp);
 $("tab-activity").addEventListener("click", () => showView("activity"));
