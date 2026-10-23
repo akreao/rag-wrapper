@@ -7,27 +7,61 @@
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
 </head>
-<body>
+<body class="app">
+  <nav id="sidebar" aria-label="Screens" hidden>
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div>
+      <div>
+        <div class="brand-name">rag-wrapper</div>
+        <div id="brand-mode" class="brand-sub"></div>
+      </div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-heading">Server</div>
+      <button id="nav-home" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>Overview</span></button>
+      <button id="nav-live" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20c-.5-2.6-2-4.3-4-5"/></svg><span>Players</span></button>
+      <button id="nav-events" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Events</span></button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-heading">Content</div>
+      <button id="nav-mods" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg><span>Mods</span></button>
+      <button id="nav-patch" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg><span>Client patch</span></button>
+      <button id="nav-news" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg><span>News</span></button>
+    </div>
+    <div class="nav-group">
+      <div class="nav-heading">System</div>
+      <button id="nav-backups" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>Backups</span></button>
+      <button id="nav" class="nav-item"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span>Settings</span></button>
+    </div>
+    <div id="docker" class="sidebar-foot"></div>
+  </nav>
+
+  <div id="shell">
   <header>
-    <h1>rag-wrapper</h1>
-    <span id="docker" class="muted"></span>
+    <h1 id="page-title">Overview</h1>
+    <span id="status" class="status off" hidden><span class="dot"></span><span id="status-text">Off</span></span>
     <div class="actions">
-      <button id="nav-live" hidden>Dashboard</button>
-      <button id="nav" hidden>Settings</button>
-      <button id="nav-backups" hidden>Backups</button>
-      <button id="nav-patch" hidden>Client patch</button>
-      <button id="nav-mods" hidden>Mods</button>
-      <button id="nav-news" hidden>News</button>
-      <button id="nav-events" hidden>Events</button>
-      <button id="start" class="primary">Start server</button>
-      <button id="stop">Stop</button>
-      <button id="build" title="Rebuild the rAthena image, e.g. after changing PACKETVER">Rebuild</button>
+      <button id="notices-toggle" class="icon-button" aria-label="Notices" title="Show or hide notices" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+        <span id="notices-count" class="count"></span>
+      </button>
       <button id="skip-wait" hidden title="Tell players it's happening now and go ahead">Go ahead now</button>
       <button id="cancel" hidden>Cancel</button>
-      <button id="quit" title="Stop the server and close rag-wrapper">Quit</button>
+      <button id="start" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>Start server</button>
+      <button id="stop" class="danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v8"/><path d="M6.3 7a8 8 0 1 0 11.4 0"/></svg>Stop server</button>
+      <details id="more" class="menu">
+        <summary class="icon-button" aria-label="More actions" title="More actions">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="fill"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </summary>
+        <div class="menu-list">
+          <button id="build"><strong>Rebuild</strong><span>Download or build the server again, such as after changing PACKETVER</span></button>
+          <button id="quit"><strong>Quit</strong><span>Stop the server and close rag-wrapper</span></button>
+        </div>
+      </details>
     </div>
   </header>
 
+  <div id="notices">
   <div id="banner" class="banner" hidden></div>
   <div id="address-bar" class="update-bar" hidden>
     <p>
@@ -93,6 +127,8 @@
     </p>
     <button id="player-news-write" class="primary">Write the post</button>
     <button id="player-news-skip" title="Don't post about this version">Not this time</button>
+  </div>
+
   </div>
 
   <main id="setup" hidden>
@@ -480,5 +516,6 @@
       <p id="events-error" class="error" hidden></p>
     </section>
   </main>
+  </div>
 </body>
 </html>

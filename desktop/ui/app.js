@@ -119,9 +119,47 @@ function renderServices(list) {
     }),
   );
 
+  renderStatus();
+
   const portal = list.find((s) => s.service === "portal" && s.state === "running" && s.ports.length);
   $("portal").hidden = !portal;
   if (portal) $("portal-link").dataset.url = `http://${overview.public_ip}:${portal.ports[0]}/`;
+}
+
+// The header's status pill, and Start or Stop: whichever does something now.
+const GAME = ["login", "char", "map"];
+const TASK_STATUS = {
+  start: "Starting",
+  restart: "Restarting",
+  readdress: "Restarting",
+  portal: "Restarting the portal",
+  rebind: "Restarting",
+  repassword: "Restarting",
+  stop: "Stopping",
+  build: "Building",
+  update: "Updating",
+  "go-back": "Going back",
+  backup: "Backing up",
+  "daily-backup": "Backing up",
+  restore: "Restoring",
+  "test-restore": "Testing a backup",
+};
+
+function renderStatus() {
+  const up = (name) => lastServices.some((s) => s.service === name && s.state === "running" && s.health !== "unhealthy");
+  const anyUp = lastServices.some((s) => s.service !== "db-init" && ["running", "restarting"].includes(s.state));
+  const allUp = GAME.every(up);
+  let kind = "off";
+  let text = "Off";
+  if (task && TASK_STATUS[task]) [kind, text] = ["busy", `${TASK_STATUS[task]}…`];
+  else if (allUp) [kind, text] = ["ok", "Running"];
+  else if (anyUp) [kind, text] = ["bad", "Partly running"];
+  const pill = $("status");
+  pill.className = `status ${kind}`;
+  $("status-text").textContent = text;
+  pill.hidden = !overview?.configured;
+  $("start").hidden = !overview?.configured || allUp;
+  $("stop").hidden = !overview?.configured || !anyUp;
 }
 
 // A slow Docker answer mustn't pile up polls behind it.
@@ -426,16 +464,11 @@ async function refreshOverview() {
   task = overview.task;
 
   $("docker").textContent = overview.docker_version ? `Docker Compose ${overview.docker_version}` : "";
+  $("brand-mode").textContent = overview.configured ? `${overview.prere ? "Pre-Renewal" : "Renewal"} · ${overview.packetver.replace(/^(\d{4})(\d\d)(\d\d)$/, "$1-$2-$3")}` : "";
   banner(overview.docker_error);
 
   $("setup").hidden = overview.configured;
-  $("nav").hidden = !overview.configured;
-  $("nav-backups").hidden = !overview.configured;
-  $("nav-live").hidden = !overview.configured;
-  $("nav-patch").hidden = !overview.configured;
-  $("nav-mods").hidden = !overview.configured;
-  $("nav-news").hidden = !overview.configured;
-  $("nav-events").hidden = !overview.configured;
+  $("sidebar").hidden = !overview.configured;
   showPage(overview.configured ? page : null);
   if (!overview.configured) {
     if ($("setup-ip").value !== "other") {
@@ -705,6 +738,7 @@ function updateButtons() {
   $("cancel").hidden = !["build", "update", "go-back", "start", "restart", "readdress", "portal", "rebind", "repassword"].includes(task) && warningLeft == null;
   $("skip-wait").hidden = warningLeft == null;
   $("announce-send").disabled = !ready;
+  renderStatus();
 }
 
 // ---- Warning players before a restart or stop, and messages of the host's own ----
@@ -747,6 +781,28 @@ $("announce-text").addEventListener("keydown", (e) => {
 
 let page = "dashboard";
 
+// The sidebar's buttons and the screen each opens.
+const NAV = [
+  ["nav-home", "dashboard"],
+  ["nav-live", "live"],
+  ["nav-events", "events"],
+  ["nav-mods", "mods"],
+  ["nav-patch", "patch"],
+  ["nav-news", "news"],
+  ["nav-backups", "backups"],
+  ["nav", "settings"],
+];
+const TITLES = {
+  dashboard: "Overview",
+  live: "Players",
+  events: "Events",
+  mods: "Mods",
+  patch: "Client patch",
+  news: "News",
+  backups: "Backups",
+  settings: "Settings",
+};
+
 function showPage(next) {
   if (next) page = next;
   $("dashboard").hidden = next !== "dashboard";
@@ -757,13 +813,13 @@ function showPage(next) {
   $("mods-page").hidden = next !== "mods";
   $("news-page").hidden = next !== "news";
   $("events-page").hidden = next !== "events";
-  $("nav").textContent = page === "settings" ? "Back to server" : "Settings";
-  $("nav-backups").textContent = page === "backups" ? "Back to server" : "Backups";
-  $("nav-live").textContent = page === "live" ? "Back to server" : "Dashboard";
-  $("nav-patch").textContent = page === "patch" ? "Back to server" : "Client patch";
-  $("nav-mods").textContent = page === "mods" ? "Back to server" : "Mods";
-  $("nav-news").textContent = page === "news" ? "Back to server" : "News";
-  $("nav-events").textContent = page === "events" ? "Back to server" : "Events";
+  const shown = next || null;
+  for (const [id, name] of NAV) {
+    $(id).classList.toggle("active", shown === name);
+    if (shown === name) $(id).setAttribute("aria-current", "page");
+    else $(id).removeAttribute("aria-current");
+  }
+  $("page-title").textContent = shown ? TITLES[shown] : "Welcome";
   renderPlayerNews();
   if (next === "live") {
     refreshHistory(true);
@@ -772,7 +828,7 @@ function showPage(next) {
 }
 
 $("nav").addEventListener("click", async () => {
-  if (page === "settings") return showPage("dashboard");
+  if (page === "settings") return;
   $("game-saved").hidden = true;
   $("game-error").hidden = true;
   await loadGameSettings();
@@ -848,10 +904,11 @@ async function startAtLogin() {
   await runInBackground("start");
 }
 
-$("nav-live").addEventListener("click", () => showPage(page === "live" ? "dashboard" : "live"));
+$("nav-home").addEventListener("click", () => showPage("dashboard"));
+$("nav-live").addEventListener("click", () => showPage("live"));
 
 $("nav-backups").addEventListener("click", async () => {
-  if (page === "backups") return showPage("dashboard");
+  if (page === "backups") return;
   $("backup-error").hidden = true;
   await refreshBackups();
   showPage("backups");
@@ -1351,7 +1408,7 @@ async function refreshPatch() {
 }
 
 $("nav-patch").addEventListener("click", async () => {
-  if (page === "patch") return showPage("dashboard");
+  if (page === "patch") return;
   $("patch-error").hidden = true;
   $("patch-done").hidden = true;
   showPage("patch");
@@ -1640,7 +1697,7 @@ async function refreshMods() {
 }
 
 $("nav-mods").addEventListener("click", async () => {
-  if (page === "mods") return showPage("dashboard");
+  if (page === "mods") return;
   modsError(null);
   showPage("mods");
   await refreshMods();
@@ -1812,7 +1869,7 @@ async function loadNews() {
 }
 
 $("nav-news").addEventListener("click", async () => {
-  if (page === "news") return showPage("dashboard");
+  if (page === "news") return;
   // Unsaved edits stay while other screens are open.
   if (!newsDirty) await loadNews();
   showPage("news");
@@ -1963,7 +2020,7 @@ async function loadEvents() {
 }
 
 $("nav-events").addEventListener("click", async () => {
-  if (page === "events") return showPage("dashboard");
+  if (page === "events") return;
   // A fresh form starts this coming Saturday at 10:00 and runs to Sunday night.
   if (!$("event-start").value) {
     const start = new Date();
@@ -2088,6 +2145,39 @@ listen("closing", async () => {
   showPage("dashboard");
   activity.length = 0;
   await showView("activity");
+});
+
+// ---- Header: the More menu and the notices ----
+
+// The menu closes after a pick and on any click outside it.
+$("more").addEventListener("click", (e) => {
+  if (e.target.closest(".menu-list button")) $("more").open = false;
+});
+document.addEventListener("click", (e) => {
+  if (!$("more").contains(e.target)) $("more").open = false;
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") $("more").open = false;
+});
+
+// The bell counts the notice bars showing. It can tuck them away for now;
+// a notice that wasn't showing before brings them back.
+let noticesSeen = new Set();
+function renderNotices() {
+  const bars = [...$("notices").querySelectorAll(":scope > .update-bar, :scope > .banner")].filter((b) => !b.hidden);
+  const ids = new Set(bars.map((b) => b.id));
+  if ([...ids].some((id) => !noticesSeen.has(id))) $("notices").classList.remove("tucked");
+  noticesSeen = ids;
+  $("notices").classList.toggle("empty", bars.length === 0);
+  $("notices-toggle").hidden = bars.length === 0;
+  $("notices-count").textContent = bars.length;
+  $("notices-toggle").setAttribute("aria-expanded", !$("notices").classList.contains("tucked"));
+}
+new MutationObserver(renderNotices).observe($("notices"), { subtree: true, attributes: true, attributeFilter: ["hidden"] });
+renderNotices();
+$("notices-toggle").addEventListener("click", () => {
+  $("notices").classList.toggle("tucked");
+  renderNotices();
 });
 
 refreshOverview()
