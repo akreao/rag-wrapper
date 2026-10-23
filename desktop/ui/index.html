@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>rag-wrapper</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
 </head>
@@ -54,6 +55,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true" class="fill"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
         </summary>
         <div class="menu-list">
+          <button id="menu-restart"><strong>Restart server</strong><span>Restart the game servers; players online get a 5-minute warning</span></button>
           <button id="build"><strong>Rebuild</strong><span>Download or build the server again, such as after changing PACKETVER</span></button>
           <button id="quit"><strong>Quit</strong><span>Stop the server and close rag-wrapper</span></button>
         </div>
@@ -374,6 +376,21 @@
 
     <div id="panel-app" class="panel" hidden>
       <section class="card group">
+        <h2>Appearance</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="theme">Theme</label>
+            <p class="hint">Match the desktop follows your desktop's light or dark setting, where it tells the app. Pick Light or Dark if it doesn't.</p>
+          </div>
+          <select id="theme" class="setting-control">
+            <option value="">Match the desktop</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card group">
         <h2>Running in the background</h2>
         <div class="setting">
           <div class="setting-text">
@@ -445,12 +462,12 @@
   </main>
 
   <main id="backups-page" hidden>
+    <div class="toolbar">
+      <button id="backup-now" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Back up now</button>
+      <button id="open-backups"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Open folder</button>
+    </div>
     <section class="card">
       <h2>Backups</h2>
-      <div class="row">
-        <button id="backup-now">Back up now</button>
-        <button id="open-backups">Open folder</button>
-      </div>
       <p class="hint">The database is also backed up before every rebuild or server update, before the server first loads a mod's database files, and on stop or close when there's no backup from the last day. The newest 10 of your own backups are kept, and the newest 10 automatic ones. Test loads a backup into a throwaway database to prove it would restore, without touching the live one.</p>
       <p id="backup-error" class="error" hidden></p>
       <ul id="backups"></ul>
@@ -459,8 +476,13 @@
   </main>
 
   <main id="patch-page" hidden>
-    <section class="card">
-      <h2>Publish client patch</h2>
+    <div class="toolbar">
+      <button id="open-client-files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Open client files folder</button>
+      <button id="patch-refresh" class="icon-button" aria-label="Check again" title="Check again"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+      <span id="patch-folder" class="hint"></span>
+    </div>
+    <details class="card help">
+      <summary>What goes in the client files folder</summary>
       <p>Players' patchers download new patches from the account portal. Put the files players need in the client files folder, laid out like the game client's own folder:</p>
       <ul class="hint">
         <li><code>rag-wrapper.exe</code>: the patched client, which the patcher's Play button starts.</li>
@@ -470,12 +492,7 @@
               <li>Mods that are on can add their own client files, from their <code>client/</code> folder, laid out the same way. They're added after this folder, in load order: a mod's file replaces one of the same name, except that the entries of Lua tables (<code>.lub</code>, <code>.lua</code> files such as <code>SystemEN/itemInfo_C.lua</code>) are merged.</li>
       </ul>
       <p class="hint">Only hand out the patched exe, your own custom content and your own translation additions: never the full client or llchrisll's translation, which players install themselves.</p>
-      <div class="row">
-        <button id="open-client-files">Open client files folder</button>
-        <button id="patch-refresh">Check again</button>
-      </div>
-      <p id="patch-folder" class="hint"></p>
-    </section>
+    </details>
     <section class="card">
       <h2>Next patch</h2>
       <ul id="patch-problems" class="error-list" hidden></ul>
@@ -500,8 +517,18 @@
   </main>
 
   <main id="mods-page" hidden>
-    <section class="card">
-      <h2>Mods</h2>
+    <div class="toolbar">
+      <button id="install-mod-zip" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 17v3h16v-3"/></svg>Install from zip…</button>
+      <input id="mod-zip-file" type="file" accept=".zip,application/zip" hidden>
+      <form id="new-item-mod" class="toolbar-form">
+        <input id="new-item-mod-name" value="my-items" spellcheck="false" required aria-label="New item mod's name" title="Starts a mod from the custom item kit: a potion and a headgear with every file each needs, and a shop in Prontera that sells them. The folder opens so you can make them your own; see its README.md.">
+        <button type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New item mod</button>
+      </form>
+      <button id="open-mods"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Open mods folder</button>
+      <button id="mods-refresh" class="icon-button" aria-label="Check again" title="Check again"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+    </div>
+    <details class="card help">
+      <summary>How mods work</summary>
       <p>Server-side custom content: NPC scripts and changes to rAthena's databases. Add a mod by installing its zip file, or by copying its folder into the mods folder, one folder per mod:</p>
       <ul class="hint">
         <li><code>npc/</code>: NPC scripts (<code>.txt</code>), loaded after rAthena's own.</li>
@@ -509,23 +536,11 @@
         <li><code>client/</code>: files for the players' game client, such as sprites or custom items' names in <code>SystemEN/itemInfo_C.lua</code>, laid out like the client folder. They go out with the next client patch, published on the Client patch screen.</li>
       </ul>
       <p class="hint">The mods that are on load from top to bottom, so when two change the same entry the lower one wins; the arrows change the order.</p>
-      <div class="row">
-        <button id="install-mod-zip">Install from zip…</button>
-        <input id="mod-zip-file" type="file" accept=".zip,application/zip" hidden>
-        <button id="open-mods">Open mods folder</button>
-        <button id="mods-refresh">Check again</button>
-      </div>
-      <form id="new-item-mod">
-        <label for="new-item-mod-name">New item mod</label>
-        <div class="row">
-          <input id="new-item-mod-name" value="my-items" spellcheck="false" required>
-          <button type="submit">Create</button>
-        </div>
-      </form>
-      <p class="hint">Starts a mod from the custom item kit: a potion and a headgear with every file each needs, and a shop in Prontera that sells them. The folder opens so you can make them your own; see its <code>README.md</code>.</p>
+      <p class="hint"><strong>New item mod</strong> starts a mod from the custom item kit: a potion and a headgear with every file each needs, and a shop in Prontera that sells them. The folder opens so you can make them your own; see its <code>README.md</code>.</p>
       <p id="mods-folder" class="hint"></p>
-    </section>
+    </details>
     <section class="card">
+      <h2>Installed</h2>
       <p id="mods-rebuild" class="notice" hidden>
         The running server was built before mods or rAthena's custom NPCs could be switched on here, so it ignores them. Rebuild the server to load them, then restart it.
         <button id="mods-rebuild-button" type="button">Rebuild</button>
@@ -554,20 +569,20 @@
   </main>
 
   <main id="news-page" hidden>
-    <section class="card">
-      <h2>News</h2>
+    <div class="toolbar">
+      <button id="news-add" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>New post</button>
+      <button id="news-save" disabled>Save</button>
+      <button id="news-reload" class="icon-button" aria-label="Reload" title="Reload"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+      <button id="news-open"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>Open the News page</button>
+    </div>
+    <p id="news-error" class="error" hidden></p>
+    <p id="news-saved" class="notice" hidden>Saved. Players see it the next time they open the News page or the patcher.</p>
+    <details class="card help">
+      <summary>About news and Markdown</summary>
       <p>Posts show on the account portal's News page, newest first, and the newest one shows in the patcher's window. They appear as soon as you save, without a restart.</p>
       <p class="hint">Write the text in Markdown: a blank line between paragraphs, <code>**bold**</code>, <code>*italics*</code>, <code>- </code> for a list, <code>[text](https://...)</code> for a link and <code>###</code> for a subheading.</p>
-      <div class="row">
-        <button id="news-add" class="primary">New post</button>
-        <button id="news-save" disabled>Save</button>
-        <button id="news-reload">Reload</button>
-        <button id="news-open">Open the News page</button>
-      </div>
-      <p id="news-error" class="error" hidden></p>
-      <p id="news-saved" class="notice" hidden>Saved. Players see it the next time they open the News page or the patcher.</p>
-    </section>
-    <details id="news-intro-box" class="card">
+    </details>
+    <details id="news-intro-box" class="card help">
       <summary>Top of the News page</summary>
       <p class="hint">Shown above the posts, such as the server's rules. Start it with a <code># </code> line to replace the page's "News" heading.</p>
       <textarea id="news-intro" rows="6" spellcheck="true" aria-label="Top of the News page"></textarea>

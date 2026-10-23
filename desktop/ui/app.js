@@ -168,6 +168,7 @@ function renderStatus() {
   pill.hidden = !overview?.configured;
   $("start").hidden = !overview?.configured || allUp;
   $("stop").hidden = !overview?.configured || !anyUp;
+  $("menu-restart").hidden = !overview?.configured || !allUp;
 }
 
 // A slow Docker answer mustn't pile up polls behind it.
@@ -821,7 +822,7 @@ $("update").addEventListener("click", () => {
 
 function updateButtons() {
   const ready = overview?.configured && !overview.docker_error;
-  for (const id of ["start", "stop", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "go-back", "go-back-yes", "ip-yes", "portal-port-use", "bind-yes"])
+  for (const id of ["start", "stop", "menu-restart", "build", "build-save", "restart", "mods-restart", "mods-rebuild-button", "backup-now", "update", "skip-update", "restart-new", "go-back", "go-back-yes", "ip-yes", "portal-port-use", "bind-yes"])
     $(id).disabled = !ready || !!task;
   for (const b of document.querySelectorAll("#backups button")) b.disabled = !ready || !!task;
   $("rebuild-now").disabled = !ready || !!task;
@@ -932,6 +933,31 @@ $("nav").addEventListener("click", async () => {
   await loadBackgroundSettings();
   showPage("settings");
 });
+
+// ---- Narrow window ----
+
+// The sidebar shows only icons below 1000 px (style.css), so each item gets
+// its name as a tooltip and accessible name then.
+const narrow = window.matchMedia("(max-width: 1000px)");
+function labelNav() {
+  for (const item of document.querySelectorAll(".nav-item")) {
+    const name = item.querySelector("span").textContent;
+    if (narrow.matches) {
+      item.title = name;
+      item.setAttribute("aria-label", name);
+    } else {
+      item.removeAttribute("title");
+      item.removeAttribute("aria-label");
+    }
+  }
+}
+labelNav();
+narrow.addEventListener("change", labelNav);
+
+// ---- Appearance ----
+
+$("theme").value = document.documentElement.dataset.theme || "";
+$("theme").addEventListener("change", () => window.setTheme($("theme").value));
 
 // ---- Running in the background ----
 
@@ -1572,6 +1598,7 @@ function modItem(m) {
   label.className = "check";
   const box = document.createElement("input");
   box.type = "checkbox";
+  box.className = "switch";
   box.checked = m.enabled;
   // A mod that can't load can still be switched off.
   box.disabled = !!m.problem && !m.enabled;
@@ -1693,6 +1720,7 @@ function customNpcItem(n) {
   label.className = "check";
   const box = document.createElement("input");
   box.type = "checkbox";
+  box.className = "switch";
   box.checked = n.enabled;
   // One that can't load can still be switched off.
   box.disabled = !!n.problem && !n.enabled;
@@ -2178,6 +2206,10 @@ async function runTask(kind, file) {
 $("start").addEventListener("click", () => runTask("start"));
 $("stop").addEventListener("click", () => runTask("stop"));
 $("build").addEventListener("click", () => runTask("build"));
+$("menu-restart").addEventListener("click", () => {
+  showPage("dashboard");
+  runTask("restart");
+});
 $("cancel").addEventListener("click", () => invoke("cancel_task"));
 $("quit").addEventListener("click", quitApp);
 $("tab-activity").addEventListener("click", () => showView("activity"));
