@@ -176,7 +176,7 @@ func (a *app) newPatcherDownload(w http.ResponseWriter, r *http.Request) {
 	a.servePatcherZip(w, r, newPatcherZip, a.conn.Patcher.NewExe, map[string][]byte{
 		newPatcherConfig: append(cfgJSON, '\n'),
 	}, map[string]string{
-		filepath.Join(filepath.Dir(a.conn.Patcher.NewExe), "LICENSE-Go"): "licenses/go-LICENSE.txt",
+		filepath.Join(filepath.Dir(a.conn.Patcher.NewExe), "LICENSE-Go"):          "licenses/go-LICENSE.txt",
 		filepath.Join(filepath.Dir(a.conn.Patcher.NewExe), "LICENSE-third-party"): "licenses/third-party-LICENSES.txt",
 	})
 }
