@@ -157,6 +157,14 @@ function renderStatus() {
   const pill = $("status");
   pill.className = `status ${kind}`;
   $("status-text").textContent = text;
+  $("ov-dot").className = `dot ${kind}`;
+  $("ov-status").textContent = text;
+  const services = lastServices.filter((s) => s.service !== "db-init");
+  const running = services.filter((s) => s.state === "running").length;
+  const sub = [];
+  if (allUp && uptime != null) sub.push(`Up ${duration(uptime)}`);
+  if (services.length) sub.push(`${running} of ${services.length} services running`);
+  $("ov-status-sub").textContent = sub.join(" · ");
   pill.hidden = !overview?.configured;
   $("start").hidden = !overview?.configured || allUp;
   $("stop").hidden = !overview?.configured || !anyUp;
@@ -231,11 +239,79 @@ function renderLive(live) {
     ...usage.map((u) => row([[LABELS[u.service] || u.service], [percent(u.cpu), true], [size(u.memory), true]])),
   );
   $("usage").tFoot.replaceChildren(row([["Total"], [percent(cpu), true], [size(mem), true]]));
+  renderOverviewLive(live, cpu, mem);
 }
 
-// Only while the Dashboard page is showing; `docker stats` isn't free.
+// ---- Overview: the cards along the top, who's online, the services ----
+
+let uptime = null;
+
+function renderOverviewLive(live, cpu, mem) {
+  uptime = live.uptime;
+  const players = live.players || [];
+  $("ov-players").textContent = players.length;
+  $("ov-usage").textContent = live.usage.length ? `CPU ${percent(cpu)} · ${size(mem)}` : "";
+  $("ov-online").replaceChildren(
+    ...players.slice(0, 8).map((p) => {
+      const li = document.createElement("li");
+      li.innerHTML = '<span class="who"><strong></strong> <span class="muted"></span></span><span class="muted map"></span><span class="lv"></span>';
+      li.querySelector("strong").textContent = p.name;
+      li.querySelector(".who .muted").textContent = p.class;
+      li.querySelector(".map").textContent = p.map;
+      li.querySelector(".lv").textContent = p.base_level;
+      return li;
+    }),
+  );
+  $("ov-no-online").hidden = players.length > 0 && players.length <= 8;
+  $("ov-no-online").textContent =
+    players.length > 8 ? `And ${players.length - 8} more.` : $("no-players").textContent;
+  renderStatus();
+}
+
+// The last day's counts as a line under the player count.
+function renderSpark() {
+  const now = Date.now() / 1000;
+  const samples = (playerHistory?.samples || []).filter((s) => s.at > now - DAY);
+  const svg = $("ov-spark");
+  if (samples.length < 2) {
+    svg.replaceChildren();
+    $("ov-peak").textContent = "";
+    return;
+  }
+  const peak = Math.max(...samples.map((s) => s.players));
+  $("ov-peak").textContent = `peak ${peak} today`;
+  const most = Math.max(2, peak);
+  const x = (t) => (200 * (t - (now - DAY))) / DAY;
+  const y = (n) => 26 - (n / most) * 24;
+  const line = samples.map((p) => `${x(p.at).toFixed(1)},${y(p.players).toFixed(1)}`).join(" ");
+  svg.replaceChildren(svgEl("polyline", { points: line, class: "spark-line" }));
+}
+
+$("copy-addr").addEventListener("click", async () => {
+  try {
+    await copyText($("connect-addr").textContent);
+    $("copy-addr").classList.add("done");
+    setTimeout(() => $("copy-addr").classList.remove("done"), 1500);
+  } catch (err) {
+    banner(String(err.message || err));
+  }
+});
+$("connect-settings").addEventListener("click", async (e) => {
+  e.preventDefault();
+  $("nav").click();
+  setTimeout(() => $("network").scrollIntoView({ block: "start", behavior: "smooth" }), 200);
+});
+$("ov-all-players").addEventListener("click", (e) => {
+  e.preventDefault();
+  showPage("live");
+});
+
+// Only while Players or Overview is showing, and every third time on
+// Overview: `docker stats` isn't free.
+let liveTicks = 0;
 async function refreshLive() {
-  if (!overview?.configured || overview.docker_error || page !== "live" || document.hidden || liveBusy) return;
+  if (!overview?.configured || overview.docker_error || !["live", "dashboard"].includes(page) || document.hidden || liveBusy) return;
+  if (page === "dashboard" && liveTicks++ % 3) return;
   liveBusy = true;
   refreshHistory();
   try {
@@ -384,6 +460,7 @@ async function refreshHistory(force) {
     return;
   }
   renderHistory();
+  renderSpark();
 }
 
 for (const [id, range] of [["history-day", DAY], ["history-week", 7 * DAY]]) {
@@ -481,6 +558,7 @@ async function refreshOverview() {
       showNote("ip-note", $("ip").value);
     }
     $("connect-addr").textContent = `${overview.public_ip}:6900`;
+    $("connect-full").textContent = `${overview.public_ip}:6900`;
     if ($("bind-confirm").hidden) $("bind-ip").checked = overview.bind_ip;
     if (document.activeElement !== $("portal-port")) $("portal-port").value = overview.portal_port;
     $("admin-name").textContent = overview.admin_user;
@@ -804,6 +882,7 @@ const TITLES = {
 };
 
 function showPage(next) {
+  const moved = next && next !== page;
   if (next) page = next;
   $("dashboard").hidden = next !== "dashboard";
   $("settings").hidden = next !== "settings";
@@ -823,6 +902,11 @@ function showPage(next) {
   renderPlayerNews();
   if (next === "live") {
     refreshHistory(true);
+    refreshLive();
+  }
+  if (next === "dashboard" && moved) {
+    refreshHistory();
+    liveTicks = 0;
     refreshLive();
   }
 }

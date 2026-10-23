@@ -158,55 +158,51 @@
   </main>
 
   <main id="dashboard" hidden>
-    <aside>
-      <section class="card">
-        <h2>Services</h2>
-        <ul id="services"></ul>
+    <div class="stats">
+      <section class="card stat">
+        <div class="stat-label">Status</div>
+        <div class="stat-value"><span id="ov-dot" class="dot"></span><span id="ov-status">Off</span></div>
+        <div id="ov-status-sub" class="stat-sub"></div>
       </section>
-      <section class="card">
-        <h2>Connecting</h2>
-        <p>Point the client's <code>clientinfo.xml</code> at <strong id="connect-addr"></strong>.</p>
-        <label>Address players connect to
-          <select id="ip"></select>
-        </label>
-        <div id="ip-other" class="row" hidden>
-          <input id="ip-typed" placeholder="such as 100.101.102.103" spellcheck="false" aria-label="Address">
-          <button id="ip-use">Use</button>
-        </div>
-        <p id="ip-note" class="hint" hidden></p>
-        <p id="ip-confirm" class="notice" hidden>Restart the char and map servers on the new address? Players in game are disconnected.<br>
-          <button id="ip-yes">Change and restart</button><button id="ip-no">Cancel</button>
-        </p>
-        <p id="ip-error" class="error" hidden></p>
-        <p class="hint">Changing it while the server runs restarts the char and map servers. Players then need to download the patcher again.</p>
-        <label class="check">
-          <input id="bind-ip" type="checkbox">
-          This network only
-        </label>
-        <p class="hint">Players can reach the server only at the address above, not from any other network this computer joins, such as public Wi-Fi. The server won't start while the computer doesn't have that address.</p>
-        <p id="bind-confirm" class="notice" hidden>Restart the game servers and portal to apply this? Players in game are disconnected.<br>
-          <button id="bind-yes">Apply and restart</button><button id="bind-no">Cancel</button>
-        </p>
-        <p id="bind-error" class="error" hidden></p>
-        <label for="portal-port">Account portal port</label>
-        <div class="row">
-          <input id="portal-port" type="number" min="1024" max="65535">
-          <button id="portal-port-use">Use</button>
-        </div>
-        <p id="portal-port-error" class="error" hidden></p>
-        <p id="portal" hidden><a href="#" id="portal-link">Open the account portal</a></p>
-        <p class="hint">Admin account: <span id="admin-name"></span></p>
+      <section class="card stat">
+        <div class="stat-label">Players online</div>
+        <div class="stat-value"><span id="ov-players">0</span><span id="ov-peak" class="stat-aside"></span></div>
+        <svg id="ov-spark" class="spark" viewBox="0 0 200 28" preserveAspectRatio="none" role="img" aria-label="Players over the last day"></svg>
       </section>
-    </aside>
-    <section class="card logs">
-      <div class="tabs">
-        <button id="tab-activity" class="tab active">Activity</button>
-        <span id="log-title" class="muted"></span>
-        <div id="progress" hidden><div id="progress-bar"></div></div>
-        <span id="progress-text" class="muted"></span>
+      <section class="card stat">
+        <div class="stat-label">Players connect to</div>
+        <div class="stat-value">
+          <code id="connect-addr"></code>
+          <button id="copy-addr" class="icon-button small" aria-label="Copy the address" title="Copy the address">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+          </button>
+        </div>
+        <div class="stat-sub"><span id="portal" hidden><a href="#" id="portal-link">Open the account portal</a> · </span><a href="#" id="connect-settings">Change</a></div>
+      </section>
+    </div>
+    <div class="overview">
+      <div class="overview-side">
+        <section class="card">
+          <div class="card-head"><h2>Services</h2><span id="ov-usage" class="muted"></span></div>
+          <ul id="services"></ul>
+          <p class="hint">Click one to see its log.</p>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>Online now</h2><a href="#" id="ov-all-players">All players</a></div>
+          <ul id="ov-online" class="people"></ul>
+          <p id="ov-no-online" class="hint">The server is off.</p>
+        </section>
       </div>
-      <pre id="log"></pre>
-    </section>
+      <section class="card logs">
+        <div class="tabs">
+          <button id="tab-activity" class="tab active">Activity</button>
+          <span id="log-title" class="muted"></span>
+          <div id="progress" hidden><div id="progress-bar"></div></div>
+          <span id="progress-text" class="muted"></span>
+        </div>
+        <pre id="log"></pre>
+      </section>
+    </div>
   </main>
 
   <main id="settings" hidden>
@@ -261,6 +257,40 @@
       <p id="build-error" class="error" hidden></p>
       <button id="build-save" type="submit">Save and rebuild</button>
     </form>
+
+    <section class="card" id="network">
+      <h2>Network</h2>
+      <p>Players' <code>clientinfo.xml</code> points at <strong id="connect-full"></strong>.</p>
+      <label>Address players connect to
+        <select id="ip"></select>
+      </label>
+      <div id="ip-other" class="row" hidden>
+        <input id="ip-typed" placeholder="such as 100.101.102.103" spellcheck="false" aria-label="Address">
+        <button id="ip-use">Use</button>
+      </div>
+      <p id="ip-note" class="hint" hidden></p>
+      <p id="ip-confirm" class="notice" hidden>Restart the char and map servers on the new address? Players in game are disconnected.<br>
+        <button id="ip-yes">Change and restart</button><button id="ip-no">Cancel</button>
+      </p>
+      <p id="ip-error" class="error" hidden></p>
+      <p class="hint">Changing it while the server runs restarts the char and map servers. Players then need to download the patcher again.</p>
+      <label class="check">
+        <input id="bind-ip" type="checkbox">
+        This network only
+      </label>
+      <p class="hint">Players can reach the server only at the address above, not from any other network this computer joins, such as public Wi-Fi. The server won't start while the computer doesn't have that address.</p>
+      <p id="bind-confirm" class="notice" hidden>Restart the game servers and portal to apply this? Players in game are disconnected.<br>
+        <button id="bind-yes">Apply and restart</button><button id="bind-no">Cancel</button>
+      </p>
+      <p id="bind-error" class="error" hidden></p>
+      <label for="portal-port">Account portal port</label>
+      <div class="row">
+        <input id="portal-port" type="number" min="1024" max="65535">
+        <button id="portal-port-use">Use</button>
+      </div>
+      <p id="portal-port-error" class="error" hidden></p>
+      <p class="hint">Admin account: <span id="admin-name"></span></p>
+    </section>
 
     <section class="card">
       <h2>Server version</h2>
