@@ -3,34 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} · Ragnarok accounts</title>
+<title>{{.Title}} · {{.ServerName}}</title>
+<link rel="icon" href="/static/poring.svg" type="image/svg+xml">
+<link rel="preload" href="/static/fonts/nunito.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header>
-  <a class="brand" href="/">Ragnarok accounts</a>
-  <nav>
-    <a href="/connect">How to connect</a>
-    <a href="/news">News</a>
-    <a href="/online">Online</a>
-    <a href="/rankings">Rankings</a>
-    <a href="/market">Market</a>
-    <a href="/items">Items</a>
-    <a href="/monsters">Monsters</a>
-  {{if .Account}}
-    <a href="/account">{{.Account.UserID}}</a>
-    {{if .IsAdmin}}<a href="/admin">Admin</a>{{end}}
-    <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">Log out</button></form>
-  {{else}}
-    <a href="/login">Log in</a>
-    <a href="/register">Create account</a>
-  {{end}}
-  </nav>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/">{{template "poring" 32}}<span>{{.ServerName}}</span></a>
+    <nav aria-label="Main">
+      <a href="/connect"{{if eq .Section "connect"}} aria-current="page"{{end}}>Play</a>
+      <a href="/news"{{if eq .Section "news"}} aria-current="page"{{end}}>News</a>
+      <a href="/online"{{if eq .Section "online"}} aria-current="page"{{end}}>Online</a>
+      <a href="/rankings"{{if eq .Section "rankings"}} aria-current="page"{{end}}>Rankings</a>
+      <a href="/market"{{if eq .Section "market"}} aria-current="page"{{end}}>Market</a>
+      <a href="/items"{{if eq .Section "database"}} aria-current="page"{{end}}>Database</a>
+      {{if .IsAdmin}}<a href="/admin"{{if eq .Section "admin"}} aria-current="page"{{end}}>Admin</a>{{end}}
+    </nav>
+    <div class="account-links">
+    {{if .Account}}
+      <a href="/account"{{if eq .Section "account"}} aria-current="page"{{end}}>{{.Account.UserID}}</a>
+      <form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">Log out</button></form>
+    {{else}}
+      <a href="/login">Log in</a>
+      <a class="button" href="/register">Create account</a>
+    {{end}}
+    </div>
+  </div>
 </header>
 <main>
   {{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
   {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
   {{template "content" .}}
 </main>
+<footer>{{.ServerName}} is a private Ragnarok Online server. Ragnarok Online is a trademark of Gravity Co., Ltd.</footer>
 </body>
 </html>{{end}}
+
+{{/* The site's mascot: a round pink blob drawn for this portal, not
+     the game's art. The argument is its width in pixels. */}}
+{{define "poring"}}<svg width="{{.}}" height="{{.}}" viewBox="0 0 36 32" aria-hidden="true"><path d="M18 2C11 9 4 15 4 21c0 6 6 9 14 9s14-3 14-9C32 15 25 9 18 2z" fill="#f28bb0" stroke="#c9577f" stroke-width="1.2"/><circle cx="13" cy="20" r="2" fill="#23324a"/><circle cx="23" cy="20" r="2" fill="#23324a"/><path d="M15 25q3 2 6 0" stroke="#23324a" stroke-width="1.6" fill="none" stroke-linecap="round"/><ellipse cx="12" cy="13" rx="2.5" ry="1.5" fill="#fff" opacity=".7"/></svg>{{end}}

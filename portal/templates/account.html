@@ -1,5 +1,5 @@
 {{define "content"}}<h1>{{.Account.UserID}}</h1>
-<section>
+<section class="panel">
   <h2>Characters</h2>
   {{with .Data.Characters}}
   <table>
@@ -18,7 +18,7 @@
 
 {{if not .Data.DeleteCode}}<p class="error">Your account has no birthdate, so you can't delete characters in the game. Set one below, then log in to the game again.</p>{{end}}
 
-<section class="grid">
+<section class="tiles">
   <form method="post" action="/account/details" class="card">
     <h2>Email and birthdate</h2>
     <input type="hidden" name="csrf" value="{{.CSRF}}">

@@ -64,8 +64,10 @@ func TestConnectRoutes(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if loc := rec.Header().Get("Location"); loc != "/connect" {
-		t.Fatalf("GET / logged out redirects to %q", loc)
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, "Welcome to rAthena") ||
+		!strings.Contains(body, `href="/connect"`) || !strings.Contains(body, "10.0.0.5") ||
+		!strings.Contains(body, "The game database isn't answering") {
+		t.Fatalf("GET /: %d\n%s", rec.Code, body)
 	}
 
 	rec = httptest.NewRecorder()

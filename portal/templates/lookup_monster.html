@@ -1,7 +1,8 @@
-{{define "content"}}{{with .Data}}{{with .Mob}}<h1>{{.Name}}{{if .MVP}} <span class="tag bad">MVP</span>{{else if .Boss}} <span class="tag">Boss</span>{{end}}</h1>
-<p><a href="/monsters">All monsters</a></p>
-<div class="grid stats">
-<div class="card">
+{{define "content"}}{{with .Data}}{{with .Mob}}<a class="back" href="/monsters">All monsters</a>
+<h1>{{.Name}}{{if .MVP}} <span class="tag bad">MVP</span>{{else if .Boss}} <span class="tag">Boss</span>{{end}}</h1>
+<div class="tiles">
+<div class="panel">
+<h2>Basics</h2>
 <dl class="facts">
   <dt>Number</dt><dd>{{.ID}} <small class="note">{{.Aegis}}</small></dd>
   {{with .Custom}}<dt>Added by</dt><dd>{{.}}</dd>{{end}}
@@ -16,7 +17,8 @@
   <dt>Size</dt><dd>{{.Size}}</dd>
 </dl>
 </div>
-<div class="card">
+<div class="panel">
+<h2>Combat</h2>
 <dl class="facts">
   <dt>Attack</dt><dd>{{if $.Data.Renewal}}{{.Attack}}, magic {{.Attack2}}{{else}}{{.Attack}} to {{.Attack2}}{{end}}</dd>
   <dt>Defense</dt><dd>{{.Defense}}</dd>
@@ -30,7 +32,7 @@
 </div>
 </div>
 {{end}}
-<section>
+<section class="panel">
 <h2>Drops</h2>
 {{with .Drops}}
 <table>
@@ -47,7 +49,7 @@
 <p>This monster drops nothing.</p>
 {{end}}
 </section>
-<section>
+<section class="panel">
 <h2>Where it spawns</h2>
 {{with .Spawns}}
 <table>

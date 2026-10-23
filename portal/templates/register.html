@@ -1,6 +1,6 @@
-{{define "content"}}<h1>Create an account</h1>
-<p>You'll use this username and password to log in to the game.</p>
-<form method="post" action="/register" class="card">
+{{define "content"}}<form method="post" action="/register" class="panel narrow">
+  <h1>Create an account</h1>
+  <p>You'll use this username and password to log in to the game.</p>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <label>Username <input name="userid" value="{{index .Form "userid"}}" minlength="4" maxlength="23" pattern="[A-Za-z0-9_]+" autocomplete="username" required autofocus>
     <small>4 to 23 letters, digits or _.</small></label>

@@ -147,3 +147,14 @@ func TestAtSavePoint(t *testing.T) {
 		t.Fatal("different spot")
 	}
 }
+
+func TestSection(t *testing.T) {
+	for path, want := range map[string]string{
+		"/": "home", "/connect": "connect", "/items/501": "database", "/monsters": "database",
+		"/admin/accounts/3": "admin", "/news": "news",
+	} {
+		if got := section(path); got != want {
+			t.Errorf("section(%q) = %q, want %q", path, got, want)
+		}
+	}
+}

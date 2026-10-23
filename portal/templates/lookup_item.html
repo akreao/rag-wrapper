@@ -1,6 +1,7 @@
-{{define "content"}}{{with .Data}}{{with .Item}}<h1>{{.Name}}{{if .Slots}} [{{.Slots}}]{{end}}</h1>
-<p><a href="/items">All items</a></p>
-<div class="card wide">
+{{define "content"}}{{with .Data}}{{with .Item}}<a class="back" href="/items">All items</a>
+<h1>{{.Name}}{{if .Slots}} [{{.Slots}}]{{end}}</h1>
+<div class="panel">
+<h2>Details</h2>
 <dl class="facts">
   <dt>Number</dt><dd>{{.ID}} <small class="note">{{.Aegis}}</small></dd>
   <dt>Type</dt><dd>{{.TypeText}}</dd>
@@ -30,7 +31,7 @@
 {{with .UnEquipScript}}<p>When taken off:</p><pre class="script">{{.}}</pre>{{end}}
 </section>{{end}}
 {{end}}
-<section>
+<section class="panel">
 <h2>Dropped by</h2>
 {{with .DroppedBy}}
 <table>
