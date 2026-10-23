@@ -29,8 +29,10 @@
   --poring: #f28bb0;
   color-scheme: light;
 }
+/* Dark: the browser's setting, unless the top bar's switch picked one
+   (theme.js puts it in data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --sky: #0f1a2b;
     --panel: #172338;
     --panel-line: #2f4568;
@@ -49,6 +51,25 @@
     --bad: #3f1f24; --bad-fg: #f5a3a3;
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --sky: #0f1a2b;
+  --panel: #172338;
+  --panel-line: #2f4568;
+  --panel-shadow: #0a1220;
+  --inset: #1e2d47;
+  --row-line: #24365a;
+  --title: #2f5596;
+  --title-dark: #24447a;
+  --title-fg: #eef4ff;
+  --fg: #e4ebf7;
+  --muted: #9fb0cc;
+  --link: #8ab4ff;
+  --cta: #e25a82;
+  --cta-dark: #a13a5a;
+  --ok: #173826; --ok-fg: #8fdcaa;
+  --bad: #3f1f24; --bad-fg: #f5a3a3;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -76,6 +97,18 @@ small, .note { color: var(--muted); }
 .topbar nav a[aria-current], .account-links a[aria-current] { background: var(--title); color: var(--title-fg); }
 .account-links { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .account-links a.button { color: #fff; padding: 8px 14px; }
+/* The light/dark switch shows the theme it switches to. */
+.theme-toggle { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border-radius: 8px;
+  background: none; box-shadow: none; color: var(--fg); }
+.theme-toggle[hidden] { display: none; }
+.theme-toggle:hover { background: var(--inset); }
+.theme-toggle:active { transform: none; }
+.theme-toggle .sun, :root[data-theme="dark"] .theme-toggle .moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .sun { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-toggle .moon { display: none; }
+  :root:not([data-theme="light"]) .theme-toggle .sun { display: block; }
+}
 .account-links a.button:hover { background: var(--cta-dark); }
 
 /* --- Page --- */
