@@ -91,6 +91,32 @@ func gameUp(ctx context.Context, address string, port int) bool {
 	return true
 }
 
+// Game server reachability, for the Game server tile.
+const (
+	upUnknown  = iota // not checked yet
+	upYes             // the login server takes connections
+	upNo              // it doesn't
+	upNoPortal        // the portal didn't answer, so the launcher can't tell
+)
+
+// gameState checks the game server after one look at the portal: live is
+// the launcher info it gave, or nil when it didn't answer, and last is the
+// info from the last time it did. With no answer the launcher still tries
+// the address it knows, but a failed try isn't Offline: the address may
+// have changed, and the portal being down says nothing about the game.
+func gameState(ctx context.Context, live, last *liveInfo) int {
+	switch {
+	case live != nil:
+		if gameUp(ctx, live.Address, live.LoginPort) {
+			return upYes
+		}
+		return upNo
+	case last != nil && gameUp(ctx, last.Address, last.LoginPort):
+		return upYes
+	}
+	return upNoPortal
+}
+
 // Theme choices.
 const (
 	themeSystem = "system" // follow Windows' app mode
