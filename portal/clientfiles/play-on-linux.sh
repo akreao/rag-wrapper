@@ -2,7 +2,7 @@
 # Starts this server's Ragnarok Online client on Linux, with Wine and DXVK.
 #
 # Put this file in the client folder (the one with data.grf in it) and run:
-#   bash play-on-linux.sh          start the patcher, which starts the game
+#   bash play-on-linux.sh          start the launcher, which starts the game
 #   bash play-on-linux.sh setup    open OpenSetup to pick DirectX 9 and a resolution
 #   bash play-on-linux.sh run X    run any other Windows program in the same Wine setup
 #
@@ -53,7 +53,7 @@ if [ "${RO_FONTS:-1}" != 0 ] && [ ! -e "$WINEPREFIX/.rag-wrapper-corefonts" ]; t
 	elif winetricks -q corefonts; then
 		touch "$WINEPREFIX/.rag-wrapper-corefonts"
 	else
-		warn "couldn't install the core fonts, so text may look wrong. Run the launcher again with internet to try again, or with RO_FONTS=0 to skip them."
+		warn "couldn't install the core fonts, so text may look wrong. Run this script again with internet to try again, or with RO_FONTS=0 to skip them."
 	fi
 fi
 
@@ -114,7 +114,7 @@ run)
 	elif [ -e "$client" ]; then
 		exec wine "$client"
 	fi
-	die "no $patcher in this folder; download the patcher from the server's How to connect page and extract it here"
+	die "no $patcher in this folder; download the launcher from the server's How to connect page and extract it here"
 	;;
 *) die "unknown command '$1'; use setup, run or nothing" ;;
 esac
