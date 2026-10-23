@@ -68,12 +68,13 @@ func newApp(st *store, adminGroup int, conn connectInfo) (*app, error) {
 		"town":          func() string { return townMap + " (" + strconv.Itoa(townX) + ", " + strconv.Itoa(townY) + ")" },
 		"jobName":       jobName,
 		"inc":           func(i int) int { return i + 1 },
+		"minus":         func(a, b int) int { return a - b },
 		"thousands":     thousands,
 		"rankingLimit":  func() int { return rankingLimit },
 		"lookupMissing": func() string { return lookupMissingText },
 	}
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"login", "register", "account", "admin", "admin_account", "admin_character", "connect", "online", "rankings", "market", "news", "error",
+	for _, name := range []string{"home", "login", "register", "account", "admin", "admin_account", "admin_character", "connect", "online", "rankings", "market", "news", "error",
 		"lookup_items", "lookup_item", "lookup_monsters", "lookup_monster"} {
 		t, err := template.New("").Funcs(funcs).ParseFS(assets, "templates/layout.html", "templates/items.html", "templates/lookup.html", "templates/"+name+".html")
 		if err != nil {
@@ -173,14 +174,18 @@ type request struct {
 
 // view is what every template gets.
 type view struct {
-	Title   string
-	Account *Account
-	IsAdmin bool
-	CSRF    string
-	Flash   string
-	Error   string
-	Form    map[string]string
-	Data    any
+	Title string
+	// Set by render for the layout: the name in the top bar, and which
+	// part of the site the page is in, to highlight it there.
+	ServerName string
+	Section    string
+	Account    *Account
+	IsAdmin    bool
+	CSRF       string
+	Flash      string
+	Error      string
+	Form       map[string]string
+	Data       any
 }
 
 // page wraps a handler with the session, CSRF check and account lookup.
@@ -246,6 +251,8 @@ func (a *app) admin(h func(*request) error) http.HandlerFunc {
 
 func (a *app) render(req *request, status int, name string, v view) {
 	v.Account = req.account
+	v.ServerName = a.conn.ServerName()
+	v.Section = section(req.r.URL.Path)
 	v.IsAdmin = req.account != nil && req.account.GroupID == a.adminGroup
 	v.CSRF = req.sess.csrf
 	if v.Flash == "" {
@@ -257,6 +264,19 @@ func (a *app) render(req *request, status int, name string, v view) {
 	if err := a.pages[name].ExecuteTemplate(req.w, "layout", v); err != nil {
 		log.Printf("render %s: %v", name, err)
 	}
+}
+
+// section is the top bar's entry for a page: the path's first part, with
+// item and monster pages under "database".
+func section(path string) string {
+	first, _, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+	switch first {
+	case "items", "monsters":
+		return "database"
+	case "":
+		return "home"
+	}
+	return first
 }
 
 func (a *app) fail(req *request, err error) {
@@ -296,12 +316,6 @@ func (a *app) healthz(w http.ResponseWriter, r *http.Request) {
 
 // home sends players to their account, and visitors who aren't logged in
 // (most likely new players) to the setup steps.
-func (a *app) home(req *request) error {
-	if req.account == nil {
-		return a.redirect(req, "/connect", "")
-	}
-	return a.redirect(req, "/account", "")
-}
 
 // --- Logging in and out ---
 

@@ -1,0 +1,68 @@
+{{define "content"}}{{with .Data}}
+<section class="panel">
+  <h2>Welcome</h2>
+  <div class="hero">
+    <div>
+      <h1>Welcome to {{.Conn.ServerName}}</h1>
+      <p>A Ragnarok Online server you play with the real game client. Make an account, get your client ready, and log in.</p>
+      <p class="downloads">
+        <a class="button" href="/connect">How to play</a>
+        {{if $.Account}}<a class="button plain" href="/account">Your account</a>{{else}}<a class="button plain" href="/register">Create an account</a>{{end}}
+      </p>
+    </div>
+    <div class="stats">
+      <div class="stat"><span>Playing now</span><strong>{{if .NoDatabase}}?{{else}}{{.OnlineCount}}{{end}}</strong></div>
+      <div class="stat"><span>Mode</span><strong>{{.Conn.Mode}}</strong></div>
+      <div class="stat"><span>Address</span><strong>{{.Conn.Address}}</strong></div>
+      <div class="stat"><span>Client date</span><strong>{{.Conn.ClientDate}}</strong></div>
+    </div>
+  </div>
+</section>
+
+<div class="tiles">
+  <section class="panel">
+    <h2>Start playing</h2>
+    <ol class="steps">
+      {{if $.Account}}<li class="done"><strong>Make an account</strong><small>Done: you're logged in as {{$.Account.UserID}}.</small></li>
+      {{else}}<li><strong><a href="/register">Make an account</a></strong><small>The game uses the same username and password.</small></li>{{end}}
+      <li><strong>Get the game client</strong><small>A Korean client from {{.Conn.ClientDate}}, with the English translation.</small></li>
+      <li><strong>Connect it to this server</strong><small><a href="/connect">How to connect</a> has every step, with the files to download.</small></li>
+    </ol>
+  </section>
+
+  <section class="panel">
+    <h2>News <a href="/news">All news</a></h2>
+    {{if .News}}<div class="news-latest">{{.News}}</div>{{else}}<p class="note">No news yet.</p>{{end}}
+  </section>
+
+  <section class="panel">
+    <h2>Who's online <a href="/online">See all</a></h2>
+    {{if .NoDatabase}}<p class="note">The game database isn't answering right now.</p>
+    {{else}}{{with .Online}}<ul class="list">
+      {{range .}}<li><span class="name">{{.Name}}</span><span class="meta">{{.JobName}} {{.BaseLevel}}</span></li>{{end}}
+    </ul>
+    {{if gt $.Data.OnlineCount (len .)}}<p class="note">And {{minus $.Data.OnlineCount (len .)}} more.</p>{{end}}
+    {{else}}<p class="note">Nobody is in the game right now.</p>{{end}}{{end}}
+  </section>
+
+  <section class="panel">
+    <h2>Top adventurers <a href="/rankings">Rankings</a></h2>
+    {{if .NoDatabase}}<p class="note">The game database isn't answering right now.</p>
+    {{else}}{{with .Top}}<ol class="list">
+      {{range $i, $c := .}}<li><span class="rank">{{inc $i}}</span><span class="name">{{$c.Name}}</span><span class="meta">{{$c.JobName}}</span><strong>{{$c.BaseLevel}}</strong></li>{{end}}
+    </ol>
+    {{else}}<p class="note">No characters to rank yet.</p>{{end}}{{end}}
+  </section>
+
+  <section class="panel span-2">
+    <h2>Database</h2>
+    <form method="get" action="/items" class="search">
+      <input type="search" name="q" placeholder="Item or monster name, or its number" aria-label="Item or monster">
+      <button>Items</button>
+      <button formaction="/monsters">Monsters</button>
+      <button formaction="/market" class="plain">In shops</button>
+    </form>
+    <p class="note">Look up what an item does and who drops it, where a monster spawns, or which shops in town sell something right now.</p>
+  </section>
+</div>
+{{end}}{{end}}

@@ -1,6 +1,8 @@
 {{define "content"}}{{$t := .Data.Target}}
-<p><a href="/admin">All accounts</a></p>
+<a class="back" href="/admin">All accounts</a>
 <h1>{{$t.UserID}}</h1>
+<section class="panel">
+<h2>Account</h2>
 <dl class="facts">
   <dt>Account</dt><dd>#{{$t.ID}}</dd>
   <dt>Email</dt><dd>{{$t.Email}}</dd>
@@ -9,8 +11,9 @@
   <dt>Last login</dt><dd>{{if $t.LastLogin}}{{$t.LastLogin}} from {{$t.LastIP}}{{else}}Never{{end}}</dd>
   <dt>Logins</dt><dd>{{$t.LoginCount}}</dd>
 </dl>
+</section>
 
-<section>
+<section class="panel">
   <h2>Characters</h2>
   {{with .Data.Characters}}
   <table>
@@ -26,7 +29,7 @@
   {{else}}<p>No characters.</p>{{end}}
 </section>
 
-<section>
+<section class="panel">
   <h2>Storage</h2>
   {{with .Data.Storage}}{{template "items" .}}{{else}}<p>The storage is empty.</p>{{end}}
   <p class="note">Kafra storage, shared by all of this account's characters. Read-only; while one of them is in game it's as of the last save.</p>
@@ -35,7 +38,7 @@
 {{if .Data.Self}}
 <p class="note">This is your own account. Another admin has to change its group, ban it or reset its password.</p>
 {{else}}
-<section class="grid">
+<section class="tiles">
   <form method="post" action="/admin/accounts/{{$t.ID}}/group" class="card">
     <h2>GM level</h2>
     <input type="hidden" name="csrf" value="{{.CSRF}}">

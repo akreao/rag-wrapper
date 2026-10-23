@@ -1,6 +1,8 @@
 {{define "content"}}{{$c := .Data.Character}}
-<p>{{with .Data.Owner}}<a href="/admin/accounts/{{.ID}}">{{.UserID}}</a>{{else}}<a href="/admin">All accounts</a>{{end}}</p>
+{{with .Data.Owner}}<a class="back" href="/admin/accounts/{{.ID}}">{{.UserID}}</a>{{else}}<a class="back" href="/admin">All accounts</a>{{end}}
 <h1>{{$c.Name}} {{if $c.Online}}<span class="tag on">Online</span>{{end}}</h1>
+<section class="panel">
+<h2>Character</h2>
 <dl class="facts">
   <dt>Class</dt><dd>{{$c.JobName}}</dd>
   <dt>Level</dt><dd>Base {{$c.BaseLevel}}, job {{$c.JobLevel}}</dd>
@@ -8,8 +10,9 @@
   <dt>Position</dt><dd>{{$c.LastMap}} ({{$c.LastX}}, {{$c.LastY}})</dd>
   <dt>Save point</dt><dd>{{$c.SaveMap}} ({{$c.SaveX}}, {{$c.SaveY}})</dd>
 </dl>
+</section>
 
-<section class="grid">
+<section class="tiles">
   <form method="post" action="/admin/characters/{{$c.ID}}/save-point" class="card">
     <h2>Move to save point</h2>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -37,7 +40,7 @@
   </form>
 </section>
 
-<section>
+<section class="panel">
   <h2>Inventory</h2>
   {{with .Data.Items}}{{template "items" .}}{{else}}<p>The inventory is empty.</p>{{end}}
   {{with .Data.Cart}}
