@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -72,7 +73,8 @@ func (a *app) launcherInfo(w http.ResponseWriter, r *http.Request) {
 		d.News = []newsPostText{}
 	}
 	if a.store != nil {
-		ctx := r.Context()
+		ctx, cancel := context.WithTimeout(r.Context(), dbTimeout)
+		defer cancel()
 		online, err := a.store.onlineCharacters(ctx)
 		if err == nil {
 			d.OnlineCount = len(online)

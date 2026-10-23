@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -156,5 +158,40 @@ func TestSection(t *testing.T) {
 		if got := section(path); got != want {
 			t.Errorf("section(%q) = %q, want %q", path, got, want)
 		}
+	}
+}
+
+func TestStaticFilesCaching(t *testing.T) {
+	a, err := newApp(nil, 99, connectInfo{Address: "10.0.0.5", PacketVer: "20220406"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := a.routes()
+	for _, name := range []string{"style.css", "theme.js", "poring.svg", "fonts/nunito.woff2"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/"+name, nil))
+		etag := rec.Header().Get("ETag")
+		if rec.Code != http.StatusOK || etag == "" || rec.Header().Get("Cache-Control") != "no-cache" {
+			t.Fatalf("%s: code %d, ETag %q, Cache-Control %q", name, rec.Code, etag, rec.Header().Get("Cache-Control"))
+		}
+		req := httptest.NewRequest(http.MethodGet, "/static/"+name, nil)
+		req.Header.Set("If-None-Match", etag)
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
+			t.Errorf("%s with matching If-None-Match: code %d, %d bytes", name, rec.Code, rec.Body.Len())
+		}
+		req = httptest.NewRequest(http.MethodGet, "/static/"+name, nil)
+		req.Header.Set("If-None-Match", `"stale"`)
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.Len() == 0 {
+			t.Errorf("%s with stale If-None-Match: code %d, %d bytes", name, rec.Code, rec.Body.Len())
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/missing.css", nil))
+	if rec.Code != http.StatusNotFound || rec.Header().Get("ETag") != "" {
+		t.Errorf("missing file: code %d, ETag %q", rec.Code, rec.Header().Get("ETag"))
 	}
 }
