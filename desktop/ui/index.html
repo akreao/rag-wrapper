@@ -206,121 +206,192 @@
   </main>
 
   <main id="settings" hidden>
-    <form id="game-form" class="card">
-      <h2>Game settings</h2>
-      <label>Server name
-        <input id="server_name" required maxlength="19">
-      </label>
-      <p class="hint">Shown in the client's server list. Up to 19 characters, no spaces or any of \ / : * ? " &lt; &gt; |</p>
-      <label>Message of the day
-        <textarea id="motd" rows="4" placeholder="Leave empty for rAthena's welcome message"></textarea>
-      </label>
-      <p class="hint">Shown to every player when they log in. Plain letters, digits and punctuation.</p>
-      <label class="check">
-        <input id="player_commands" type="checkbox">
-        Players can use helper commands: @autoloot, @go, @rates, @whodrops and the rest of rAthena's "Super Player" list
-      </label>
-      <p id="commands-locked" class="hint" hidden><code>groups.yml</code> in the overrides folder was written by hand, so this is set there.</p>
-      <p id="game-error" class="error" hidden></p>
-      <p id="game-saved" class="notice" hidden>
-        Saved. Changes apply the next time the game servers start.
-        <button id="restart" type="button" hidden>Restart game servers</button>
-      </p>
-      <div class="row">
-        <button id="game-save" class="primary" type="submit">Save</button>
-        <button id="open-battle-conf" type="button">Battle config…</button>
-        <button id="open-overrides" type="button">Open override folder</button>
-      </div>
-      <p class="hint">Exp and drop rates, the exp lost on death and every other option in rAthena's <code>conf/battle</code> files are in <strong>Battle config</strong>. For other config files, edit them in the override folder.</p>
-    </form>
+    <nav class="subtabs" aria-label="Settings sections">
+      <button type="button" class="subtab active" data-panel="panel-game">Game</button>
+      <button type="button" class="subtab" data-panel="panel-build">Server build</button>
+      <button type="button" class="subtab" data-panel="panel-network">Network</button>
+      <button type="button" class="subtab" data-panel="panel-version">Version</button>
+      <button type="button" class="subtab" data-panel="panel-app">App</button>
+    </nav>
 
-    <form id="build-form" class="card">
-      <h2>Server build</h2>
-      <label>Client date (PACKETVER)
-        <select id="packetver-preset">
-          <option value="20250716">2025-07-16 (WARPGATE)</option>
-          <option value="20220406">2022-04-06</option>
-          <option value="custom">Other date…</option>
-        </select>
-      </label>
-      <label id="packetver-custom" hidden>Client date, YYYYMMDD
-        <input id="packetver" inputmode="numeric" pattern="20[0-9]{6}" maxlength="8">
-      </label>
-      <label>Game mode
-        <select id="mode">
-          <option value="pre">Pre-renewal (default)</option>
-          <option value="re">Renewal</option>
-        </select>
-      </label>
-      <p class="hint">Pre-renewal is the more polished mode; rAthena's Renewal content is incomplete and not up to date with kRO. Each mode keeps its own characters: accounts are shared, and switching back brings the other mode's characters back. The client date must match your game client.</p>
-      <p id="build-warning" class="notice" hidden>Saving rebuilds the server, which takes 5 to 10 minutes. Players are disconnected while it restarts. If you publish client patches, publish one after a mode switch so players get that mode's files.</p>
-      <p id="build-error" class="error" hidden></p>
-      <button id="build-save" type="submit">Save and rebuild</button>
-    </form>
+    <div id="panel-game" class="panel">
+      <form id="game-form" class="card group">
+        <h2>Game</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="server_name">Server name</label>
+            <p class="hint">Shown in the client's server list. Up to 19 characters, no spaces or any of \ / : * ? " &lt; &gt; |</p>
+          </div>
+          <input id="server_name" class="setting-control" required maxlength="19">
+        </div>
+        <div class="setting stacked">
+          <div class="setting-text">
+            <label for="motd">Message of the day</label>
+            <p class="hint">Shown to every player when they log in. Plain letters, digits and punctuation.</p>
+          </div>
+          <textarea id="motd" rows="4" placeholder="Leave empty for rAthena's welcome message"></textarea>
+        </div>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="player_commands">Player helper commands</label>
+            <p class="hint">@autoloot, @go, @rates, @whodrops and the rest of rAthena's "Super Player" list</p>
+            <p id="commands-locked" class="hint" hidden><code>groups.yml</code> in the overrides folder was written by hand, so this is set there.</p>
+          </div>
+          <input id="player_commands" type="checkbox" class="switch">
+        </div>
+        <div class="save-row">
+          <p id="game-error" class="error" hidden></p>
+          <p id="game-saved" class="notice" hidden>
+            Saved. Changes apply the next time the game servers start.
+            <button id="restart" type="button" hidden>Restart game servers</button>
+          </p>
+          <button id="game-save" class="primary" type="submit">Save</button>
+        </div>
+      </form>
 
-    <section class="card" id="network">
-      <h2>Network</h2>
-      <p>Players' <code>clientinfo.xml</code> points at <strong id="connect-full"></strong>.</p>
-      <label>Address players connect to
-        <select id="ip"></select>
-      </label>
-      <div id="ip-other" class="row" hidden>
-        <input id="ip-typed" placeholder="such as 100.101.102.103" spellcheck="false" aria-label="Address">
-        <button id="ip-use">Use</button>
-      </div>
-      <p id="ip-note" class="hint" hidden></p>
-      <p id="ip-confirm" class="notice" hidden>Restart the char and map servers on the new address? Players in game are disconnected.<br>
-        <button id="ip-yes">Change and restart</button><button id="ip-no">Cancel</button>
-      </p>
-      <p id="ip-error" class="error" hidden></p>
-      <p class="hint">Changing it while the server runs restarts the char and map servers. Players then need to download the patcher again.</p>
-      <label class="check">
-        <input id="bind-ip" type="checkbox">
-        This network only
-      </label>
-      <p class="hint">Players can reach the server only at the address above, not from any other network this computer joins, such as public Wi-Fi. The server won't start while the computer doesn't have that address.</p>
-      <p id="bind-confirm" class="notice" hidden>Restart the game servers and portal to apply this? Players in game are disconnected.<br>
-        <button id="bind-yes">Apply and restart</button><button id="bind-no">Cancel</button>
-      </p>
-      <p id="bind-error" class="error" hidden></p>
-      <label for="portal-port">Account portal port</label>
-      <div class="row">
-        <input id="portal-port" type="number" min="1024" max="65535">
-        <button id="portal-port-use">Use</button>
-      </div>
-      <p id="portal-port-error" class="error" hidden></p>
-      <p class="hint">Admin account: <span id="admin-name"></span></p>
-    </section>
+      <section class="card group">
+        <h2>More options</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <span class="setting-title">Battle config</span>
+            <p class="hint">Exp and drop rates, the exp lost on death and every other option in rAthena's <code>conf/battle</code> files.</p>
+          </div>
+          <button id="open-battle-conf" type="button">Open…</button>
+        </div>
+        <div class="setting">
+          <div class="setting-text">
+            <span class="setting-title">Override folder</span>
+            <p class="hint">Edit any other rAthena config file by hand.</p>
+          </div>
+          <button id="open-overrides" type="button">Open folder</button>
+        </div>
+      </section>
+    </div>
 
-    <section class="card">
-      <h2>Server version</h2>
-      <p>rAthena <code id="version-current"></code><span id="version-previous" hidden>; before that, <code id="version-previous-commit"></code></span>.
-        <a href="#" id="version-changes" hidden>What going back undoes</a></p>
-      <p id="go-back-confirm" class="notice" hidden>
-        Go back to <code id="go-back-to"></code>? The database is backed up first, then the older version is downloaded, or built here, which takes 5 to 10 minutes. A running server moves to it when you restart it, which disconnects everyone.
-        If the newer version changed the database, the older one won't start on it; then go forward again, or restore the backup made before the server update.
-        <button id="go-back-yes" type="button" class="primary">Go back</button>
-        <button id="go-back-no" type="button">Keep this version</button>
-      </p>
-      <button id="go-back" type="button" hidden>Go back to the previous version</button>
-      <p id="no-previous" class="hint" hidden>There's no previous version to go back to yet.</p>
-      <p class="hint">Use this when a server update breaks something, without waiting for a new app version. Going back again returns to the newer version.</p>
-    </section>
+    <div id="panel-build" class="panel" hidden>
+      <form id="build-form" class="card group">
+        <h2>Server build</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="packetver-preset">Client date (PACKETVER)</label>
+            <p class="hint">Must match your game client.</p>
+          </div>
+          <select id="packetver-preset" class="setting-control">
+            <option value="20250716">2025-07-16 (WARPGATE)</option>
+            <option value="20220406">2022-04-06</option>
+            <option value="custom">Other date…</option>
+          </select>
+        </div>
+        <div id="packetver-custom" class="setting" hidden>
+          <div class="setting-text"><label for="packetver">Client date, YYYYMMDD</label></div>
+          <input id="packetver" class="setting-control" inputmode="numeric" pattern="20[0-9]{6}" maxlength="8">
+        </div>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="mode">Game mode</label>
+            <p class="hint">Pre-renewal is the more polished mode; rAthena's Renewal content is incomplete and not up to date with kRO. Each mode keeps its own characters: accounts are shared, and switching back brings the other mode's characters back.</p>
+          </div>
+          <select id="mode" class="setting-control">
+            <option value="pre">Pre-renewal (default)</option>
+            <option value="re">Renewal</option>
+          </select>
+        </div>
+        <div class="save-row">
+          <p id="build-warning" class="notice" hidden>Saving rebuilds the server, which takes 5 to 10 minutes. Players are disconnected while it restarts. If you publish client patches, publish one after a mode switch so players get that mode's files.</p>
+          <p id="build-error" class="error" hidden></p>
+          <button id="build-save" type="submit">Save and rebuild</button>
+        </div>
+      </form>
+    </div>
 
-    <section class="card">
-      <h2>Running in the background</h2>
-      <label class="check">
-        <input id="keep-running" type="checkbox">
-        Keep the server running when this window is closed
-      </label>
-      <p class="hint">rag-wrapper stays in the system tray, where you can open it again, start or stop the server, or quit, which stops the server. Opening rag-wrapper from the applications menu also brings the window back. When the server is off, closing the window quits. On GNOME the tray needs the AppIndicator extension.</p>
-      <label class="check">
-        <input id="start-at-login" type="checkbox">
-        Start the server when I log in
-      </label>
-      <p class="hint">rag-wrapper starts in the tray, without its window, and starts the server. The window opens if the server can't start.</p>
-      <p id="background-error" class="error" hidden></p>
-    </section>
+    <div id="panel-network" class="panel" hidden>
+      <section class="card group" id="network">
+        <h2>Network</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="ip">Address players connect to</label>
+            <p class="hint">Players' <code>clientinfo.xml</code> points at <strong id="connect-full"></strong>. Changing it while the server runs restarts the char and map servers, and players need to download the patcher again.</p>
+            <p id="ip-note" class="hint" hidden></p>
+          </div>
+          <select id="ip" class="setting-control"></select>
+        </div>
+        <div id="ip-other" class="setting" hidden>
+          <div class="setting-text"><label for="ip-typed">Address</label></div>
+          <div class="setting-control inline">
+            <input id="ip-typed" placeholder="such as 100.101.102.103" spellcheck="false">
+            <button id="ip-use">Use</button>
+          </div>
+        </div>
+        <p id="ip-confirm" class="notice" hidden>Restart the char and map servers on the new address? Players in game are disconnected.<br>
+          <button id="ip-yes">Change and restart</button><button id="ip-no">Cancel</button>
+        </p>
+        <p id="ip-error" class="error" hidden></p>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="bind-ip">This network only</label>
+            <p class="hint">Players can reach the server only at the address above, not from any other network this computer joins, such as public Wi-Fi. The server won't start while the computer doesn't have that address.</p>
+          </div>
+          <input id="bind-ip" type="checkbox" class="switch">
+        </div>
+        <p id="bind-confirm" class="notice" hidden>Restart the game servers and portal to apply this? Players in game are disconnected.<br>
+          <button id="bind-yes">Apply and restart</button><button id="bind-no">Cancel</button>
+        </p>
+        <p id="bind-error" class="error" hidden></p>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="portal-port">Account portal port</label>
+            <p class="hint">Admin account: <span id="admin-name"></span></p>
+          </div>
+          <div class="setting-control inline">
+            <input id="portal-port" type="number" min="1024" max="65535">
+            <button id="portal-port-use">Use</button>
+          </div>
+        </div>
+        <p id="portal-port-error" class="error" hidden></p>
+      </section>
+    </div>
+
+    <div id="panel-version" class="panel" hidden>
+      <section class="card group">
+        <h2>Server version</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <span class="setting-title">rAthena <code id="version-current"></code></span>
+            <p class="hint"><span id="version-previous" hidden>Before that, <code id="version-previous-commit"></code>. <a href="#" id="version-changes" hidden>What going back undoes</a></span></p>
+            <p id="no-previous" class="hint" hidden>There's no previous version to go back to yet.</p>
+          </div>
+          <button id="go-back" type="button" hidden>Go back to the previous version</button>
+        </div>
+        <p id="go-back-confirm" class="notice" hidden>
+          Go back to <code id="go-back-to"></code>? The database is backed up first, then the older version is downloaded, or built here, which takes 5 to 10 minutes. A running server moves to it when you restart it, which disconnects everyone.
+          If the newer version changed the database, the older one won't start on it; then go forward again, or restore the backup made before the server update.
+          <button id="go-back-yes" type="button" class="primary">Go back</button>
+          <button id="go-back-no" type="button">Keep this version</button>
+        </p>
+        <p class="hint">Use this when a server update breaks something, without waiting for a new app version. Going back again returns to the newer version.</p>
+      </section>
+    </div>
+
+    <div id="panel-app" class="panel" hidden>
+      <section class="card group">
+        <h2>Running in the background</h2>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="keep-running">Keep the server running when this window is closed</label>
+            <p class="hint">rag-wrapper stays in the system tray, where you can open it again, start or stop the server, or quit, which stops the server. Opening rag-wrapper from the applications menu also brings the window back. When the server is off, closing the window quits. On GNOME the tray needs the AppIndicator extension.</p>
+          </div>
+          <input id="keep-running" type="checkbox" class="switch">
+        </div>
+        <div class="setting">
+          <div class="setting-text">
+            <label for="start-at-login">Start the server when I log in</label>
+            <p class="hint">rag-wrapper starts in the tray, without its window, and starts the server. The window opens if the server can't start.</p>
+          </div>
+          <input id="start-at-login" type="checkbox" class="switch">
+        </div>
+        <p id="background-error" class="error" hidden></p>
+      </section>
+    </div>
   </main>
 
   <main id="live-page" hidden>
