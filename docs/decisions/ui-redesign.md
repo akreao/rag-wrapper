@@ -21,3 +21,4 @@ The desktop app's new look (Steven, 2026-10-22: "more sleek, modern and modular,
 - **Every element with the `hidden` attribute is hidden**, whatever its own `display`, which fixes the mods screen's file picker showing beside Install from zip.
 - **Icon styles apply only to decorative icons** (`aria-hidden` SVGs). Part 1's rule for every SVG had outlined the Players chart's labels.
 - **Restart server is in the ⋯ menu too** (Steven, review), above Rebuild, while the game servers are all up. It's the same restart as after saving game settings: players online get the 5-minute warning first. The tray keeps only Start, Stop and Quit.
+- **Below 1000 px wide the sidebar shrinks to its icons** (Steven, review), 64 px, with each screen's name on hover, so a window beside the game client or a terminal keeps room for the screen. Group headings become dividers; the mode and Docker version lines hide.

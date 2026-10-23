@@ -934,6 +934,26 @@ $("nav").addEventListener("click", async () => {
   showPage("settings");
 });
 
+// ---- Narrow window ----
+
+// The sidebar shows only icons below 1000 px (style.css), so each item gets
+// its name as a tooltip and accessible name then.
+const narrow = window.matchMedia("(max-width: 1000px)");
+function labelNav() {
+  for (const item of document.querySelectorAll(".nav-item")) {
+    const name = item.querySelector("span").textContent;
+    if (narrow.matches) {
+      item.title = name;
+      item.setAttribute("aria-label", name);
+    } else {
+      item.removeAttribute("title");
+      item.removeAttribute("aria-label");
+    }
+  }
+}
+labelNav();
+narrow.addEventListener("change", labelNav);
+
 // ---- Appearance ----
 
 $("theme").value = document.documentElement.dataset.theme || "";
