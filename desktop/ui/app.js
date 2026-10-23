@@ -298,9 +298,22 @@ $("copy-addr").addEventListener("click", async () => {
 });
 $("connect-settings").addEventListener("click", async (e) => {
   e.preventDefault();
+  showSettingsPanel("panel-network");
   $("nav").click();
-  setTimeout(() => $("network").scrollIntoView({ block: "start", behavior: "smooth" }), 200);
 });
+
+// ---- Settings: one section at a time ----
+
+function showSettingsPanel(id) {
+  for (const tab of document.querySelectorAll(".subtab")) {
+    const on = tab.dataset.panel === id;
+    tab.classList.toggle("active", on);
+    if (on) tab.setAttribute("aria-current", "true");
+    else tab.removeAttribute("aria-current");
+    $(tab.dataset.panel).hidden = !on;
+  }
+}
+for (const tab of document.querySelectorAll(".subtab")) tab.addEventListener("click", () => showSettingsPanel(tab.dataset.panel));
 $("ov-all-players").addEventListener("click", (e) => {
   e.preventDefault();
   showPage("live");
