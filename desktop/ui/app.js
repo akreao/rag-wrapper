@@ -1572,6 +1572,7 @@ function modItem(m) {
   label.className = "check";
   const box = document.createElement("input");
   box.type = "checkbox";
+  box.className = "switch";
   box.checked = m.enabled;
   // A mod that can't load can still be switched off.
   box.disabled = !!m.problem && !m.enabled;
@@ -1693,6 +1694,7 @@ function customNpcItem(n) {
   label.className = "check";
   const box = document.createElement("input");
   box.type = "checkbox";
+  box.className = "switch";
   box.checked = n.enabled;
   // One that can't load can still be switched off.
   box.disabled = !!n.problem && !n.enabled;

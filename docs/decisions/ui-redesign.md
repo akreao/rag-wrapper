@@ -15,3 +15,8 @@ The desktop app's new look (Steven, 2026-10-22: "more sleek, modern and modular,
 - **Overview reads who's online and the CPU and memory every 15 seconds**, a third as often as the Players screen, since `docker stats` isn't free and Overview is open most of the time. Neither runs while the window is hidden.
 - **Settings is split into tabs** (Game, Server build, Network, Version, App), one card each, instead of one long page. Each option is a row: its name and explanation on the left, the control on the right. On/off options are switches. Game and Server build keep their own Save buttons, in a bar at the foot of the card, since they apply differently (on the next restart, or by rebuilding).
 - **Rates stay in Battle config** rather than coming back as steppers on the Game tab, as the mockup showed. The rates' one home is rAthena's `conf/battle` files (battle-config.md); two places to set them would disagree.
+- **Each screen's actions sit in a toolbar at the top**, the main one highlighted (Install from zip, Back up now, New post). Check again and Reload are icon buttons.
+- **Long explanations fold away** under a "How mods work" style heading, closed by default, so the list a screen is about comes first. Errors and save notices stay outside them, where they can't be missed.
+- **Mods and rAthena's custom NPCs are switched on and off with switches.**
+- **Every element with the `hidden` attribute is hidden**, whatever its own `display`, which fixes the mods screen's file picker showing beside Install from zip.
+- **Icon styles apply only to decorative icons** (`aria-hidden` SVGs). Part 1's rule for every SVG had outlined the Players chart's labels.
