@@ -17,3 +17,4 @@ Questions asked about the finished redesign (PR #93), one at a time.
 
 - **Logging in lands on the home page (Steven, 2026-10-23).** It has the news and who's online, which players look at most; the account page is one click away in the top bar. Creating an account still lands on the account page, with its welcome message.
 - **A light/dark switch in the top bar (Steven, 2026-10-23).** A sun or moon button overrides the system setting; the choice is kept in that browser's localStorage, so it's per browser, not per account. `static/theme.js` applies it before the page draws, so there's no flash. Without JavaScript the button stays hidden and the system setting applies.
+- **The patcher window keeps its old look for now (Steven, 2026-10-23).** The launcher itself is due for a rework, so its window gets restyled then rather than twice.
