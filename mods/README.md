@@ -77,7 +77,7 @@ A custom item has two halves, both in one mod, under the same `Id`:
 
 The Mods screen's **New item mod** button starts a mod with both halves of two items, a potion and a headgear, and a shop in Prontera that sells them; its `README.md` says what each file is and where a new look's sprites go. The items reuse the Red Potion's and the Ribbon's looks, written as byte escapes (`"\187\161..."`), since the client reads sprite names in the Korean code page (CP949): keep a Korean name in that form, or save the file as CP949.
 
-The Mods screen warns when one half is missing: an item in the custom range in `item_db.yml` with no `tbl_custom` entry (players would see an unknown item), a `tbl_custom` entry with no `item_db.yml` entry, and an itemInfo file other than `SystemEN/itemInfo_C.lua`, which would replace the players' whole item list or not be read at all.
+The Mods screen warns when one half is missing: an item in the custom range in `item_db.yml` with no `tbl_custom` entry (players would see an unknown item), a `tbl_custom` entry in the custom range with no `item_db.yml` entry, an official item (an Id outside the custom range) in `tbl_custom`, which the translation skips, so it belongs in `tbl_override`, and an itemInfo file other than `SystemEN/itemInfo_C.lua`, which would replace the players' whole item list or not be read at all.
 
 ## Problems
 

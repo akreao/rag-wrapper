@@ -52,8 +52,11 @@ pub fn create(mods_dir: &Path, name: &str) -> Result<PathBuf, String> {
 
 /// Problems with a mod's custom items: an item in the custom Id range that
 /// its `db/` adds without a `tbl_custom` entry in its client files, which
-/// players see as an unknown item, or the other way round, and itemInfo
-/// files that would stand in for the players' whole item list.
+/// players see as an unknown item, or the other way round, an official
+/// item in `tbl_custom`, which the translation skips, and itemInfo files
+/// that would stand in for the players' whole item list. `tbl_override`
+/// entries change official items' text, so they need no `item_db.yml`
+/// entry and aren't checked.
 pub fn check(root: &Path) -> Vec<String> {
     let mut warnings = Vec::new();
     let server = server_ids(root);
@@ -90,7 +93,20 @@ pub fn check(root: &Path) -> Vec<String> {
             "Item {id} is in the mod's item_db.yml but not in tbl_custom in {where_client}: players would see an unknown item."
         ));
     }
-    for id in client.iter().filter(|id| !server.contains(id)) {
+    // The translation adds a tbl_custom entry only when its own list lacks
+    // the Id, and every official item is in that list.
+    let official: Vec<String> = client.iter().filter(|id| !CUSTOM_IDS.contains(id)).map(u32::to_string).collect();
+    if !official.is_empty() {
+        let (items, them) = if official.len() == 1 { ("Item", "it") } else { ("Items", "them") };
+        warnings.push(format!(
+            "{items} {} {} in tbl_custom in {where_client}, but only Ids {}-{} are free for custom items: the players' item list already has {them}, so the translation skips {them}. To change an official item's name or description, put {them} in tbl_override instead.",
+            official.join(", "),
+            if official.len() == 1 { "is" } else { "are" },
+            CUSTOM_IDS.start(),
+            CUSTOM_IDS.end(),
+        ));
+    }
+    for id in client.iter().filter(|id| CUSTOM_IDS.contains(id) && !server.contains(id)) {
         warnings.push(format!(
             "Item {id} is in {where_client} but not in the mod's item_db.yml: the server has no such item, unless another mod adds it."
         ));
@@ -200,6 +216,30 @@ mod tests {
             "Item 40002 is in the mod's item_db.yml but not in tbl_custom in client/Renewal/SystemEN/iteminfo_c.lua: players would see an unknown item."
         );
         assert!(warnings[2].starts_with("Item 40003 is in client/Renewal/SystemEN/iteminfo_c.lua but not in the mod's item_db.yml"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn official_items_belong_in_tbl_override() {
+        let dir = temp_dir("official");
+        write(&dir, "db/re/item_db.yml", "Body:\n  - Id: 100337\n    Buy: 5\n");
+        write(
+            &dir,
+            "client/SystemEN/itemInfo_C.lua",
+            "tbl_custom = {\n\t[100337] = { identifiedDisplayName = \"A\" },\n\t[100340] = { identifiedDisplayName = \"B\" },\n}\ntbl_override = {\n\t[100341] = { identifiedDisplayName = \"C\" },\n}\n",
+        );
+        assert_eq!(
+            check(&dir),
+            vec!["Items 100337, 100340 are in tbl_custom in client/SystemEN/itemInfo_C.lua, but only Ids 40000-49999 are free for custom items: the players' item list already has them, so the translation skips them. To change an official item's name or description, put them in tbl_override instead.".to_owned()]
+        );
+
+        // An official item's text in tbl_override needs nothing in item_db.yml.
+        write(
+            &dir,
+            "client/SystemEN/itemInfo_C.lua",
+            "tbl_custom = {\n}\ntbl_override = {\n\t[100340] = { identifiedDisplayName = \"B\" },\n}\n",
+        );
+        assert!(check(&dir).is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
 
