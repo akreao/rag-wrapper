@@ -314,14 +314,11 @@ func (a *app) healthz(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok\n"))
 }
 
-// home sends players to their account, and visitors who aren't logged in
-// (most likely new players) to the setup steps.
-
 // --- Logging in and out ---
 
 func (a *app) loginForm(req *request) error {
 	if req.account != nil {
-		return a.redirect(req, "/account", "")
+		return a.redirect(req, "/", "")
 	}
 	a.keepSession(req)
 	a.render(req, http.StatusOK, "login", view{Title: "Log in"})
@@ -362,7 +359,7 @@ func (a *app) login(req *request) error {
 
 	a.sessions.end(req.w, req.sess)
 	req.sess = a.sessions.start(req.w, acc.ID, loginTTL)
-	return a.redirect(req, "/account", "")
+	return a.redirect(req, "/", "")
 }
 
 func (a *app) logout(req *request) error {

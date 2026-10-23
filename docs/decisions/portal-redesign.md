@@ -10,3 +10,9 @@ A new look for the web portal, with Ragnarok Online themes, and a home page. Bui
 - **A home page at `/`.** It used to send visitors to How to connect and players to their account. Now it shows a welcome with how many are playing, the mode, address and client date, the steps to start, the newest news post, who's online, the top five by level and a search box for the item, monster and market pages. If the database doesn't answer, the page still shows, with a note in place of the two lists.
 - **Top bar: Play, News, Online, Rankings, Market, Database.** "Play" is How to connect; "Database" is the item and monster lookup. The current page is highlighted. Admin moved from the account links into the bar, shown to admins only. The server's name (from the desktop app's Settings) replaces "Ragnarok accounts".
 - **The patcher window is unchanged.** It runs in Windows' old IE engine, which can't use this stylesheet, so `patcher.css` stays as it is.
+
+## Review
+
+Questions asked about the finished redesign (PR #93), one at a time.
+
+- **Logging in lands on the home page (Steven, 2026-10-23).** It has the news and who's online, which players look at most; the account page is one click away in the top bar. Creating an account still lands on the account page, with its welcome message.
