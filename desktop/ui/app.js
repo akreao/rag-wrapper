@@ -148,7 +148,12 @@ const TASK_STATUS = {
 function renderStatus() {
   const up = (name) => lastServices.some((s) => s.service === name && s.state === "running" && s.health !== "unhealthy");
   const anyUp = lastServices.some((s) => s.service !== "db-init" && ["running", "restarting"].includes(s.state));
-  const allUp = GAME.every(up);
+  // "Running" and a hidden Start need every service up, not only the game
+  // servers: Start (a full compose up) is how a stopped portal, web server or
+  // database comes back without stopping the game.
+  const services = lastServices.filter((s) => s.service !== "db-init");
+  const allUp = services.length > 0 && services.every((s) => up(s.service));
+  const gameUp = GAME.every(up);
   let kind = "off";
   let text = "Off";
   if (task && TASK_STATUS[task]) [kind, text] = ["busy", `${TASK_STATUS[task]}…`];
@@ -159,16 +164,15 @@ function renderStatus() {
   $("status-text").textContent = text;
   $("ov-dot").className = `dot ${kind}`;
   $("ov-status").textContent = text;
-  const services = lastServices.filter((s) => s.service !== "db-init");
   const running = services.filter((s) => s.state === "running").length;
   const sub = [];
-  if (allUp && uptime != null) sub.push(`Up ${duration(uptime)}`);
+  if (gameUp && uptime != null) sub.push(`Up ${duration(uptime)}`);
   if (services.length) sub.push(`${running} of ${services.length} services running`);
   $("ov-status-sub").textContent = sub.join(" · ");
   pill.hidden = !overview?.configured;
   $("start").hidden = !overview?.configured || allUp;
   $("stop").hidden = !overview?.configured || !anyUp;
-  $("menu-restart").hidden = !overview?.configured || !allUp;
+  $("menu-restart").hidden = !overview?.configured || !gameUp;
 }
 
 // A slow Docker answer mustn't pile up polls behind it.
@@ -571,7 +575,10 @@ async function refreshOverview() {
       fillAddresses($("ip"), overview.public_ip, overview.public_ip_auto);
       showNote("ip-note", $("ip").value);
     }
-    $("connect-addr").textContent = `${overview.public_ip}:6900`;
+    // A narrow window wraps the address before the port (style.css), and the
+    // title shows it whole wherever it's cut off.
+    $("connect-addr").replaceChildren(overview.public_ip, document.createElement("wbr"), ":6900");
+    $("connect-addr").title = `${overview.public_ip}:6900`;
     $("connect-full").textContent = `${overview.public_ip}:6900`;
     if ($("bind-confirm").hidden) $("bind-ip").checked = overview.bind_ip;
     if (document.activeElement !== $("portal-port")) $("portal-port").value = overview.portal_port;
