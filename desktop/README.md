@@ -35,6 +35,10 @@ What it does:
 
 CI publishes the rAthena image for each pinned commit and the previous release's commit (so going back is a download too), in both modes for the two PACKETVER presets, and the portal image, to `ghcr.io/akreao/` (`.github/workflows/images.yml`). The app pulls the one matching the server's settings and tags it with the name Compose uses (`rag-wrapper/rathena:<PACKETVER>`, `rag-wrapper/portal`), so the first start and a server update take a download instead of a 5 to 10 minute compile. A tag names everything the image was built from: `rag-wrapper-rathena:<PACKETVER>-<prere|re>-<commit>-<hash>` and `rag-wrapper-portal:<hash>`, where the hash covers the files in `docker/rathena/` or `portal/` that came with the app, so an app version with a changed entrypoint or portal never gets an old image. Anything not published (another PACKETVER, a hand-set commit, a different `RATHENA_REPO`, no network) falls back to building here. `PREBUILT_IMAGES=` (empty) in `.env` always builds here.
 
+### Theme
+
+The app follows the desktop's light or dark setting. **Theme** in Settings > App picks Light or Dark instead, for desktops that don't pass their setting through; it's kept in the webview's `localStorage` and applied by `ui/theme.js`.
+
 ### Running in the background
 
 Closing the window while the server runs (or a build, start or backup is under way) hides it and keeps everything running; rag-wrapper stays in the system tray. The tray icon's menu opens the window, starts or stops the server, or quits. When the server is off, closing the window quits. Opening the app again from the applications menu also brings the window back, which is the way in on a desktop that shows no tray (GNOME without the AppIndicator extension).

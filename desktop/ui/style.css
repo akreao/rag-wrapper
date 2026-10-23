@@ -42,8 +42,9 @@
   color-scheme: light dark;
 }
 
+/* Dark: the desktop's setting, unless Settings > App picks a theme (theme.js). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #10131a;
     --card: #181c25;
     --raised: #1d222c;
@@ -59,6 +60,23 @@
     --shadow: none;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #10131a;
+  --card: #181c25;
+  --raised: #1d222c;
+  --text: #e4e7ec;
+  --muted: #96a0b0;
+  --border: #282e3a;
+  --accent: #7b93f0;
+  --accent-text: #0e1320;
+  --log-bg: #0b0e13;
+  --side-bg: #0b0e14;
+  --side-hover: #161b26;
+  --side-active: #1f2636;
+  --shadow: none;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 

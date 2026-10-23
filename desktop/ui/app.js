@@ -934,6 +934,11 @@ $("nav").addEventListener("click", async () => {
   showPage("settings");
 });
 
+// ---- Appearance ----
+
+$("theme").value = document.documentElement.dataset.theme || "";
+$("theme").addEventListener("change", () => window.setTheme($("theme").value));
+
 // ---- Running in the background ----
 
 async function loadBackgroundSettings() {
